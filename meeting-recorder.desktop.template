@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Meeting Recorder
+Comment=Record, transcribe and summarize meetings
+Exec=LAUNCHER_PATH
+Icon=audio-input-microphone
+Terminal=false
+Categories=AudioVideo;Audio;Recorder;
+Keywords=meeting;record;transcribe;notes;audio;
+StartupNotify=true

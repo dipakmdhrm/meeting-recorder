@@ -1,0 +1,34 @@
+"""libnotify wrapper for desktop notifications."""
+
+from __future__ import annotations
+
+import logging
+import subprocess
+from typing import Callable
+
+logger = logging.getLogger(__name__)
+
+
+def notify(
+    summary: str,
+    body: str = "",
+    app_name: str = "Meeting Recorder",
+    icon: str = "audio-input-microphone",
+    on_click: Callable | None = None,
+) -> None:
+    """Send a desktop notification using notify-send (libnotify)."""
+    cmd = [
+        "notify-send",
+        "--app-name", app_name,
+        "--icon", icon,
+        summary,
+    ]
+    if body:
+        cmd.append(body)
+
+    try:
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except FileNotFoundError:
+        logger.warning("notify-send not found; notifications unavailable")
+    except Exception as exc:
+        logger.warning("Failed to send notification: %s", exc)

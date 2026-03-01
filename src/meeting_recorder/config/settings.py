@@ -1,0 +1,67 @@
+"""Load/save configuration from ~/.config/meeting-recorder/config.json."""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import stat
+from pathlib import Path
+from typing import Any
+
+from .defaults import CONFIG_DIR, CONFIG_FILE, DEFAULT_CONFIG
+
+logger = logging.getLogger(__name__)
+
+
+def _config_path() -> Path:
+    return Path(os.path.expanduser(CONFIG_FILE))
+
+
+def _config_dir() -> Path:
+    return Path(os.path.expanduser(CONFIG_DIR))
+
+
+def load() -> dict[str, Any]:
+    """Load config, returning defaults merged with stored values."""
+    path = _config_path()
+    config = dict(DEFAULT_CONFIG)
+    if path.exists():
+        try:
+            with open(path) as f:
+                stored = json.load(f)
+            # Merge: stored values override defaults, unknown keys ignored
+            for key in DEFAULT_CONFIG:
+                if key in stored:
+                    config[key] = stored[key]
+        except Exception as exc:
+            logger.warning("Failed to load config: %s", exc)
+    return config
+
+
+def save(config: dict[str, Any]) -> None:
+    """Save config to disk with 600 permissions."""
+    d = _config_dir()
+    d.mkdir(parents=True, exist_ok=True)
+
+    path = _config_path()
+    # Write atomically: write to temp, then rename
+    tmp = path.with_suffix(".tmp")
+    try:
+        with open(tmp, "w") as f:
+            json.dump(config, f, indent=2)
+        # Secure permissions before rename
+        os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)
+        tmp.rename(path)
+        # Ensure permissions on final file (rename preserves them on Linux)
+        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+    except Exception as exc:
+        logger.error("Failed to save config: %s", exc)
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+        raise
+
+
+def get(key: str, default: Any = None) -> Any:
+    """Convenience: load config and return a single key."""
+    return load().get(key, default)
