@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Callable
 
 from ...config.defaults import (
-    GEMINI_DUAL_PROMPT,
     GEMINI_TRANSCRIPTION_PROMPT,
     SUMMARIZATION_PROMPT,
 )
@@ -26,9 +25,54 @@ _TRANSCRIPTION_TEMPERATURE = 0
 # Gemini can take several minutes to process long audio before returning any response.
 _GENERATE_TIMEOUT_MS = 180_000  # 3 minutes
 
+# Request the maximum output tokens so long transcripts are never silently truncated.
+# The API caps this at the model's own limit, so it is safe to set high.
+_MAX_OUTPUT_TOKENS = 65_536
+
 
 def _require_text(response, context: str) -> str:
-    """Extract text from a GenerateContentResponse, raising clearly if empty."""
+    """Extract text from a GenerateContentResponse, raising clearly if empty or truncated."""
+    # Log token usage and finish_reason for diagnostics
+    _truncation_error = None
+    try:
+        usage = getattr(response, "usage_metadata", None)
+        if usage:
+            logger.info(
+                "%s token usage — input: %s, output: %s, total: %s",
+                context,
+                getattr(usage, "prompt_token_count", "?"),
+                getattr(usage, "candidates_token_count", "?"),
+                getattr(usage, "total_token_count", "?"),
+            )
+        candidate = response.candidates[0] if response.candidates else None
+        if candidate:
+            finish_reason = getattr(candidate, "finish_reason", None)
+            logger.info("%s finish_reason: %s", context, finish_reason)
+            try:
+                from google.genai import types
+                if finish_reason == types.FinishReason.MAX_TOKENS:
+                    _truncation_error = RuntimeError(
+                        f"Gemini output was truncated ({context}): the response hit the token limit. "
+                        "Try a shorter recording, or switch to gemini-2.5-flash / gemini-2.5-pro "
+                        "which support up to 65,536 output tokens."
+                    )
+            except ImportError:
+                pass
+            # Some models report STOP even when truncated — warn if output tokens
+            # are suspiciously close to a common model limit (8192)
+            if usage and not _truncation_error:
+                out_tokens = getattr(usage, "candidates_token_count", 0) or 0
+                if out_tokens >= 8000:
+                    logger.warning(
+                        "%s: output tokens (%d) near 8192 limit — transcript may be truncated. "
+                        "Consider using gemini-2.5-flash which supports up to 65,536 output tokens.",
+                        context, out_tokens,
+                    )
+    except Exception:
+        pass
+    if _truncation_error:
+        raise _truncation_error
+
     text = response.text
     if not text:
         feedback = getattr(response, "prompt_feedback", None)
@@ -110,6 +154,7 @@ class GeminiProvider:
                 contents=[uploaded, GEMINI_TRANSCRIPTION_PROMPT],
                 config={
                     "temperature": _TRANSCRIPTION_TEMPERATURE,
+                    "max_output_tokens": _MAX_OUTPUT_TOKENS,
                     "http_options": {"timeout": _GENERATE_TIMEOUT_MS},
                 },
             )
@@ -137,52 +182,14 @@ class GeminiProvider:
             response = client.models.generate_content(
                 model=self._model,
                 contents=[prompt],
-                config={"http_options": {"timeout": _GENERATE_TIMEOUT_MS}},
-            )
-        except Exception as exc:
-            raise _wrap_timeout(exc, "summarization") from exc
-        return _require_text(response, "summarization")
-
-    # ------------------------------------------------------------------
-    # Dual-call: single API call for both transcription + summarization
-    # ------------------------------------------------------------------
-
-    def transcribe_and_summarize(
-        self,
-        audio_path: Path,
-        on_status: Callable[[str], None] | None = None,
-    ) -> tuple[str, str]:
-        """
-        Single Gemini call that returns (transcript, notes).
-        Used when both services are Gemini for maximum efficiency.
-        """
-        client = self._get_client()
-
-        if on_status:
-            on_status("Uploading audio to Gemini…")
-
-        uploaded = client.files.upload(
-            file=str(audio_path),
-            config={"mime_type": "audio/mpeg"},
-        )
-        uploaded = self._wait_for_active(client, uploaded, on_status)
-
-        if on_status:
-            on_status("Processing with Gemini (transcription + notes)…")
-
-        try:
-            response = client.models.generate_content(
-                model=self._model,
-                contents=[uploaded, GEMINI_DUAL_PROMPT],
                 config={
-                    "temperature": _TRANSCRIPTION_TEMPERATURE,
+                    "max_output_tokens": _MAX_OUTPUT_TOKENS,
                     "http_options": {"timeout": _GENERATE_TIMEOUT_MS},
                 },
             )
         except Exception as exc:
-            raise _wrap_timeout(exc, "transcription+summarization") from exc
-        text = _require_text(response, "transcription+summarization")
-        return self._parse_dual_response(text)
+            raise _wrap_timeout(exc, "summarization") from exc
+        return _require_text(response, "summarization")
 
     # ------------------------------------------------------------------
     # Helpers
@@ -213,24 +220,3 @@ class GeminiProvider:
             time.sleep(_POLL_INTERVAL)
             file_obj = client.files.get(name=file_obj.name)
 
-    @staticmethod
-    def _parse_dual_response(text: str) -> tuple[str, str]:
-        """Parse response containing --- TRANSCRIPT --- and --- NOTES --- sections."""
-        transcript = ""
-        notes = ""
-
-        transcript_marker = "--- TRANSCRIPT ---"
-        notes_marker = "--- NOTES ---"
-
-        if transcript_marker in text and notes_marker in text:
-            t_start = text.index(transcript_marker) + len(transcript_marker)
-            n_start = text.index(notes_marker)
-            transcript = text[t_start:n_start].strip()
-            notes = text[n_start + len(notes_marker):].strip()
-        elif transcript_marker in text:
-            t_start = text.index(transcript_marker) + len(transcript_marker)
-            transcript = text[t_start:].strip()
-        else:
-            transcript = text.strip()
-
-        return transcript, notes

@@ -12,6 +12,8 @@ TRANSCRIPTION_SERVICES = ["gemini", "whisper"]
 SUMMARIZATION_SERVICES = ["gemini", "gpt4o"]
 
 GEMINI_MODELS = [
+    "gemini-3-flash-preview",
+    "gemini-2.5-flash-lite",
     "gemini-2.5-flash",
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
@@ -104,37 +106,3 @@ assigned in the order they first speak. Use the same label consistently for the 
 - Transcribe faithfully in whatever language is spoken; do not translate.
 """
 
-GEMINI_DUAL_PROMPT = """\
-You are a meeting assistant. Transcribe this audio recording, then produce meeting notes.
-
-Audio channel layout:
-- Left channel = local microphone (the person who made this recording)
-- Right channel = system audio (remote participants)
-
-Use this channel information to distinguish speakers. Label each speaker turn with a \
-timestamp and speaker label, for example:
-
-[00:00:05] **Alice:** Hello, can everyone hear me?
-[00:00:09] **Bob:** Yes, loud and clear.
-
-Rules:
-- Try to infer each speaker's name from the conversation (e.g. if someone is addressed \
-by name or introduces themselves). Use that name as their label.
-- If a name cannot be determined, label speakers as **Person 1:**, **Person 2:**, etc., \
-assigned in the order they first speak. Use the same label consistently for the same speaker.
-- Timestamps in [HH:MM:SS] format.
-- Transcribe faithfully in whatever language is spoken; do not translate.
-
-Format your response EXACTLY as follows (keep the delimiter lines exactly as shown):
-
---- TRANSCRIPT ---
-[Timestamped, speaker-labelled transcript, one turn per line]
-
---- NOTES ---
-[Concise meeting notes in Markdown format:
-1. Brief summary (2-4 sentences).
-2. Key discussion points and decisions, attributed to speakers where identifiable.
-3. If and only if there are clear action items, end with a ## Action Items section \
-listing each as a checkbox with owner if known (e.g. `- [ ] John to send the report`). \
-Omit this section entirely if there are no action items.]
-"""

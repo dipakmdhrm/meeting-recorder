@@ -190,6 +190,13 @@ class MainWindow(Gtk.ApplicationWindow):
             record_btn.get_style_context().add_class("suggested-action")
             self._button_box.pack_start(record_btn, False, False, 0)
 
+            existing_btn = Gtk.Button(label=" Use Existing Recording")
+            existing_btn.set_image(
+                Gtk.Image.new_from_icon_name("document-open", Gtk.IconSize.BUTTON)
+            )
+            existing_btn.connect("clicked", lambda *_: self.on_use_existing_clicked())
+            self._button_box.pack_start(existing_btn, False, False, 0)
+
         elif state == State.RECORDING:
             self._status_label.set_text(status or "Recording…")
             self._title_entry.set_sensitive(False)
@@ -324,6 +331,52 @@ class MainWindow(Gtk.ApplicationWindow):
             return
 
         self._transition(State.RECORDING)
+
+    def on_use_existing_clicked(self) -> None:
+        assert_main_thread()
+        if self._state != State.IDLE:
+            return
+
+        cfg = settings.load()
+        ts = cfg.get("transcription_service", "gemini")
+        ss = cfg.get("summarization_service", "gemini")
+        key_missing = self._check_api_keys(cfg, ts, ss)
+        if key_missing:
+            self._show_error(key_missing)
+            return
+
+        dialog = Gtk.FileChooserDialog(
+            title="Select Audio Recording",
+            parent=self,
+            action=Gtk.FileChooserAction.OPEN,
+        )
+        dialog.add_buttons(
+            Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+            Gtk.STOCK_OPEN, Gtk.ResponseType.OK,
+        )
+        audio_filter = Gtk.FileFilter()
+        audio_filter.set_name("Audio files")
+        for pat in ("*.mp3", "*.wav", "*.m4a", "*.ogg", "*.flac", "*.webm"):
+            audio_filter.add_pattern(pat)
+        dialog.add_filter(audio_filter)
+
+        response = dialog.run()
+        filename = dialog.get_filename()
+        dialog.destroy()
+
+        if response != Gtk.ResponseType.OK or not filename:
+            return
+
+        audio_path = Path(filename)
+        stem = audio_path.stem
+        self._audio_path = audio_path
+        self._transcript_path = audio_path.parent / f"{stem}_transcript.md"
+        self._notes_path = audio_path.parent / f"{stem}_notes.md"
+
+        self._pipeline_gen += 1
+        gen_id = self._pipeline_gen
+        self._transition(State.PROCESSING, status="Transcribing…")
+        threading.Thread(target=self._run_pipeline, args=(gen_id,), daemon=True).start()
 
     def on_pause_clicked(self) -> None:
         assert_main_thread()

@@ -34,47 +34,20 @@ class Pipeline:
 
     def run(self) -> None:
         """Execute the pipeline. Raises on failure."""
-        ts_service = self._config.get("transcription_service", "gemini")
-        ss_service = self._config.get("summarization_service", "gemini")
-
-        if ts_service == "gemini" and ss_service == "gemini":
-            self._run_dual_gemini()
-        else:
-            self._run_separate()
+        self._run_separate()
 
     # ------------------------------------------------------------------
-
-    def _run_dual_gemini(self) -> None:
-        """Single Gemini call for both transcription and summarization."""
-        from .providers.gemini import GeminiProvider
-
-        provider = GeminiProvider(
-            api_key=self._config["gemini_api_key"],
-            model=self._config.get("gemini_model", "gemini-2.5-flash"),
-        )
-        transcript, notes = provider.transcribe_and_summarize(
-            audio_path=self._audio_path,
-            on_status=self._on_status,
-        )
-
-        if not notes:
-            # Fallback: separate summarization if dual response missing notes section
-            logger.warning("Dual Gemini response missing notes; running separate summarize")
-            if self._on_status:
-                self._on_status("Generating notes with Gemini…")
-            notes = provider.summarize(transcript, on_status=self._on_status)
-
-        self._write_results(transcript, notes)
 
     def _run_separate(self) -> None:
         """Separate transcription and summarization calls."""
         from .transcription import create_transcription_provider
         from .summarization import create_summarization_provider
+        audio_path = self._audio_path
 
         # Transcription
         ts_provider = create_transcription_provider(self._config)
         transcript = ts_provider.transcribe(
-            audio_path=self._audio_path,
+            audio_path=audio_path,
             on_status=self._on_status,
         )
 
