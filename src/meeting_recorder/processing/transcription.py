@@ -26,6 +26,7 @@ def create_transcription_provider(config: dict) -> TranscriptionProvider:
         return GeminiProvider(
             api_key=config["gemini_api_key"],
             model=config.get("gemini_model", "gemini-2.5-flash"),
+            transcription_prompt=config.get("transcription_prompt", ""),
         )
     else:
         raise ValueError(f"Unknown transcription service: {service!r}")

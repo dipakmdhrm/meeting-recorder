@@ -105,9 +105,18 @@ class GeminiProvider:
     The pipeline checks for the dual-call optimization.
     """
 
-    def __init__(self, api_key: str, model: str = "gemini-2.5-flash") -> None:
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "gemini-2.5-flash",
+        transcription_prompt: str = "",
+        summarization_prompt: str = "",
+    ) -> None:
         self._api_key = api_key
         self._model = model
+        # Fall back to built-in defaults if no custom prompt is configured.
+        self._transcription_prompt = transcription_prompt or GEMINI_TRANSCRIPTION_PROMPT
+        self._summarization_prompt = summarization_prompt or SUMMARIZATION_PROMPT
         self._client = None
 
     def _get_client(self):
@@ -155,7 +164,7 @@ class GeminiProvider:
         try:
             response = client.models.generate_content(
                 model=self._model,
-                contents=[uploaded, GEMINI_TRANSCRIPTION_PROMPT],
+                contents=[uploaded, self._transcription_prompt],
                 config={
                     "temperature": _TRANSCRIPTION_TEMPERATURE,
                     "max_output_tokens": _MAX_OUTPUT_TOKENS,
@@ -181,7 +190,11 @@ class GeminiProvider:
         if on_status:
             on_status("Summarizing with Gemini…")
 
-        prompt = SUMMARIZATION_PROMPT.format(transcript=transcript)
+        try:
+            prompt = self._summarization_prompt.format(transcript=transcript)
+        except KeyError:
+            # User removed {transcript} from their custom prompt — append it manually.
+            prompt = self._summarization_prompt + f"\n\nTRANSCRIPT:\n{transcript}"
         try:
             response = client.models.generate_content(
                 model=self._model,

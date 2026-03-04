@@ -34,6 +34,12 @@ DEFAULT_CONFIG: dict = {
 
     "output_folder": DEFAULT_OUTPUT_FOLDER,
     "call_detection_enabled": False,
+
+    # Empty string means "use the built-in default prompt".
+    # Storing the prompt text directly lets the user revert to the default
+    # by clearing the field, without needing a separate "use default" flag.
+    "transcription_prompt": "",
+    "summarization_prompt": "",
 }
 
 # A single call start can trigger multiple source-output events (browser tabs, virtual
