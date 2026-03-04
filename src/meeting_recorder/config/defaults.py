@@ -66,12 +66,7 @@ TRANSCRIPT:
 GEMINI_TRANSCRIPTION_PROMPT = """\
 Transcribe this audio recording exactly as spoken.
 
-Audio channel layout:
-- Left channel = local microphone (the person who made this recording)
-- Right channel = system audio (remote participants)
-
-Use this channel information to distinguish speakers. Label each speaker turn with a \
-timestamp and speaker label on a new line, for example:
+Label each speaker turn with a timestamp and speaker label on a new line, for example:
 
 [00:00:05] **Alice:** Hello, can everyone hear me?
 [00:00:09] **Bob:** Yes, loud and clear.
