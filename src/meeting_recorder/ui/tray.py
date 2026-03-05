@@ -6,9 +6,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# AyatanaAppIndicator3 is the Canonical/Ubuntu maintained fork of AppIndicator3.
-# Ubuntu 22.04+ and Linux Mint ship AyatanaAppIndicator3; older systems may only
-# have the original AppIndicator3. We try both to cover both distributions.
 _INDICATOR_AVAILABLE = False
 try:
     import gi
@@ -30,7 +27,7 @@ if not _INDICATOR_AVAILABLE:
 
 class TrayIcon:
     """
-    System tray icon that reflects recording state and provides a context menu.
+    System tray icon that reflects recording state and lists background jobs.
     Falls back to pystray if AyatanaAppIndicator3 is unavailable.
     """
 
@@ -47,10 +44,15 @@ class TrayIcon:
                 logger.warning("pystray unavailable: %s", exc)
                 raise
 
-    def set_state(self, state: str) -> None:
-        """Update tray icon/menu for given state: idle, recording, paused, processing."""
+    def update(self, recording_state: str, jobs: list) -> None:
+        """
+        Update tray icon and menu.
+
+        recording_state: "idle" | "recording" | "paused"
+        jobs: list of (label: str, cancel_fn: callable) for active processing jobs
+        """
         if self._impl:
-            self._impl.set_state(state)
+            self._impl.update(recording_state, jobs)
 
 
 class _IndicatorTray:
@@ -63,7 +65,8 @@ class _IndicatorTray:
 
         self._window = window
         self._Gtk = Gtk
-        self._state = "idle"
+        self._recording_state = "idle"
+        self._jobs: list = []
 
         self._indicator = AyatanaAppIndicator3.Indicator.new(
             "meeting-recorder",
@@ -76,15 +79,17 @@ class _IndicatorTray:
 
     def _build_menu(self) -> None:
         from gi.repository import Gtk
-        # Clear existing items
         for child in self._menu.get_children():
             self._menu.remove(child)
 
-        state = self._state
+        state = self._recording_state
+        jobs = self._jobs
 
+        # Recording controls — always reflect current recording state
         if state == "idle":
             self._add_item("Record (Headphones)", self._on_start_headphones)
             self._add_item("Record (Speaker)", self._on_start_speaker)
+            self._add_item("Use Existing Recording", self._on_use_existing)
         elif state == "recording":
             self._add_item("Pause Recording", self._on_pause)
             self._add_item("Stop Recording", self._on_stop)
@@ -95,13 +100,17 @@ class _IndicatorTray:
             self._add_item("Stop Recording", self._on_stop)
             self._add_item("Cancel (save recording)", self._on_cancel_save)
             self._add_item("Cancel", self._on_cancel)
-        elif state == "processing":
-            item = Gtk.MenuItem(label="Processing...")
-            item.set_sensitive(False)
-            self._menu.append(item)
-            self._add_item("Cancel Processing", self._on_cancel_processing)
 
-        # Separator + Show Window + Quit
+        # Background jobs section (only shown when jobs are active)
+        if jobs:
+            self._menu.append(Gtk.SeparatorMenuItem())
+            header = Gtk.MenuItem(label=f"Processing ({len(jobs)} active)")
+            header.set_sensitive(False)
+            self._menu.append(header)
+            for label, cancel_fn in jobs:
+                self._add_item(f"  Cancel: {label}", cancel_fn)
+
+        # Footer
         self._menu.append(Gtk.SeparatorMenuItem())
         self._add_item("Show Window", self._on_show)
         self._add_item("Quit", self._on_quit)
@@ -115,29 +124,34 @@ class _IndicatorTray:
         item.connect("activate", lambda *_: callback())
         self._menu.append(item)
 
-    def set_state(self, state: str) -> None:
-        self._state = state
+    def update(self, recording_state: str, jobs: list) -> None:
+        self._recording_state = recording_state
+        self._jobs = jobs
         self._build_menu()
-        # Update icon
-        icons = {
-            "idle": "audio-input-microphone",
-            "recording": "media-record",
-            "paused": "media-playback-pause",
-            "processing": "system-run",
-        }
-        self._indicator.set_icon_full(
-            icons.get(state, "audio-input-microphone"), state
-        )
+
+        # Icon priority: recording > paused > jobs processing > idle
+        if recording_state == "recording":
+            icon = "media-record"
+        elif recording_state == "paused":
+            icon = "media-playback-pause"
+        elif jobs:
+            icon = "system-run"
+        else:
+            icon = "audio-input-microphone"
+
+        self._indicator.set_icon_full(icon, recording_state)
 
     def _on_start_headphones(self) -> None:
-        # AppIndicator callbacks can arrive on a non-GTK thread; route all UI
-        # mutations through idle_call to ensure they run on the main thread.
         from ..utils.glib_bridge import idle_call
         idle_call(self._window.on_record_headphones_clicked)
 
     def _on_start_speaker(self) -> None:
         from ..utils.glib_bridge import idle_call
         idle_call(self._window.on_record_speaker_clicked)
+
+    def _on_use_existing(self) -> None:
+        from ..utils.glib_bridge import idle_call
+        idle_call(self._window.on_use_existing_clicked)
 
     def _on_pause(self) -> None:
         from ..utils.glib_bridge import idle_call
@@ -158,10 +172,6 @@ class _IndicatorTray:
     def _on_cancel(self) -> None:
         from ..utils.glib_bridge import idle_call
         idle_call(self._window.on_cancel_clicked)
-
-    def _on_cancel_processing(self) -> None:
-        from ..utils.glib_bridge import idle_call
-        idle_call(self._window.on_cancel_processing_clicked)
 
     def _on_show(self) -> None:
         from gi.repository import GLib
@@ -184,10 +194,10 @@ class _PystrayTray:
         from PIL import Image, ImageDraw
 
         self._window = window
-        self._state = "idle"
+        self._recording_state = "idle"
+        self._jobs: list = []
         self._pystray = pystray
 
-        # Create a simple icon image
         img = Image.new("RGB", (64, 64), color=(64, 64, 64))
         draw = ImageDraw.Draw(img)
         draw.ellipse([16, 16, 48, 48], fill=(220, 50, 50))
@@ -200,53 +210,72 @@ class _PystrayTray:
             menu=self._build_menu(),
         )
         import threading
-        # pystray.Icon.run() blocks in its own event loop. A daemon thread means it
-        # doesn't prevent process exit when the main GTK loop shuts down.
         threading.Thread(target=self._icon.run, daemon=True).start()
 
     def _build_menu(self):
         import pystray
         from ..utils.glib_bridge import idle_call
 
-        state = self._state
+        state = self._recording_state
+        jobs = self._jobs
         items = []
 
         if state == "idle":
-            items.append(pystray.MenuItem("Record (Headphones)",
-                lambda *_: idle_call(self._window.on_record_headphones_clicked)))
-            items.append(pystray.MenuItem("Record (Speaker)",
-                lambda *_: idle_call(self._window.on_record_speaker_clicked)))
+            items.append(pystray.MenuItem(
+                "Record (Headphones)",
+                lambda *_: idle_call(self._window.on_record_headphones_clicked),
+            ))
+            items.append(pystray.MenuItem(
+                "Record (Speaker)",
+                lambda *_: idle_call(self._window.on_record_speaker_clicked),
+            ))
+            items.append(pystray.MenuItem(
+                "Use Existing Recording",
+                lambda *_: idle_call(self._window.on_use_existing_clicked),
+            ))
         elif state == "recording":
-            items.append(pystray.MenuItem("Pause Recording",
-                lambda *_: idle_call(self._window.on_pause_clicked)))
-            items.append(pystray.MenuItem("Stop Recording",
-                lambda *_: idle_call(self._window.on_stop_clicked)))
+            items.append(pystray.MenuItem(
+                "Pause Recording",
+                lambda *_: idle_call(self._window.on_pause_clicked),
+            ))
+            items.append(pystray.MenuItem(
+                "Stop Recording",
+                lambda *_: idle_call(self._window.on_stop_clicked),
+            ))
         elif state == "paused":
-            items.append(pystray.MenuItem("Resume Recording",
-                lambda *_: idle_call(self._window.on_resume_clicked)))
-            items.append(pystray.MenuItem("Stop Recording",
-                lambda *_: idle_call(self._window.on_stop_clicked)))
-        elif state == "processing":
-            items.append(pystray.MenuItem("Processing...",
-                lambda *_: None, enabled=False))
-            items.append(pystray.MenuItem("Cancel Processing",
-                lambda *_: idle_call(self._window.on_cancel_processing_clicked)))
+            items.append(pystray.MenuItem(
+                "Resume Recording",
+                lambda *_: idle_call(self._window.on_resume_clicked),
+            ))
+            items.append(pystray.MenuItem(
+                "Stop Recording",
+                lambda *_: idle_call(self._window.on_stop_clicked),
+            ))
 
-        items.append(pystray.MenuItem("Show Window",
-            lambda *_: idle_call(self._window.present)))
-        items.append(pystray.MenuItem("Quit",
-            lambda *_: self._do_quit()))
+        if jobs:
+            items.append(pystray.MenuItem(
+                f"Processing ({len(jobs)} active)", lambda *_: None, enabled=False
+            ))
+            for label, cancel_fn in jobs:
+                items.append(pystray.MenuItem(f"  Cancel: {label}", cancel_fn))
+
+        items.append(pystray.MenuItem(
+            "Show Window", lambda *_: idle_call(self._window.present)
+        ))
+        items.append(pystray.MenuItem("Quit", lambda *_: self._do_quit()))
 
         return pystray.Menu(*items)
 
     def _do_quit(self) -> None:
+        from ..utils.glib_bridge import idle_call
         def _quit():
             if self._window._recorder:
                 self._window._recorder.stop()
             self._window.get_application().quit()
         idle_call(_quit)
 
-    def set_state(self, state: str) -> None:
-        self._state = state
+    def update(self, recording_state: str, jobs: list) -> None:
+        self._recording_state = recording_state
+        self._jobs = jobs
         self._icon.menu = self._build_menu()
         self._icon.update_menu()
