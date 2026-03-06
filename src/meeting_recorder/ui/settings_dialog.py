@@ -13,6 +13,7 @@ from ..config import settings
 from ..config.defaults import (
     GEMINI_MODELS,
     GEMINI_TRANSCRIPTION_PROMPT,
+    RECORDING_QUALITIES,
     SUMMARIZATION_PROMPT,
     SUMMARIZATION_SERVICES,
     TRANSCRIPTION_SERVICES,
@@ -152,7 +153,8 @@ class SettingsDialog(Gtk.Dialog):
         grid.set_margin_start(16)
         grid.set_margin_end(16)
 
-        grid.attach(Gtk.Label(label="Output folder:", xalign=0), 0, 0, 1, 1)
+        row = 0
+        grid.attach(Gtk.Label(label="Output folder:", xalign=0), 0, row, 1, 1)
 
         folder_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         self._folder_entry = Gtk.Entry()
@@ -162,7 +164,16 @@ class SettingsDialog(Gtk.Dialog):
         browse_btn.connect("clicked", self._on_browse_folder)
         folder_box.pack_start(self._folder_entry, True, True, 0)
         folder_box.pack_start(browse_btn, False, False, 0)
-        grid.attach(folder_box, 1, 0, 1, 1)
+        grid.attach(folder_box, 1, row, 1, 1)
+        row += 1
+
+        grid.attach(Gtk.Label(label="Recording quality:", xalign=0), 0, row, 1, 1)
+        self._quality_combo = Gtk.ComboBoxText()
+        for key, (label, _) in RECORDING_QUALITIES.items():
+            self._quality_combo.append(key, label)
+        self._quality_combo.set_active_id(self._cfg.get("recording_quality", "high"))
+        grid.attach(self._quality_combo, 1, row, 1, 1)
+        row += 1
 
         return grid
 
@@ -334,6 +345,7 @@ class SettingsDialog(Gtk.Dialog):
         cfg["gemini_api_key"] = self._gemini_key_entry.get_text().strip()
         cfg["gemini_model"] = self._gemini_model_combo.get_active_id() or GEMINI_MODELS[0]
         cfg["output_folder"] = self._folder_entry.get_text().strip() or "~/meetings"
+        cfg["recording_quality"] = self._quality_combo.get_active_id() or "high"
         cfg["call_detection_enabled"] = self._detection_switch.get_active()
 
         ts_buf = self._ts_prompt_view.get_buffer()

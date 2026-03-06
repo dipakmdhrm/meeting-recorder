@@ -398,9 +398,15 @@ class MainWindow(Gtk.ApplicationWindow):
         self._notes_path = notes
 
         from ..audio.recorder import Recorder, RecordingError
+        from ..config.defaults import RECORDING_QUALITIES
+        
+        q_key = cfg.get("recording_quality", "high")
+        _, q_val = RECORDING_QUALITIES.get(q_key, RECORDING_QUALITIES["high"])
+
         self._recorder = Recorder(
             output_path=audio,
             mode=self._recording_mode,
+            quality=q_val,
             on_tick=self._on_tick,
             on_error=self._on_recording_error,
         )

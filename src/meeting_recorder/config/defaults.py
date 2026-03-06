@@ -33,6 +33,7 @@ DEFAULT_CONFIG: dict = {
     "gemini_model": "gemini-2.5-flash",
 
     "output_folder": DEFAULT_OUTPUT_FOLDER,
+    "recording_quality": "high",
     "call_detection_enabled": False,
 
     # Empty string means "use the built-in default prompt".
@@ -48,6 +49,15 @@ CALL_DETECTION_DEDUP_WINDOW = 10
 
 # Recording format
 AUDIO_FORMAT = "mp3"
+
+# FFmpeg quality mapping (-q:a for libmp3lame)
+# 2: ~190kbps, 5: ~130kbps, 7: ~100kbps, 9: ~64kbps
+RECORDING_QUALITIES = {
+    "very_high": ("Very High Quality (~190kbps)", "2"),
+    "high": ("High Quality (~130kbps)", "5"),
+    "medium": ("Medium Quality (~100kbps)", "7"),
+    "low": ("Low Quality (~64kbps)", "9"),
+}
 
 SUMMARIZATION_PROMPT = """\
 You are a meeting assistant. Given the following meeting transcript, produce concise, \

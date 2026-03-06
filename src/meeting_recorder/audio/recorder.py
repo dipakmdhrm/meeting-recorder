@@ -67,11 +67,13 @@ class Recorder:
         self,
         output_path: Path,
         mode: str = "headphones",
+        quality: str = "2",
         on_tick: Callable[[int], None] | None = None,
         on_error: Callable[[str], None] | None = None,
     ) -> None:
         self._output_path = output_path
         self._mode = mode  # "headphones" = mic + monitor; "speaker" = mic only
+        self._quality = quality
         self._on_tick = on_tick
         self._on_error = on_error
 
@@ -187,9 +189,9 @@ class Recorder:
         self._segments.append(seg_path)
 
         if self._mode == "speaker":
-            cmd = build_ffmpeg_command_mic_only(self._mic_source, seg_path)
+            cmd = build_ffmpeg_command_mic_only(self._mic_source, seg_path, quality=self._quality)
         else:
-            cmd = build_ffmpeg_command(self._mic_source, self._monitor_source, seg_path)
+            cmd = build_ffmpeg_command(self._mic_source, self._monitor_source, seg_path, quality=self._quality)
 
         log_path = _ffmpeg_log_path(self._output_path)
         log_path.parent.mkdir(parents=True, exist_ok=True)

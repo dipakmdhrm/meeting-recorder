@@ -9,6 +9,7 @@ def build_ffmpeg_command(
     source: str,
     monitor: str,
     output_path: str | Path,
+    quality: str = "2",
 ) -> list[str]:
     """
     Build ffmpeg command that reads two PulseAudio sources into a stereo MP3.
@@ -40,7 +41,7 @@ def build_ffmpeg_command(
         "-filter_complex", filter_str,
         "-map", "[out]",
         "-acodec", "libmp3lame",
-        "-q:a", "2",
+        "-q:a", quality,
         str(output_path),
     ]
 
@@ -48,6 +49,7 @@ def build_ffmpeg_command(
 def build_ffmpeg_command_mic_only(
     source: str,
     output_path: str | Path,
+    quality: str = "2",
 ) -> list[str]:
     """
     Build ffmpeg command that records the microphone only (no system audio).
@@ -63,7 +65,7 @@ def build_ffmpeg_command_mic_only(
         "-f", "pulse", "-i", source,
         "-af", "highpass=f=80",
         "-acodec", "libmp3lame",
-        "-q:a", "2",
+        "-q:a", quality,
         str(output_path),
     ]
 
