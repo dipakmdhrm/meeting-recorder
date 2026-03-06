@@ -1,4 +1,6 @@
-"""Tabbed settings dialog."""
+"""
+Implements a tabbed settings dialog for the application using Gtk. It allows users to configure transcription and summarization services (specifically Google Gemini), manage API keys, set output directories, choose recording quality, enable call detection, and customize AI prompts.
+"""
 
 from __future__ import annotations
 

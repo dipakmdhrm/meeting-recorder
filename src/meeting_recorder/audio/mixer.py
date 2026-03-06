@@ -1,4 +1,6 @@
-"""ffmpeg command builder for mixing mic + system audio into MP3."""
+"""
+Provides utility functions to construct ffmpeg command-line arguments for audio capture. It supports mixing multiple PulseAudio sources (e.g., microphone and system output) into a single stereo stream, applying filters like highpass to improve voice clarity.
+"""
 
 from __future__ import annotations
 

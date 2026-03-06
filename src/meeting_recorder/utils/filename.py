@@ -1,4 +1,6 @@
-"""Output path generation with title sanitization."""
+"""
+Handles the generation of structured output paths for recording sessions. It includes logic for sanitizing user-provided titles and organizing files into a readable date-based directory hierarchy.
+"""
 
 from __future__ import annotations
 

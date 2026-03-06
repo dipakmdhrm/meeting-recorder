@@ -1,9 +1,5 @@
-"""Main window — state machine: IDLE / RECORDING / PAUSED / COUNTDOWN.
-
-Transcription/summarisation jobs run in the background and are shown in
-the jobs panel at the bottom of the window.  The window returns to IDLE
-as soon as the 5-second countdown expires so the user can start a new
-recording while previous ones are still being processed.
+"""
+The primary user interface and state coordinator for the Meeting Recorder application. It manages the recording lifecycle (IDLE, RECORDING, PAUSED, COUNTDOWN), handles user interactions for starting/stopping recordings, and monitors background processing jobs for transcription and summarization.
 """
 
 from __future__ import annotations
@@ -399,7 +395,7 @@ class MainWindow(Gtk.ApplicationWindow):
 
         from ..audio.recorder import Recorder, RecordingError
         from ..config.defaults import RECORDING_QUALITIES
-        
+
         q_key = cfg.get("recording_quality", "high")
         _, q_val = RECORDING_QUALITIES.get(q_key, RECORDING_QUALITIES["high"])
 

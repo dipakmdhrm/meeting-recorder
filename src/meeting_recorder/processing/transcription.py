@@ -1,4 +1,6 @@
-"""TranscriptionProvider protocol and factory."""
+"""
+Defines the TranscriptionProvider protocol and a factory function to instantiate configured transcription services. This provides a consistent interface for converting audio recordings into text using different AI providers.
+"""
 
 from __future__ import annotations
 

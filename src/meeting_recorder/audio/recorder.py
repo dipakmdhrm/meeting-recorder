@@ -1,4 +1,6 @@
-"""Recording thread: ffmpeg subprocess lifecycle, pause/resume via segments."""
+"""
+Manages the audio recording lifecycle using ffmpeg as a subprocess. It implements a robust pause/resume mechanism by recording into segments and concatenating them upon completion. It also handles audio device resolution and error monitoring during the recording process.
+"""
 
 from __future__ import annotations
 

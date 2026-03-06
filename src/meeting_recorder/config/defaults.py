@@ -1,4 +1,6 @@
-"""Default values, model lists, and constants."""
+"""
+Defines application-wide constants and default configuration settings. This includes app identification, supported Gemini models, default prompts for transcription and summarization, and audio quality presets.
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,6 @@
-"""pactl subscribe stdout reader for new microphone capture streams."""
+"""
+Monitors system audio events using 'pactl subscribe' to detect when applications start capturing from the microphone. This allows the application to identify potential calls from browser-based tools and desktop applications.
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,6 @@
-"""Call detector: audio watcher with deduplication."""
+"""
+Orchestrates call detection by leveraging the AudioWatcher to monitor microphone usage. It includes a deduplication mechanism to ensure that the user is notified only once per call start, even if multiple audio streams are initialized simultaneously.
+"""
 
 from __future__ import annotations
 

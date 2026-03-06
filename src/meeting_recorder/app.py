@@ -1,4 +1,6 @@
-"""Gtk.Application subclass — startup validation and lifecycle."""
+"""
+Defines the MeetingRecorderApp class, a Gtk.Application subclass that manages the overall application lifecycle. It handles startup initialization, logging setup, system dependency validation, and coordinates the creation of the main window, tray icon, and call detector.
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,6 @@
-"""Load/save configuration from ~/.config/meeting-recorder/config.json."""
+"""
+Manages persistent application configuration. It provides functions to load and save user settings from a JSON file, ensuring that sensitive data like API keys are stored with restricted file permissions and merged with default values.
+"""
 
 from __future__ import annotations
 

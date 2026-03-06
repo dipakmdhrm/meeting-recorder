@@ -1,4 +1,6 @@
-"""System tray icon using AyatanaAppIndicator3 with pystray fallback."""
+"""
+Implements a system tray icon (AppIndicator) for the application. It provides quick-access controls for recording and displays the status of active background processing jobs, falling back to pystray if native indicators are unavailable.
+"""
 
 from __future__ import annotations
 

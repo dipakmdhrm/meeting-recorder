@@ -1,4 +1,6 @@
-"""SummarizationProvider protocol and factory."""
+"""
+Defines the SummarizationProvider protocol and a factory function to instantiate configured summarization services. This abstraction allows the application to support multiple AI backends for generating meeting notes.
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,6 @@
-"""Google Gemini provider: audio transcription + summarization (single or dual call)."""
+"""
+Implementation of the Google Gemini AI provider. It handles the specific requirements of the Gemini API, including uploading audio files, polling for processing status, and executing both transcription and summarization prompts with appropriate model configurations.
+"""
 
 from __future__ import annotations
 

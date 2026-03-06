@@ -1,4 +1,6 @@
-"""libnotify wrapper for desktop notifications."""
+"""
+Provides a simple wrapper around 'notify-send' (libnotify) to display desktop notifications. This is used to inform the user when a call is detected or when a recording's processing is complete.
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,6 @@
-"""pactl-based audio device queries."""
+"""
+Provides utilities for querying and validating audio devices using PulseAudio/PipeWire (via pactl). It identifies default input/output devices and manages the resolution of monitor sources for capturing system audio.
+"""
 
 from __future__ import annotations
 

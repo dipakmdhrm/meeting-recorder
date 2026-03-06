@@ -1,4 +1,6 @@
-"""GLib.idle_add / timeout_add wrappers for safe GTK UI updates from threads."""
+"""
+Provides thread-safe wrappers for interacting with the GLib main loop. These utilities ensure that UI updates from background threads are correctly scheduled on the GTK main thread.
+"""
 
 from __future__ import annotations
 

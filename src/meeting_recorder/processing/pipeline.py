@@ -1,4 +1,6 @@
-"""Orchestrates transcription → summarization with status callbacks."""
+"""
+Manages the end-to-end AI processing workflow for recorded meetings. It coordinates the execution of transcription followed by summarization, ensuring that results are correctly saved to the designated output paths on disk.
+"""
 
 from __future__ import annotations
 
