@@ -135,12 +135,16 @@ Prompts support a **Reset to default** button. The `{transcript}` placeholder in
 4. After 5 seconds, transcription starts automatically
 5. When done, links to the transcript and notes files appear in the window
 
-## Log File
+## Logs
 
-Logs are written to:
+Application logs:
 ```
 ~/.local/share/meeting-recorder/meeting-recorder.log
 ```
+
+FFmpeg (recording) logs:
+- **Installed**: `/var/log/meeting-recorder/ffmpeg-<session-dir>.log`
+- **Dev Mode**: `ffmpeg.log` inside the recording directory
 
 ## License
 
