@@ -1,5 +1,27 @@
 name: Release
 
+# Triggered by pushing a version tag, e.g.: git tag v1.0.0 && git push origin v1.0.0
+#
+# One-time setup required before this workflow will work:
+#   1. Generate a GPG signing key (run once locally):
+#        gpg --batch --gen-key <<EOF
+#        Key-Type: RSA
+#        Key-Length: 4096
+#        Name-Real: Meeting Recorder
+#        Name-Email: noreply@github.com
+#        Expire-Date: 0
+#        %no-passphrase
+#        EOF
+#        gpg --armor --export-secret-keys "Meeting Recorder" > private.key
+#
+#   2. Add the private key as a repository secret:
+#        GitHub repo → Settings → Secrets → Actions → New secret
+#        Name: APT_SIGNING_KEY
+#        Value: contents of private.key (then delete private.key)
+#
+#   3. Enable GitHub Pages:
+#        GitHub repo → Settings → Pages → Source: Deploy from branch → Branch: gh-pages
+
 on:
   push:
     tags:
@@ -10,6 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pages: write
 
     steps:
       - name: Checkout
@@ -18,6 +41,19 @@ jobs:
       - name: Get version from tag
         id: version
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Install build tools
+        run: sudo apt-get install -y reprepro
+
+      - name: Import GPG signing key
+        id: gpg
+        env:
+          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+        run: |
+          echo "$APT_SIGNING_KEY" | gpg --batch --import
+          FINGERPRINT=$(gpg --list-secret-keys --with-colons | grep '^fpr' | head -1 | cut -d: -f10)
+          echo "${FINGERPRINT}:6:" | gpg --import-ownertrust
+          echo "FINGERPRINT=${FINGERPRINT}" >> "$GITHUB_OUTPUT"
 
       - name: Build .deb
         run: |
@@ -63,21 +99,64 @@ jobs:
 
           dpkg-deb --build "$STAGING" "meeting-recorder_${VERSION}_all.deb"
 
+      - name: Update apt repository on gh-pages
+        env:
+          FINGERPRINT: ${{ steps.gpg.outputs.FINGERPRINT }}
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          DEB="meeting-recorder_${VERSION}_all.deb"
+
+          # Check out or initialise the gh-pages branch
+          if git ls-remote --exit-code --heads origin gh-pages; then
+            git fetch origin gh-pages
+            git worktree add gh-pages-dir origin/gh-pages
+          else
+            git worktree add --orphan gh-pages-dir gh-pages
+          fi
+
+          cd gh-pages-dir
+
+          # reprepro configuration
+          mkdir -p conf
+          cat > conf/distributions << EOF
+Origin: Meeting Recorder
+Label: Meeting Recorder
+Codename: stable
+Architectures: all
+Components: main
+Description: Meeting Recorder APT repository
+SignWith: ${FINGERPRINT}
+EOF
+
+          # Export public key for users
+          gpg --armor --export "$FINGERPRINT" | gpg --dearmor > key.gpg
+
+          # Remove previous version and add new .deb
+          reprepro -b . remove stable meeting-recorder 2>/dev/null || true
+          reprepro -b . includedeb stable "../${DEB}"
+
+          # Commit and push
+          git config user.email "github-actions@github.com"
+          git config user.name "GitHub Actions"
+          git add -A
+          git commit -m "Release v${VERSION}"
+          git push origin gh-pages
+
       - name: Create source tarball
         run: |
           VERSION="${{ steps.version.outputs.VERSION }}"
-          TARBALL="meeting-recorder_${VERSION}.tar.gz"
           SRC=$(mktemp -d)
 
           cp -r . "$SRC/meeting-recorder-${VERSION}"
           rm -rf \
             "$SRC/meeting-recorder-${VERSION}/.git" \
             "$SRC/meeting-recorder-${VERSION}/.claude" \
-            "$SRC/meeting-recorder-${VERSION}/packaging"
+            "$SRC/meeting-recorder-${VERSION}/packaging" \
+            "$SRC/meeting-recorder-${VERSION}/gh-pages-dir"
           find "$SRC" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
           find "$SRC" -name '*.pyc' -delete 2>/dev/null || true
 
-          tar -czf "$TARBALL" -C "$SRC" "meeting-recorder-${VERSION}"
+          tar -czf "meeting-recorder_${VERSION}.tar.gz" -C "$SRC" "meeting-recorder-${VERSION}"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

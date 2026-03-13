@@ -8,6 +8,10 @@ if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
     # Remove system log directory
     rm -rf /var/log/meeting-recorder
 
+    # Remove apt repository configuration
+    rm -f /etc/apt/keyrings/meeting-recorder.gpg
+    rm -f /etc/apt/sources.list.d/meeting-recorder.list
+
     # Remove autostart entries created by the app for any user
     for home_dir in /home/*; do
         rm -f "$home_dir/.config/autostart/meeting-recorder.desktop" 2>/dev/null || true

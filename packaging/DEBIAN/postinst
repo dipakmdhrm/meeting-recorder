@@ -4,6 +4,9 @@ set -e
 APP_DIR="/opt/meeting-recorder"
 VENV_DIR="$APP_DIR/venv"
 LOG_DIR="/var/log/meeting-recorder"
+APT_REPO="https://dipakmdhrm.github.io/meeting-recorder"
+KEYRING="/etc/apt/keyrings/meeting-recorder.gpg"
+SOURCES="/etc/apt/sources.list.d/meeting-recorder.list"
 
 # Create Python virtual environment and install dependencies
 python3 -m venv "$VENV_DIR" --system-site-packages
@@ -19,6 +22,12 @@ fi
 # Create system log directory, world-writable so any user can write logs
 mkdir -p "$LOG_DIR"
 chmod 1777 "$LOG_DIR"
+
+# Configure apt repository for automatic future updates
+mkdir -p /etc/apt/keyrings
+curl -fsSL "${APT_REPO}/key.gpg" | gpg --dearmor -o "$KEYRING"
+echo "deb [signed-by=${KEYRING}] ${APT_REPO} stable main" > "$SOURCES"
+apt-get update -qq 2>/dev/null || true
 
 # Update desktop database
 update-desktop-database /usr/share/applications 2>/dev/null || true
