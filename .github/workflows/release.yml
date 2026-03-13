@@ -102,16 +102,22 @@ jobs:
       - name: Update apt repository on gh-pages
         env:
           FINGERPRINT: ${{ steps.gpg.outputs.FINGERPRINT }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           VERSION="${{ steps.version.outputs.VERSION }}"
           DEB="meeting-recorder_${VERSION}_all.deb"
+          REPO_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
 
-          # Check out or initialise the gh-pages branch
+          # Clone gh-pages branch if it exists, otherwise initialise a new one
           if git ls-remote --exit-code --heads origin gh-pages; then
-            git fetch origin gh-pages
-            git worktree add gh-pages-dir origin/gh-pages
+            git clone --depth 1 --branch gh-pages "$REPO_URL" gh-pages-dir
           else
-            git worktree add --orphan gh-pages-dir gh-pages
+            mkdir gh-pages-dir
+            cd gh-pages-dir
+            git init
+            git remote add origin "$REPO_URL"
+            git checkout -b gh-pages
+            cd ..
           fi
 
           cd gh-pages-dir
