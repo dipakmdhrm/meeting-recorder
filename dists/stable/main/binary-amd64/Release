@@ -1,0 +1,5 @@
+Component: main
+Origin: Meeting Recorder
+Label: Meeting Recorder
+Architecture: amd64
+Description: Meeting Recorder APT repository
