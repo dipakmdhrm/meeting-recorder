@@ -4,35 +4,35 @@ Hash: SHA512
 Origin: Meeting Recorder
 Label: Meeting Recorder
 Codename: stable
-Date: Fri, 13 Mar 2026 18:52:24 UTC
+Date: Fri, 13 Mar 2026 19:00:04 UTC
 Architectures: amd64
 Components: main
 Description: Meeting Recorder APT repository
 MD5Sum:
- 604df20d98f5600180b1b02d6adbf46b 872 main/binary-amd64/Packages
- 6423f9ed5931bd341eff310f2063f456 545 main/binary-amd64/Packages.gz
+ 97ba990bc91e7cff88443fa063b1aaac 872 main/binary-amd64/Packages
+ 9628aab018a648495ccb779e308f5bcb 545 main/binary-amd64/Packages.gz
  17d185771c71cb5d97cc0e53538eb589 130 main/binary-amd64/Release
 SHA1:
- 9d81fd1ca6a9047e52fae645b805931c6220df56 872 main/binary-amd64/Packages
- e4a473c337fdedfdcd7f7b801577a4f47d58d739 545 main/binary-amd64/Packages.gz
+ bf4ca290d27f10b4741a2d4c45cb245c529b139a 872 main/binary-amd64/Packages
+ 5ccc6b4445388c3c4dd9867cb1182c8351d11caa 545 main/binary-amd64/Packages.gz
  6d96455003a8d856ac1ed26320b011ccbb3e3102 130 main/binary-amd64/Release
 SHA256:
- 80f5f5868fd01d33b4bc644bbaac4cc1c484ebd961582b87a3eef97fdc5a0b78 872 main/binary-amd64/Packages
- af4c99f5667af47c4b304ea9ef92055638fbdfc22a7eae39225e7e6d3fd2fa6c 545 main/binary-amd64/Packages.gz
+ 4c4d3b367a100ae44c6fb87e9eb882231ffaeb09763ab3c99ec75c20f94abadb 872 main/binary-amd64/Packages
+ f6ddc15bdd30f52e1ab2c02ec83ff21b60b582230d1c813f73c469f919e3cf57 545 main/binary-amd64/Packages.gz
  cb47744016fef55a364c52a4cbab776a3fcc31238d729cc091ba4aa1ed558c29 130 main/binary-amd64/Release
 -----BEGIN PGP SIGNATURE-----
 
-iQIzBAEBCgAdFiEEHfjTLFriB1Wucq4B6cV3Y7Q498QFAmm0XOgACgkQ6cV3Y7Q4
-98QOdQ/+JgBRLu1/etb7x4GcimbFAt8uXkuyXUjq1bmr99CTscuiZOX6OTTROOvV
-YOYYZbUdoxYCTDjhEITwMOu+Dl5hIAS4X05cIQFuBoCcp2y0cyuNaBjos5sfEa1/
-NrFFFlOymvBgsqk9a7TLamwsXdbdJxQY2BVZJKP35A9ZIMb++paVqTDrUV9rVj7Q
-oFVvs6kRK3lX90Zrfk4YBeJBAVbzBaDZ0cg2qQZLeeOHw0RWzhpg8m924/85Q4FH
-k/74f2nqrClSvbMptzJIxNWCXS9YS/+PmVsA5s1A0nyZyu1O2l1Af2WNeXgYTmW6
-WWCUW5fyD0UB8Fv4hmJUhkagK0kwHzHag2YKQXuRmCzaxvvM5xEyEqrpiyBi9obN
-qEhWjYJ+4FUcZd4fuefP7g1pX7uLf4+zc6Mfk00ycFmqCe6eRI3ON5eYNjqYetEU
-Pn6E7OZHrrGjPEuR5WPmz8LOL95cJdM9SEpSvojBUfgwUbBN7El7OHyDvlJv7tZw
-otKUmn9suldB97+GPaWhC3qk8zKjJOYWZKf7qMD82FBKNiA/Xy6NS/upbqKrOxWv
-7cYDsO9ny7S9EfOnb9wCX34Ye0zwlOGHa0FrpA/Zrw2g2VR5mMN9+mJ5gfXCuJ97
-GOFMYPszW88DJXv1q+PptUNcwAJqs/7ohIqoG6LQvqhWvJtZgLY=
-=JV2K
+iQIzBAEBCgAdFiEEHfjTLFriB1Wucq4B6cV3Y7Q498QFAmm0XrQACgkQ6cV3Y7Q4
+98Tyxg/7BKew99o23WwRSL25ol0CM3Ct5IRTRMni0nf32rOoPKReN5NyM73cxPCj
+WmePUIXNOuKmVyX+nPjRCmuclIt75lHAfLC5aWRJPJMvOZTevEcR1Bc8LM6TNvPb
+LTrw/QUxE32fodypHtuExw9ftKvgtHbNfAjTlzU0IcSEvJbNsGEMeb2muMruc1Ie
+sH1rHmS1EdMpurs/rdK8C+SWTptGcALfjVd16Oqkh9eMuhgk4jFOwjtYUZVjDAq3
+jKEITuEX1QRWj7GBsOBmLTHS/4fUxKf8wuAapJ5LpXKgqRvKASDHeEA6uT9Rv+Pu
+1t6ZCJ0mCa2kiiCpFq3owRe/3VjbEfM5kqdzKGh7/ZpxCwXzRG9jCr2iTQr4rf/M
++oAEcqR10m24duHiZjvsET9pFAync75GsKs7X6BhSWjiOcIeo4Xsy2/wD8JP+GUU
+cL2bxhgx2m3Su18mHW57t3tgvXL7+6yFwahEYln7nC8YQ1m7qF0saOZN2IbGDFB6
+gG0maVt9t2J0l5fzpvh557jGmwkZ5KXfJzGi7d7OFmxwWStVAMIWDW8zpP8VisyT
+cVfyJMf/twj/0/O96HcHC2XC/qOoJQcd3oE3TmIhggyiHz7wtUxRWUvHcKYEvZ5U
+6XUE5S8LaOyIRxZQ1i2RAs61FlLjDgRLBw+/Nhc96OprRn80KQg=
+=Y4We
 -----END PGP SIGNATURE-----
