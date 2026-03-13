@@ -67,7 +67,7 @@ LITELLM_SUMMARIZATION_MODELS = [
     "ollama_chat/gemma3:4b",
     "ollama_chat/qwen2.5:7b",
     "ollama_chat/llama3.1:8b",
-    "anthropic/claude-sonnet-4-20250514",
+    "anthropic/claude-sonnet-4-latest",
     "openai/gpt-4o",
     "openrouter/anthropic/claude-sonnet-4",
     "openrouter/openai/gpt-4o",
@@ -85,14 +85,16 @@ Two classes in one file:
 **`LiteLLMTranscriptionProvider`**
 - Constructor: `(model: str)`
 - `transcribe(audio_path, on_status)` → calls `litellm.transcription(model=self._model, file=open(audio_path, "rb"))`
-- Returns transcript text
+- Returns `response.text` (the `AudioResponse` object's text attribute)
 
 **`LiteLLMSummarizationProvider`**
 - Constructor: `(model: str, summarization_prompt: str, timeout_minutes: int)`
 - `summarize(transcript, on_status)` → calls `litellm.completion(model=self._model, messages=[...], timeout=...)`
-- Returns notes markdown
+- Returns `response.choices[0].message.content` (standard OpenAI-compatible response)
 
 Both are thin wrappers. The model string is passed straight through to litellm.
+
+**Note:** LiteLLM's `transcription()` support is narrower than `completion()`. Verify each curated transcription model actually works before shipping. The `deepgram/nova-3` entry in particular should be tested — Deepgram support in litellm transcription may be incomplete.
 
 ### 2.5 Config Keys
 
@@ -118,7 +120,6 @@ Both are thin wrappers. The model string is passed straight through to litellm.
   "monitors": "all",
   "screen_fps": 30,
   "separate_audio_tracks": true,
-  "capture_mode": "headphones",
 
   "output_folder": "~/meetings",
   "recording_quality": "high",
@@ -133,13 +134,28 @@ Both are thin wrappers. The model string is passed straight through to litellm.
 
 ### 2.6 Config Migration
 
-`settings.py._migrate_config()` handles:
+`settings.py._migrate_config(stored)` runs at the **top** of `load()`, operating on the raw JSON dict **before** the `DEFAULT_CONFIG` merge. After migration, the migrated config is saved back to disk so migration only runs once.
+
+**Key renames:**
 1. `transcription_service` → `transcription_provider` (if `*_provider` key not already set)
 2. `summarization_service` → `summarization_provider`
-3. `gemini_api_key` (top-level string) → `api_keys.GEMINI_API_KEY` (move into dict)
-4. `elevenlabs_api_key` → `api_keys.ELEVENLABS_API_KEY`
-5. `ollama_host` / `ollama_model` — kept as-is (used by Ollama VRAM management and by Models tab for downloading)
-6. Old keys removed from top-level after migration
+
+**Value migrations (critical — old values don't exist in the new factory):**
+3. If `transcription_provider` (or migrated value) is `"gemini"`, `"elevenlabs"`, or `"whisper"` → keep as-is (these are still direct providers)
+4. If `summarization_provider` is `"gemini"` → change to `"litellm"`, set `litellm_summarization_model` to `"gemini/{current gemini_model or gemini-2.5-flash}"`
+5. If `summarization_provider` is `"ollama"` → change to `"litellm"`, set `litellm_summarization_model` to `"ollama_chat/{current ollama_model or phi4-mini}"`
+
+**API key migration:**
+6. `gemini_api_key` (top-level string) → `api_keys.GEMINI_API_KEY` (move into dict)
+7. `elevenlabs_api_key` → `api_keys.ELEVENLABS_API_KEY`
+
+**Kept as-is:**
+8. `ollama_host` / `ollama_model` — kept (used by VRAM management and Models tab)
+
+**Cleanup:**
+9. Old top-level keys (`transcription_service`, `summarization_service`, `gemini_api_key`, `elevenlabs_api_key`) removed after migration
+
+**Important:** Every config key listed in Section 2.5 MUST have a corresponding entry in `DEFAULT_CONFIG` in `defaults.py`, or the `settings.load()` key-filter loop will silently discard them.
 
 ### 2.7 GPU Memory Management
 
@@ -149,6 +165,8 @@ Friend's pipeline.py VRAM orchestration stays:
 - After summarization → call `ss_provider.unload()` if available
 
 The provider key reads in pipeline.py updated to use `*_provider` with `*_service` fallback.
+
+**Note:** Unify all `config.get("llm_request_timeout_minutes", ...)` fallback values to `5` across the codebase to match `DEFAULT_CONFIG`. Current code has inconsistent fallbacks of `3` in some places.
 
 ---
 
@@ -180,6 +198,7 @@ LiteLLM and direct providers auto-read their respective env vars.
   - `GROQ_API_KEY`
   - `OPENROUTER_API_KEY`
   - `ELEVENLABS_API_KEY`
+  - `DEEPGRAM_API_KEY`
 - User can pick from list or type any custom env var name
 - "Add Key" button at the bottom
 - **Validation on save:** duplicate env names → error highlight on the duplicate rows, save blocked
@@ -221,11 +240,11 @@ Five tabs: **General, Platform, Models, API Keys, Prompts**
 
 ### 4.3 Models Tab (friend's, preserved)
 
-- **Gemini section:** model dropdown from `GEMINI_MODELS`
+- **Gemini section:** model dropdown from `GEMINI_MODELS`. Note: this controls the model for direct Gemini transcription only. LiteLLM-routed `gemini/...` calls use the model string from the General tab's ComboBoxEntry, not this dropdown.
 - **Whisper section:** model dropdown + download grid (model name, size, note, status, download button per model)
 - **Ollama section:** model dropdown, host entry, connection status label, download grid
 
-This tab is for managing local model downloads and Gemini model selection. The provider *choice* is in General tab; this tab configures the models *within* each provider.
+This tab is for managing local model downloads and Gemini model selection. The provider *choice* is in General tab; this tab configures the models *within* each direct provider.
 
 ### 4.4 API Keys Tab (new)
 
@@ -233,15 +252,15 @@ Dynamic key-value list as described in Section 3.3.
 
 ### 4.5 Prompts Tab (friend's, preserved)
 
-- Transcription prompt (note: applies to Gemini and LiteLLM LLM-based providers only, not Whisper/ElevenLabs)
+- Transcription prompt (note: applies to Gemini direct provider only. Whisper, ElevenLabs, and LiteLLM transcription providers do not use custom prompts.)
 - Summarization prompt
 - Reset to default buttons per prompt
 
 ### 4.6 Button Behavior
 
-- **Save** button — saves config without closing dialog, flashes "Saved!" for 1.2s
-- **Close** button — closes dialog without saving (unless already saved)
-- Replaces friend's Cancel/OK pattern
+- **Save** button — saves config without closing dialog, flashes "Saved!" for 1.2s. Implemented as `Gtk.ResponseType.APPLY` with `stop_emission_by_name("response")` to prevent the dialog from closing.
+- **Close** button — closes dialog without saving. Uses `Gtk.ResponseType.CLOSE`.
+- Replaces friend's Cancel/OK pattern.
 
 ---
 
@@ -290,17 +309,17 @@ Config → PlatformRegistry (dict lookup) → Concrete Backends
 |------|-------------|
 | `config/defaults.py` | Friend's Whisper/Ollama catalogs + our platform keys + litellm curated lists + `TRANSCRIPTION_PROVIDERS`/`SUMMARIZATION_PROVIDERS` lists |
 | `config/settings.py` | Friend's base + expanded `_migrate_config()` for `*_service`→`*_provider`, api_keys dict migration, env injection |
-| `processing/transcription.py` | Factory with 4 providers: gemini, elevenlabs, whisper, litellm. `*_provider` key with `*_service` fallback |
+| `processing/transcription.py` | Factory with 4 providers: gemini, elevenlabs, whisper, litellm. `*_provider` key with `*_service` fallback. Gemini factory passes `api_key=os.environ.get("GEMINI_API_KEY", "")` (since top-level `gemini_api_key` is migrated to env). |
 | `processing/summarization.py` | Factory with 2 providers: claude_code, litellm. Same key fallback |
 | `processing/pipeline.py` | Friend's VRAM management + `*_provider` key fallback |
 | `ui/settings_dialog.py` | Full merge: friend's Models tab + our Platform tab + new API Keys tab + litellm double-dropdown + Save button |
-| `ui/main_window.py` | Our DI changes: accept audio_backend + screen_recorder, AudioResult, screen recorder lifecycle |
+| `ui/main_window.py` | Our DI changes: accept audio_backend + screen_recorder, AudioResult, screen recorder lifecycle. Update `_check_api_keys()` to check `os.environ` for the appropriate key per provider (e.g., Gemini needs `GEMINI_API_KEY`, ElevenLabs needs `ELEVENLABS_API_KEY`). For litellm, extract the provider prefix from the model string and check the corresponding env var. |
 | `ui/tray.py` | Our refactor: delegate to platform tray backends |
 | `app.py` | Our PlatformRegistry + backend injection + api_keys env injection on startup |
 | `README.md` | Combined: both platforms, all providers, litellm usage |
 | `install/install-debian.sh` | Friend's install.sh content in our `install/` path structure |
 | `requirements.txt` | All deps merged + `litellm` |
-| `uninstall.sh` | Our dead code fixes |
+| `uninstall.sh` | Remove dead `/var/log/meeting-recorder` cleanup step, fix paths |
 
 ### 6.4 Friend's Files — Kept Untouched
 
@@ -319,10 +338,13 @@ Config → PlatformRegistry (dict lookup) → Concrete Backends
 ### requirements.txt additions
 ```
 litellm
-elevenlabs
+elevenlabs>=1.0.0
 ```
 
 (`faster-whisper` already added by friend)
+
+### .gitignore
+Add `__pycache__/` and `*.pyc` if not already present.
 
 ### install/install-arch.sh additions
 ```bash
