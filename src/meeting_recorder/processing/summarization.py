@@ -30,5 +30,14 @@ def create_summarization_provider(config: dict) -> SummarizationProvider:
             summarization_prompt=config.get("summarization_prompt", ""),
             timeout_minutes=config.get("llm_request_timeout_minutes", 3),
         )
-    else:
-        raise ValueError(f"Unknown summarization service: {service!r}")
+
+    if service == "ollama":
+        from .providers.ollama import OllamaProvider
+        return OllamaProvider(
+            model=config.get("ollama_model", "phi4-mini"),
+            host=config.get("ollama_host", "http://localhost:11434"),
+            summarization_prompt=config.get("summarization_prompt", ""),
+            timeout_minutes=config.get("llm_request_timeout_minutes", 10),
+        )
+
+    raise ValueError(f"Unknown summarization service: {service!r}")

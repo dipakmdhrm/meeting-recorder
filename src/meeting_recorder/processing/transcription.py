@@ -31,5 +31,11 @@ def create_transcription_provider(config: dict) -> TranscriptionProvider:
             transcription_prompt=config.get("transcription_prompt", ""),
             timeout_minutes=config.get("llm_request_timeout_minutes", 3),
         )
-    else:
-        raise ValueError(f"Unknown transcription service: {service!r}")
+
+    if service == "whisper":
+        from .providers.whisper import WhisperProvider
+        return WhisperProvider(
+            model=config.get("whisper_model", "large-v3-turbo"),
+        )
+
+    raise ValueError(f"Unknown transcription service: {service!r}")

@@ -45,21 +45,47 @@ class Pipeline:
         """Separate transcription and summarization calls."""
         from .transcription import create_transcription_provider
         from .summarization import create_summarization_provider
-        audio_path = self._audio_path
+        from .providers.ollama import unload_all_models
+
+        ts_service = self._config.get("transcription_service", "gemini")
+        ss_service = self._config.get("summarization_service", "gemini")
+        ollama_host = self._config.get("ollama_host", "http://localhost:11434")
+
+        # Before GPU transcription, evict any ollama models that are occupying VRAM.
+        if ts_service == "whisper":
+            loaded = []
+            try:
+                from .providers.ollama import get_loaded_models
+                loaded = get_loaded_models(ollama_host)
+            except Exception:
+                pass
+            if loaded:
+                if self._on_status:
+                    self._on_status("Freeing GPU memory (unloading ollama models)…")
+                unload_all_models(ollama_host)
 
         # Transcription
         ts_provider = create_transcription_provider(self._config)
         transcript = ts_provider.transcribe(
-            audio_path=audio_path,
+            audio_path=self._audio_path,
             on_status=self._on_status,
         )
 
-        if self._on_status:
-            self._on_status("Summarizing…")
+        # Free transcription model from memory before loading summarization model.
+        if hasattr(ts_provider, "unload"):
+            if self._on_status:
+                self._on_status("Freeing GPU memory (unloading transcription model)…")
+            ts_provider.unload()
 
         # Summarization
         ss_provider = create_summarization_provider(self._config)
         notes = ss_provider.summarize(transcript, on_status=self._on_status)
+
+        # Free summarization model from memory once done.
+        if hasattr(ss_provider, "unload"):
+            if self._on_status:
+                self._on_status("Freeing GPU memory (unloading summarization model)…")
+            ss_provider.unload()
 
         self._write_results(transcript, notes)
 

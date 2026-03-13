@@ -10,8 +10,8 @@ CONFIG_DIR = "~/.config/meeting-recorder"
 CONFIG_FILE = "~/.config/meeting-recorder/config.json"
 DEFAULT_OUTPUT_FOLDER = "~/meetings"
 
-TRANSCRIPTION_SERVICES = ["gemini"]
-SUMMARIZATION_SERVICES = ["gemini"]
+TRANSCRIPTION_SERVICES = ["gemini", "whisper"]
+SUMMARIZATION_SERVICES = ["gemini", "ollama"]
 
 # Allowed LLM request timeout values (minutes)
 LLM_TIMEOUT_OPTIONS = [1, 2, 3, 5, 8, 10]
@@ -31,6 +31,51 @@ GEMINI_MODELS = [
     "gemini-2.5-flash-lite",
 ]
 
+# Whisper STT model list (for local transcription)
+WHISPER_MODELS = [
+    "large-v3-turbo",
+    "distil-large-v3",
+    "large-v3",
+    "medium",
+    "small",
+]
+
+# Maps model name -> HuggingFace repo ID (used for cache-presence check)
+WHISPER_HF_REPOS = {
+    "small":           "Systran/faster-whisper-small",
+    "medium":          "Systran/faster-whisper-medium",
+    "distil-large-v3": "Systran/faster-distil-whisper-large-v3",
+    "large-v3":        "Systran/faster-whisper-large-v3",
+    "large-v3-turbo":  "Systran/faster-whisper-large-v3-turbo",
+}
+
+WHISPER_MODEL_INFO = {
+    "small":           {"size": "~500 MB", "note": "Fast, lower accuracy"},
+    "medium":          {"size": "~1.5 GB", "note": "Good balance"},
+    "distil-large-v3": {"size": "~1.5 GB", "note": "Fast, near-large quality"},
+    "large-v3-turbo":  {"size": "~1.6 GB", "note": "High quality, 8× faster than large-v3"},
+    "large-v3":        {"size": "~3 GB",   "note": "Best accuracy, slow on CPU"},
+}
+
+# Ollama LLM model list (for local summarization)
+OLLAMA_MODELS = [
+    "phi4-mini",
+    "gemma3:4b",
+    "qwen2.5:7b",
+    "llama3.1:8b",
+    "gemma3:12b",
+]
+
+OLLAMA_MODEL_INFO = {
+    "phi4-mini":    {"size": "~3 GB", "note": "Lightest, good quality"},
+    "gemma3:4b":    {"size": "~4 GB", "note": "Good quality"},
+    "qwen2.5:7b":   {"size": "~5 GB", "note": "Very capable"},
+    "llama3.1:8b":  {"size": "~5 GB", "note": "Very capable"},
+    "gemma3:12b":   {"size": "~8 GB", "note": "Best quality, high RAM required"},
+}
+
+OLLAMA_DEFAULT_HOST = "http://localhost:11434"
+
 DEFAULT_CONFIG: dict = {
     "transcription_service": "gemini",
     "summarization_service": "gemini",
@@ -43,6 +88,10 @@ DEFAULT_CONFIG: dict = {
     "start_at_startup": False,
 
     "llm_request_timeout_minutes": 3,
+
+    "whisper_model": "large-v3-turbo",
+    "ollama_model": "phi4-mini",
+    "ollama_host": "http://localhost:11434",
 
     # Empty string means "use the built-in default prompt".
     # Storing the prompt text directly lets the user revert to the default
