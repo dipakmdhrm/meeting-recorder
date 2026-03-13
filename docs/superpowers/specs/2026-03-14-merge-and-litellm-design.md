@@ -108,6 +108,8 @@ Both are thin wrappers. The model string is passed straight through to litellm.
 
   "gemini_model": "gemini-flash-latest",
   "whisper_model": "large-v3-turbo",
+  "ollama_model": "phi4-mini",
+  "ollama_host": "http://localhost:11434",
 
   "api_keys": {
     "GEMINI_API_KEY": "...",
@@ -132,28 +134,9 @@ Both are thin wrappers. The model string is passed straight through to litellm.
 }
 ```
 
-### 2.6 Config Migration
+### 2.6 Config Notes
 
-`settings.py._migrate_config(stored)` runs at the **top** of `load()`, operating on the raw JSON dict **before** the `DEFAULT_CONFIG` merge. After migration, the migrated config is saved back to disk so migration only runs once.
-
-**Key renames:**
-1. `transcription_service` → `transcription_provider` (if `*_provider` key not already set)
-2. `summarization_service` → `summarization_provider`
-
-**Value migrations (critical — old values don't exist in the new factory):**
-3. If `transcription_provider` (or migrated value) is `"gemini"`, `"elevenlabs"`, or `"whisper"` → keep as-is (these are still direct providers)
-4. If `summarization_provider` is `"gemini"` → change to `"litellm"`, set `litellm_summarization_model` to `"gemini/{current gemini_model or gemini-2.5-flash}"`
-5. If `summarization_provider` is `"ollama"` → change to `"litellm"`, set `litellm_summarization_model` to `"ollama_chat/{current ollama_model or phi4-mini}"`
-
-**API key migration:**
-6. `gemini_api_key` (top-level string) → `api_keys.GEMINI_API_KEY` (move into dict)
-7. `elevenlabs_api_key` → `api_keys.ELEVENLABS_API_KEY`
-
-**Kept as-is:**
-8. `ollama_host` / `ollama_model` — kept (used by VRAM management and Models tab)
-
-**Cleanup:**
-9. Old top-level keys (`transcription_service`, `summarization_service`, `gemini_api_key`, `elevenlabs_api_key`) removed after migration
+No migration logic. The app is new — users will get a fresh default config. The install scripts write a clean `config.json` with the new key names.
 
 **Important:** Every config key listed in Section 2.5 MUST have a corresponding entry in `DEFAULT_CONFIG` in `defaults.py`, or the `settings.load()` key-filter loop will silently discard them.
 
@@ -164,7 +147,7 @@ Friend's pipeline.py VRAM orchestration stays:
 - After transcription → call `ts_provider.unload()` if available
 - After summarization → call `ss_provider.unload()` if available
 
-The provider key reads in pipeline.py updated to use `*_provider` with `*_service` fallback.
+The provider key reads in pipeline.py updated to use `transcription_provider` / `summarization_provider`.
 
 **Note:** Unify all `config.get("llm_request_timeout_minutes", ...)` fallback values to `5` across the codebase to match `DEFAULT_CONFIG`. Current code has inconsistent fallbacks of `3` in some places.
 
@@ -308,10 +291,10 @@ Config → PlatformRegistry (dict lookup) → Concrete Backends
 | File | What changes |
 |------|-------------|
 | `config/defaults.py` | Friend's Whisper/Ollama catalogs + our platform keys + litellm curated lists + `TRANSCRIPTION_PROVIDERS`/`SUMMARIZATION_PROVIDERS` lists |
-| `config/settings.py` | Friend's base + expanded `_migrate_config()` for `*_service`→`*_provider`, api_keys dict migration, env injection |
-| `processing/transcription.py` | Factory with 4 providers: gemini, elevenlabs, whisper, litellm. `*_provider` key with `*_service` fallback. Gemini factory passes `api_key=os.environ.get("GEMINI_API_KEY", "")` (since top-level `gemini_api_key` is migrated to env). |
-| `processing/summarization.py` | Factory with 2 providers: claude_code, litellm. Same key fallback |
-| `processing/pipeline.py` | Friend's VRAM management + `*_provider` key fallback |
+| `config/settings.py` | Add env injection helper that injects `api_keys` dict into `os.environ` on load |
+| `processing/transcription.py` | Factory with 4 providers: gemini, elevenlabs, whisper, litellm. Uses `transcription_provider` key. Gemini factory passes `api_key=os.environ.get("GEMINI_API_KEY", "")`. |
+| `processing/summarization.py` | Factory with 2 providers: claude_code, litellm. Uses `summarization_provider` key. |
+| `processing/pipeline.py` | Friend's VRAM management, updated to use `transcription_provider` / `summarization_provider` keys |
 | `ui/settings_dialog.py` | Full merge: friend's Models tab + our Platform tab + new API Keys tab + litellm double-dropdown + Save button |
 | `ui/main_window.py` | Our DI changes: accept audio_backend + screen_recorder, AudioResult, screen recorder lifecycle. Update `_check_api_keys()` to check `os.environ` for the appropriate key per provider (e.g., Gemini needs `GEMINI_API_KEY`, ElevenLabs needs `ELEVENLABS_API_KEY`). For litellm, extract the provider prefix from the model string and check the corresponding env var. |
 | `ui/tray.py` | Our refactor: delegate to platform tray backends |
