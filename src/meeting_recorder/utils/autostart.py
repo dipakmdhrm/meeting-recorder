@@ -22,9 +22,6 @@ def update_autostart(enabled: bool) -> None:
     autostart_file = AUTOSTART_DIR / DESKTOP_FILENAME
     
     if enabled:
-        if autostart_file.exists():
-            return
-
         # Ensure autostart directory exists
         AUTOSTART_DIR.mkdir(parents=True, exist_ok=True)
         
@@ -33,8 +30,15 @@ def update_autostart(enabled: bool) -> None:
         
         if source_desktop.exists():
             try:
-                shutil.copy2(source_desktop, autostart_file)
-                logger.info("Enabled autostart: copied %s to %s", source_desktop, autostart_file)
+                # Copy desktop file but append --hidden to the Exec line so the
+                # window starts minimised to the system tray on login.
+                lines = source_desktop.read_text().splitlines()
+                with open(autostart_file, "w") as f:
+                    for line in lines:
+                        if line.startswith("Exec="):
+                            line += " --hidden"
+                        f.write(line + "\n")
+                logger.info("Enabled autostart: created %s (with --hidden)", autostart_file)
             except Exception as exc:
                 logger.error("Failed to enable autostart: %s", exc)
         else:

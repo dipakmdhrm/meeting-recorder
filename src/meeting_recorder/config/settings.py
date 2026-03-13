@@ -70,3 +70,12 @@ def save(config: dict[str, Any]) -> None:
 def get(key: str, default: Any = None) -> Any:
     """Convenience: load config and return a single key."""
     return load().get(key, default)
+
+
+def inject_api_keys(config: dict[str, Any] | None = None) -> None:
+    """Inject api_keys dict entries into os.environ."""
+    if config is None:
+        config = load()
+    for env_name, value in config.get("api_keys", {}).items():
+        if value:
+            os.environ[env_name] = value

@@ -10,8 +10,35 @@ CONFIG_DIR = "~/.config/meeting-recorder"
 CONFIG_FILE = "~/.config/meeting-recorder/config.json"
 DEFAULT_OUTPUT_FOLDER = "~/meetings"
 
-TRANSCRIPTION_SERVICES = ["gemini", "whisper"]
-SUMMARIZATION_SERVICES = ["gemini", "ollama"]
+TRANSCRIPTION_PROVIDERS = ["gemini", "elevenlabs", "whisper", "litellm"]
+SUMMARIZATION_PROVIDERS = ["claude_code", "litellm"]
+
+# Backward compat aliases (some imports still reference these)
+TRANSCRIPTION_SERVICES = TRANSCRIPTION_PROVIDERS
+SUMMARIZATION_SERVICES = SUMMARIZATION_PROVIDERS
+
+# Curated model lists for LiteLLM (users can also type any provider/model string).
+# Format: provider_prefix/model_name — the prefix tells LiteLLM which API to use.
+# For Ollama: the prefix is "ollama/" (chat completions via Ollama's /api/chat).
+LITELLM_TRANSCRIPTION_MODELS = [
+    "groq/whisper-large-v3",
+    "groq/whisper-large-v3-turbo",
+    "openai/whisper-1",
+    "deepgram/nova-3",
+]
+
+LITELLM_SUMMARIZATION_MODELS = [
+    "gemini/gemini-2.5-flash",
+    "gemini/gemini-2.5-pro",
+    "ollama/phi4-mini",
+    "ollama/gemma3:4b",
+    "ollama/qwen2.5:7b",
+    "ollama/llama3.1:8b",
+    "anthropic/claude-sonnet-4-latest",
+    "openai/gpt-4o",
+    "openrouter/anthropic/claude-sonnet-4",
+    "openrouter/openai/gpt-4o",
+]
 
 # Allowed LLM request timeout values (minutes)
 LLM_TIMEOUT_OPTIONS = [1, 2, 3, 5, 8, 10]
@@ -77,25 +104,39 @@ OLLAMA_MODEL_INFO = {
 OLLAMA_DEFAULT_HOST = "http://localhost:11434"
 
 DEFAULT_CONFIG: dict = {
-    "transcription_service": "gemini",
-    "summarization_service": "gemini",
-    "gemini_api_key": "",
+    # Provider selection
+    "transcription_provider": "gemini",
+    "summarization_provider": "litellm",
+
+    # LiteLLM model strings (provider/model format)
+    "litellm_transcription_model": "groq/whisper-large-v3",
+    "litellm_summarization_model": "gemini/gemini-2.5-flash",
+
+    # API key store — injected into os.environ on startup
+    "api_keys": {},
+
+    # Direct provider settings
     "gemini_model": "gemini-flash-latest",
-
-    "output_folder": DEFAULT_OUTPUT_FOLDER,
-    "recording_quality": "high",
-    "call_detection_enabled": False,
-    "start_at_startup": False,
-
-    "llm_request_timeout_minutes": 5,
-
     "whisper_model": "large-v3-turbo",
     "ollama_model": "phi4-mini",
     "ollama_host": "http://localhost:11434",
 
+    # Platform
+    "audio_backend": "pipewire",
+    "screen_recording": False,
+    "screen_recorder": "none",
+    "monitors": "all",
+    "screen_fps": 30,
+    "separate_audio_tracks": True,
+
+    # General
+    "output_folder": DEFAULT_OUTPUT_FOLDER,
+    "recording_quality": "high",
+    "llm_request_timeout_minutes": 5,
+    "call_detection_enabled": False,
+    "start_at_startup": False,
+
     # Empty string means "use the built-in default prompt".
-    # Storing the prompt text directly lets the user revert to the default
-    # by clearing the field, without needing a separate "use default" flag.
     "transcription_prompt": "",
     "summarization_prompt": "",
 }
