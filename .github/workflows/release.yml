@@ -118,15 +118,15 @@ jobs:
 
           # reprepro configuration
           mkdir -p conf
-          cat > conf/distributions << EOF
-Origin: Meeting Recorder
-Label: Meeting Recorder
-Codename: stable
-Architectures: all
-Components: main
-Description: Meeting Recorder APT repository
-SignWith: ${FINGERPRINT}
-EOF
+          {
+            echo "Origin: Meeting Recorder"
+            echo "Label: Meeting Recorder"
+            echo "Codename: stable"
+            echo "Architectures: all"
+            echo "Components: main"
+            echo "Description: Meeting Recorder APT repository"
+            echo "SignWith: ${FINGERPRINT}"
+          } > conf/distributions
 
           # Export public key for users
           gpg --armor --export "$FINGERPRINT" | gpg --dearmor > key.gpg
