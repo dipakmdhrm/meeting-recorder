@@ -47,12 +47,11 @@ class Pipeline:
         from .summarization import create_summarization_provider
         from .providers.ollama import unload_all_models
 
-        ts_service = self._config.get("transcription_service", "gemini")
-        ss_service = self._config.get("summarization_service", "gemini")
+        ts_provider_name = self._config.get("transcription_provider", "gemini")
         ollama_host = self._config.get("ollama_host", "http://localhost:11434")
 
         # Before GPU transcription, evict any ollama models that are occupying VRAM.
-        if ts_service == "whisper":
+        if ts_provider_name == "whisper":
             loaded = []
             try:
                 from .providers.ollama import get_loaded_models

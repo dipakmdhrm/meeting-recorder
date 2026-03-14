@@ -84,12 +84,46 @@ class MeetingRecorderApp(Gtk.Application):
     def do_activate(self) -> None:
         if self.window is None:
             self._create_window()
+            # When launched with --hidden (e.g. autostart), stay in the tray
+            if "--hidden" in sys.argv:
+                return
         self.window.present()
 
     # ------------------------------------------------------------------
     def _create_window(self) -> None:
         from .ui.main_window import MainWindow
-        self.window = MainWindow(application=self)
+        from .platform.registry import PlatformRegistry
+        from .config.settings import inject_api_keys
+
+        cfg = settings.load()
+        inject_api_keys(cfg)
+
+        registry = PlatformRegistry()
+
+        # Audio backend
+        audio_backend = None
+        audio_backend_name = cfg.get("audio_backend", "pulseaudio")
+        audio_backend_cls = registry.get_audio_backend(audio_backend_name)
+        if audio_backend_cls is None:
+            available = registry.available_audio_backends()
+            if available:
+                audio_backend_cls = registry.get_audio_backend(available[0])
+        if audio_backend_cls:
+            audio_backend = audio_backend_cls()
+
+        # Screen recorder
+        screen_recorder = None
+        if cfg.get("screen_recording"):
+            sr_name = cfg.get("screen_recorder", "none")
+            sr_cls = registry.get_screen_recorder(sr_name)
+            if sr_cls:
+                screen_recorder = sr_cls()
+
+        self.window = MainWindow(
+            application=self,
+            audio_backend=audio_backend,
+            screen_recorder=screen_recorder,
+        )
 
         # System tray (best-effort)
         try:
@@ -99,14 +133,13 @@ class MeetingRecorderApp(Gtk.Application):
             logger.info("Tray unavailable: %s", exc)
 
         # Call detection (if enabled)
-        cfg = settings.load()
         if cfg.get("call_detection_enabled"):
             self._start_call_detector()
 
-        self.window.show_all()
-
-        # Validate system deps after window shown so errors display nicely
-        GLib.idle_add(self._validate_system_deps)
+        if "--hidden" not in sys.argv:
+            self.window.show_all()
+            # Validate system deps after window shown so errors display nicely
+            GLib.idle_add(self._validate_system_deps)
 
     def _validate_system_deps(self) -> bool:
         missing = _check_system_deps()

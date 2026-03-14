@@ -1,7 +1,5 @@
 """
-Implements a tabbed settings dialog for the application using Gtk. It allows users to configure
-transcription and summarization services (Gemini, Whisper, Ollama), manage API keys, set output
-directories, choose recording quality, enable call detection, and customize AI prompts.
+Settings dialog — 5 tabs: General, Platform, Models, API Keys, Prompts.
 """
 
 from __future__ import annotations
@@ -23,13 +21,15 @@ from ..config.defaults import (
     GEMINI_MODELS,
     GEMINI_TRANSCRIPTION_PROMPT,
     LLM_TIMEOUT_OPTIONS,
+    LITELLM_SUMMARIZATION_MODELS,
+    LITELLM_TRANSCRIPTION_MODELS,
     OLLAMA_DEFAULT_HOST,
     OLLAMA_MODEL_INFO,
     OLLAMA_MODELS,
     RECORDING_QUALITIES,
     SUMMARIZATION_PROMPT,
-    SUMMARIZATION_SERVICES,
-    TRANSCRIPTION_SERVICES,
+    SUMMARIZATION_PROVIDERS,
+    TRANSCRIPTION_PROVIDERS,
     WHISPER_HF_REPOS,
     WHISPER_MODEL_INFO,
     WHISPER_MODELS,
@@ -38,11 +38,23 @@ from ..utils.autostart import update_autostart, is_autostart_enabled, can_enable
 
 logger = logging.getLogger(__name__)
 
-_SERVICE_LABELS = {
-    "gemini":  "Google Gemini",
+_PROVIDER_LABELS = {
+    "gemini": "Google Gemini (Direct Audio Upload)",
+    "elevenlabs": "ElevenLabs Scribe v2",
     "whisper": "Whisper (local)",
-    "ollama":  "Ollama (local)",
+    "litellm": "LiteLLM (100+ providers)",
+    "claude_code": "Claude Code CLI",
 }
+
+_SUGGESTED_ENV_KEYS = [
+    "GEMINI_API_KEY",
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GROQ_API_KEY",
+    "OPENROUTER_API_KEY",
+    "ELEVENLABS_API_KEY",
+    "DEEPGRAM_API_KEY",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -88,17 +100,22 @@ class SettingsDialog(Gtk.Dialog):
             use_header_bar=True,
         )
         self.add_buttons(
-            Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
-            Gtk.STOCK_OK, Gtk.ResponseType.OK,
+            "Close", Gtk.ResponseType.CLOSE,
+            "Save", Gtk.ResponseType.APPLY,
         )
-        self.set_default_size(580, 620)
+        self.set_default_size(620, 680)
 
         self._cfg = settings.load()
 
-        # Dicts keyed by model name: {"status": Gtk.Label, "btn": Gtk.Button}
+        # Model download tracking
         self._whisper_rows: dict[str, dict] = {}
         self._ollama_rows: dict[str, dict] = {}
         self._ollama_status_label: Gtk.Label | None = None
+
+        # API key rows
+        self._api_key_rows: list[dict] = []
+        self._api_keys_box: Gtk.Box | None = None
+        self._api_keys_error_label: Gtk.Label | None = None
 
         self._build_ui()
 
@@ -111,10 +128,15 @@ class SettingsDialog(Gtk.Dialog):
         self.get_content_area().add(notebook)
 
         notebook.append_page(self._build_general_tab(), Gtk.Label(label="General"))
-        notebook.append_page(self._build_models_tab(),  Gtk.Label(label="Models"))
+        notebook.append_page(self._build_platform_tab(), Gtk.Label(label="Platform"))
+        notebook.append_page(self._build_models_tab(), Gtk.Label(label="Model Config"))
+        notebook.append_page(self._build_api_keys_tab(), Gtk.Label(label="API Keys"))
         notebook.append_page(self._build_prompts_tab(), Gtk.Label(label="Prompts"))
 
         self.show_all()
+
+        # Hide litellm model rows if not selected
+        self._update_litellm_visibility()
 
         # Kick off background status checks after show_all so labels are realized
         self._refresh_local_model_statuses()
@@ -132,20 +154,83 @@ class SettingsDialog(Gtk.Dialog):
 
         row = 0
 
-        # Transcription service
-        grid.attach(Gtk.Label(label="Transcription service:", xalign=0), 0, row, 1, 1)
-        self._ts_combo = self._make_combo(
-            TRANSCRIPTION_SERVICES, self._cfg.get("transcription_service", "gemini")
+        # Transcription provider
+        grid.attach(Gtk.Label(label="Transcription provider:", xalign=0), 0, row, 1, 1)
+        self._ts_combo = self._make_provider_combo(
+            TRANSCRIPTION_PROVIDERS, self._cfg.get("transcription_provider", "gemini")
         )
+        self._ts_combo.connect("changed", lambda *_: self._update_litellm_visibility())
         grid.attach(self._ts_combo, 1, row, 1, 1)
         row += 1
 
-        # Summarization service
-        grid.attach(Gtk.Label(label="Summarization service:", xalign=0), 0, row, 1, 1)
-        self._ss_combo = self._make_combo(
-            SUMMARIZATION_SERVICES, self._cfg.get("summarization_service", "gemini")
+        # LiteLLM transcription model (visible only when litellm selected)
+        self._litellm_ts_label = Gtk.Label(label="LiteLLM transcription model:", xalign=0)
+        grid.attach(self._litellm_ts_label, 0, row, 1, 1)
+        self._litellm_ts_combo = Gtk.ComboBoxText.new_with_entry()
+        for m in LITELLM_TRANSCRIPTION_MODELS:
+            self._litellm_ts_combo.append_text(m)
+        entry = self._litellm_ts_combo.get_child()
+        entry.set_text(self._cfg.get("litellm_transcription_model", "groq/whisper-large-v3"))
+        self._litellm_ts_combo.set_hexpand(True)
+        grid.attach(self._litellm_ts_combo, 1, row, 1, 1)
+        row += 1
+
+        # Summarization provider
+        grid.attach(Gtk.Label(label="Summarization provider:", xalign=0), 0, row, 1, 1)
+        self._ss_combo = self._make_provider_combo(
+            SUMMARIZATION_PROVIDERS, self._cfg.get("summarization_provider", "litellm")
         )
+        self._ss_combo.connect("changed", lambda *_: self._update_litellm_visibility())
         grid.attach(self._ss_combo, 1, row, 1, 1)
+        row += 1
+
+        # LiteLLM summarization model (visible only when litellm selected)
+        self._litellm_ss_label = Gtk.Label(label="LiteLLM summarization model:", xalign=0)
+        grid.attach(self._litellm_ss_label, 0, row, 1, 1)
+        self._litellm_ss_combo = Gtk.ComboBoxText.new_with_entry()
+        for m in LITELLM_SUMMARIZATION_MODELS:
+            self._litellm_ss_combo.append_text(m)
+        entry = self._litellm_ss_combo.get_child()
+        entry.set_text(self._cfg.get("litellm_summarization_model", "gemini/gemini-2.5-flash"))
+        self._litellm_ss_combo.set_hexpand(True)
+        grid.attach(self._litellm_ss_combo, 1, row, 1, 1)
+        row += 1
+
+        grid.attach(Gtk.Separator(), 0, row, 2, 1)
+        row += 1
+
+        # Output folder
+        grid.attach(Gtk.Label(label="Output folder:", xalign=0), 0, row, 1, 1)
+        folder_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        self._folder_entry = Gtk.Entry()
+        self._folder_entry.set_text(self._cfg.get("output_folder", "~/meetings"))
+        self._folder_entry.set_hexpand(True)
+        browse_btn = Gtk.Button(label="Browse\u2026")
+        browse_btn.connect("clicked", self._on_browse_folder)
+        folder_box.pack_start(self._folder_entry, True, True, 0)
+        folder_box.pack_start(browse_btn, False, False, 0)
+        grid.attach(folder_box, 1, row, 1, 1)
+        row += 1
+
+        # Recording quality
+        grid.attach(Gtk.Label(label="Recording quality:", xalign=0), 0, row, 1, 1)
+        self._quality_combo = Gtk.ComboBoxText()
+        for key, (label, _) in RECORDING_QUALITIES.items():
+            self._quality_combo.append(key, label)
+        self._quality_combo.set_active_id(self._cfg.get("recording_quality", "high"))
+        grid.attach(self._quality_combo, 1, row, 1, 1)
+        row += 1
+
+        # Processing timeout
+        grid.attach(Gtk.Label(label="Processing timeout:", xalign=0), 0, row, 1, 1)
+        self._timeout_combo = Gtk.ComboBoxText()
+        current_timeout = self._cfg.get("llm_request_timeout_minutes", 5)
+        for minutes in LLM_TIMEOUT_OPTIONS:
+            self._timeout_combo.append(str(minutes), f"{minutes} min")
+        self._timeout_combo.set_active_id(str(current_timeout))
+        if self._timeout_combo.get_active_id() is None:
+            self._timeout_combo.set_active_id("5")
+        grid.attach(self._timeout_combo, 1, row, 1, 1)
         row += 1
 
         grid.attach(Gtk.Separator(), 0, row, 2, 1)
@@ -194,36 +279,136 @@ class SettingsDialog(Gtk.Dialog):
         note_detection.set_line_wrap(True)
         note_detection.set_xalign(0)
         grid.attach(note_detection, 0, row, 2, 1)
+
+        return grid
+
+    def _update_litellm_visibility(self) -> None:
+        ts_is_litellm = (self._ts_combo.get_active_id() == "litellm")
+        self._litellm_ts_label.set_visible(ts_is_litellm)
+        self._litellm_ts_combo.set_visible(ts_is_litellm)
+
+        ss_is_litellm = (self._ss_combo.get_active_id() == "litellm")
+        self._litellm_ss_label.set_visible(ss_is_litellm)
+        self._litellm_ss_combo.set_visible(ss_is_litellm)
+
+    # ------------------------------------------------------------------
+    # Platform tab
+    # ------------------------------------------------------------------
+
+    def _build_platform_tab(self) -> Gtk.Widget:
+        grid = Gtk.Grid(column_spacing=12, row_spacing=12)
+        grid.set_margin_top(16)
+        grid.set_margin_bottom(16)
+        grid.set_margin_start(16)
+        grid.set_margin_end(16)
+
+        row = 0
+
+        # Audio backend
+        grid.attach(Gtk.Label(label="Audio backend:", xalign=0), 0, row, 1, 1)
+        self._audio_backend_combo = Gtk.ComboBoxText()
+        for name in ("pulseaudio", "pipewire"):
+            self._audio_backend_combo.append(name, name)
+        self._audio_backend_combo.set_active_id(
+            self._cfg.get("audio_backend", "pipewire")
+        )
+        grid.attach(self._audio_backend_combo, 1, row, 1, 1)
+        row += 1
+
+        # Separate audio tracks
+        grid.attach(Gtk.Label(label="Separate audio tracks:", xalign=0), 0, row, 1, 1)
+        self._separate_tracks_switch = Gtk.Switch()
+        self._separate_tracks_switch.set_active(
+            self._cfg.get("separate_audio_tracks", True)
+        )
+        self._separate_tracks_switch.set_halign(Gtk.Align.START)
+        grid.attach(self._separate_tracks_switch, 1, row, 1, 1)
+        row += 1
+
+        sep_note = Gtk.Label(
+            label="Records mic and system audio as separate files for better diarization.",
+            xalign=0,
+        )
+        sep_note.set_line_wrap(True)
+        grid.attach(sep_note, 0, row, 2, 1)
         row += 1
 
         grid.attach(Gtk.Separator(), 0, row, 2, 1)
         row += 1
 
-        # Output folder
-        grid.attach(Gtk.Label(label="Output folder:", xalign=0), 0, row, 1, 1)
-        folder_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        self._folder_entry = Gtk.Entry()
-        self._folder_entry.set_text(self._cfg.get("output_folder", "~/meetings"))
-        self._folder_entry.set_hexpand(True)
-        browse_btn = Gtk.Button(label="Browse\u2026")
-        browse_btn.connect("clicked", self._on_browse_folder)
-        folder_box.pack_start(self._folder_entry, True, True, 0)
-        folder_box.pack_start(browse_btn, False, False, 0)
-        grid.attach(folder_box, 1, row, 1, 1)
+        # Screen recording
+        grid.attach(Gtk.Label(label="Screen recording:", xalign=0), 0, row, 1, 1)
+        self._screen_recording_switch = Gtk.Switch()
+        self._screen_recording_switch.set_active(
+            self._cfg.get("screen_recording", False)
+        )
+        self._screen_recording_switch.set_halign(Gtk.Align.START)
+        self._screen_recording_switch.connect("notify::active", self._on_screen_toggle)
+        grid.attach(self._screen_recording_switch, 1, row, 1, 1)
         row += 1
 
-        # Recording quality
-        grid.attach(Gtk.Label(label="Recording quality:", xalign=0), 0, row, 1, 1)
-        self._quality_combo = Gtk.ComboBoxText()
-        for key, (label, _) in RECORDING_QUALITIES.items():
-            self._quality_combo.append(key, label)
-        self._quality_combo.set_active_id(self._cfg.get("recording_quality", "high"))
-        grid.attach(self._quality_combo, 1, row, 1, 1)
+        # Screen recorder
+        self._screen_recorder_label = Gtk.Label(label="Screen recorder:", xalign=0)
+        grid.attach(self._screen_recorder_label, 0, row, 1, 1)
+        self._screen_recorder_combo = Gtk.ComboBoxText()
+        for name in ("gpu-screen-recorder", "none"):
+            self._screen_recorder_combo.append(name, name)
+        self._screen_recorder_combo.set_active_id(
+            self._cfg.get("screen_recorder", "none")
+        )
+        grid.attach(self._screen_recorder_combo, 1, row, 1, 1)
+        row += 1
+
+        # Monitors
+        self._monitors_label = Gtk.Label(label="Monitors:", xalign=0)
+        grid.attach(self._monitors_label, 0, row, 1, 1)
+        self._monitors_entry = Gtk.Entry()
+        self._monitors_entry.set_text(self._cfg.get("monitors", "all"))
+        self._monitors_entry.set_hexpand(True)
+        grid.attach(self._monitors_entry, 1, row, 1, 1)
+        row += 1
+
+        # FPS
+        self._fps_label = Gtk.Label(label="FPS:", xalign=0)
+        grid.attach(self._fps_label, 0, row, 1, 1)
+        self._fps_spin = Gtk.SpinButton.new_with_range(1, 60, 1)
+        self._fps_spin.set_value(self._cfg.get("screen_fps", 30))
+        grid.attach(self._fps_spin, 1, row, 1, 1)
+        row += 1
+
+        # Screen recorder availability warning
+        import shutil
+        self._screen_warn_label = Gtk.Label(xalign=0)
+        self._screen_warn_label.set_line_wrap(True)
+        self._screen_warn_label.set_no_show_all(True)
+        grid.attach(self._screen_warn_label, 0, row, 2, 1)
+
+        self._update_screen_warning()
 
         return grid
 
+    def _update_screen_warning(self) -> None:
+        import shutil
+        active = self._screen_recording_switch.get_active()
+        if active and not shutil.which("gpu-screen-recorder"):
+            self._screen_warn_label.set_markup(
+                '<span foreground="red">gpu-screen-recorder is not installed. '
+                'Install it: <b>yay -S gpu-screen-recorder</b></span>'
+            )
+            self._screen_warn_label.show()
+        else:
+            self._screen_warn_label.hide()
+
+    def _on_screen_toggle(self, switch, *_) -> None:
+        active = switch.get_active()
+        self._update_screen_warning()
+        for w in (self._screen_recorder_label, self._screen_recorder_combo,
+                  self._monitors_label, self._monitors_entry,
+                  self._fps_label, self._fps_spin):
+            w.set_sensitive(active)
+
     # ------------------------------------------------------------------
-    # Models tab
+    # Models tab (friend's Gemini/Whisper/Ollama sections preserved)
     # ------------------------------------------------------------------
 
     def _build_models_tab(self) -> Gtk.Widget:
@@ -237,6 +422,18 @@ class SettingsDialog(Gtk.Dialog):
         vbox.set_margin_end(16)
         outer_scroll.add(vbox)
 
+        config_note = Gtk.Label(xalign=0)
+        config_note.set_markup(
+            "These settings apply only when the corresponding provider is selected "
+            "in the <b>General</b> tab (e.g. Gemini model is used when transcription "
+            "provider is set to Google Gemini, Whisper/Ollama when Whisper or LiteLLM "
+            "with ollama is selected)."
+        )
+        config_note.set_line_wrap(True)
+        vbox.pack_start(config_note, False, False, 0)
+
+        vbox.pack_start(Gtk.Separator(), False, False, 4)
+
         # --- Gemini section ---
         gemini_title = Gtk.Label(xalign=0)
         gemini_title.set_markup("<b>Gemini</b>")
@@ -244,28 +441,19 @@ class SettingsDialog(Gtk.Dialog):
 
         gemini_grid = Gtk.Grid(column_spacing=12, row_spacing=8)
 
-        gemini_grid.attach(Gtk.Label(label="API key:", xalign=0), 0, 0, 1, 1)
-        self._gemini_key_entry = Gtk.Entry()
-        self._gemini_key_entry.set_text(self._cfg.get("gemini_api_key", ""))
-        self._gemini_key_entry.set_hexpand(True)
-        gemini_grid.attach(self._gemini_key_entry, 1, 0, 1, 1)
-
-        gemini_grid.attach(Gtk.Label(label="Model:", xalign=0), 0, 1, 1, 1)
+        gemini_grid.attach(Gtk.Label(label="Model:", xalign=0), 0, 0, 1, 1)
         self._gemini_model_combo = self._make_combo(
             GEMINI_MODELS, self._cfg.get("gemini_model", GEMINI_MODELS[0])
         )
-        self._gemini_model_combo.connect("changed", self._on_gemini_model_changed)
-        gemini_grid.attach(self._gemini_model_combo, 1, 1, 1, 1)
+        gemini_grid.attach(self._gemini_model_combo, 1, 0, 1, 1)
 
-        gemini_grid.attach(Gtk.Label(label="Processing timeout:", xalign=0), 0, 2, 1, 1)
-        self._timeout_combo = Gtk.ComboBoxText()
-        current_timeout = self._cfg.get("llm_request_timeout_minutes", 3)
-        for minutes in LLM_TIMEOUT_OPTIONS:
-            self._timeout_combo.append(str(minutes), f"{minutes} min")
-        self._timeout_combo.set_active_id(str(current_timeout))
-        if self._timeout_combo.get_active_id() is None:
-            self._timeout_combo.set_active_id("3")
-        gemini_grid.attach(self._timeout_combo, 1, 2, 1, 1)
+        gemini_note = Gtk.Label(
+            label="Controls the model for direct Gemini transcription. "
+                  "LiteLLM-routed gemini/ calls use the model from the General tab.",
+            xalign=0,
+        )
+        gemini_note.set_line_wrap(True)
+        gemini_grid.attach(gemini_note, 0, 1, 2, 1)
 
         vbox.pack_start(gemini_grid, False, False, 0)
 
@@ -303,7 +491,7 @@ class SettingsDialog(Gtk.Dialog):
             whisper_grid.attach(Gtk.Label(label=info.get("size", ""), xalign=0), 1, r, 1, 1)
             whisper_grid.attach(Gtk.Label(label=info.get("note", ""), xalign=0), 2, r, 1, 1)
 
-            status_lbl = Gtk.Label(label="Checking…", xalign=0)
+            status_lbl = Gtk.Label(label="Checking\u2026", xalign=0)
             whisper_grid.attach(status_lbl, 3, r, 1, 1)
 
             btn = Gtk.Button(label="Download")
@@ -324,10 +512,19 @@ class SettingsDialog(Gtk.Dialog):
         ollama_config_grid = Gtk.Grid(column_spacing=12, row_spacing=8)
 
         ollama_config_grid.attach(Gtk.Label(label="Ollama model:", xalign=0), 0, 0, 1, 1)
-        self._ollama_model_combo = self._make_combo(
-            OLLAMA_MODELS, self._cfg.get("ollama_model", OLLAMA_MODELS[0])
+        model_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        self._ollama_model_combo = Gtk.ComboBoxText.new_with_entry()
+        for m in OLLAMA_MODELS:
+            self._ollama_model_combo.append_text(m)
+        self._ollama_model_combo.get_child().set_text(
+            self._cfg.get("ollama_model", OLLAMA_MODELS[0])
         )
-        ollama_config_grid.attach(self._ollama_model_combo, 1, 0, 1, 1)
+        self._ollama_model_combo.set_hexpand(True)
+        model_box.pack_start(self._ollama_model_combo, True, True, 0)
+        self._ollama_custom_dl_btn = Gtk.Button(label="Pull Model")
+        self._ollama_custom_dl_btn.connect("clicked", self._on_ollama_pull_custom)
+        model_box.pack_start(self._ollama_custom_dl_btn, False, False, 0)
+        ollama_config_grid.attach(model_box, 1, 0, 1, 1)
 
         ollama_config_grid.attach(Gtk.Label(label="Ollama host:", xalign=0), 0, 1, 1, 1)
         self._ollama_host_entry = Gtk.Entry()
@@ -340,12 +537,13 @@ class SettingsDialog(Gtk.Dialog):
         vbox.pack_start(ollama_config_grid, False, False, 0)
 
         self._ollama_status_label = Gtk.Label(
-            label="Checking Ollama connection…", xalign=0
+            label="Checking Ollama connection\u2026", xalign=0
         )
         vbox.pack_start(self._ollama_status_label, False, False, 0)
 
         ollama_note = Gtk.Label(
-            label="Requires Ollama to be installed and running (ollama serve).",
+            label="Requires Ollama to be installed and running (ollama serve). "
+                  "Use ollama_chat/ prefix in LiteLLM for summarization.",
             xalign=0,
         )
         ollama_note.set_line_wrap(True)
@@ -363,7 +561,7 @@ class SettingsDialog(Gtk.Dialog):
             ollama_grid.attach(Gtk.Label(label=info.get("size", ""), xalign=0), 1, r, 1, 1)
             ollama_grid.attach(Gtk.Label(label=info.get("note", ""), xalign=0), 2, r, 1, 1)
 
-            status_lbl = Gtk.Label(label="Checking…", xalign=0)
+            status_lbl = Gtk.Label(label="Checking\u2026", xalign=0)
             ollama_grid.attach(status_lbl, 3, r, 1, 1)
 
             btn = Gtk.Button(label="Download")
@@ -382,7 +580,120 @@ class SettingsDialog(Gtk.Dialog):
         return outer_scroll
 
     # ------------------------------------------------------------------
-    # Prompts tab
+    # API Keys tab
+    # ------------------------------------------------------------------
+
+    def _build_api_keys_tab(self) -> Gtk.Widget:
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        vbox.set_margin_top(16)
+        vbox.set_margin_bottom(16)
+        vbox.set_margin_start(16)
+        vbox.set_margin_end(16)
+
+        note = Gtk.Label(
+            label="API keys are passed directly to providers and also set as environment variables.",
+            xalign=0,
+        )
+        note.set_line_wrap(True)
+        vbox.pack_start(note, False, False, 0)
+
+        # Error label for duplicate validation
+        self._api_keys_error_label = Gtk.Label(xalign=0)
+        self._api_keys_error_label.set_no_show_all(True)
+        vbox.pack_start(self._api_keys_error_label, False, False, 0)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_vexpand(True)
+
+        self._api_keys_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        scroll.add(self._api_keys_box)
+        vbox.pack_start(scroll, True, True, 0)
+
+        # Load existing keys
+        for env_name, value in self._cfg.get("api_keys", {}).items():
+            self._add_api_key_row(env_name, value)
+
+        # Add button
+        add_btn = Gtk.Button(label="Add Key")
+        add_btn.connect("clicked", lambda *_: self._add_api_key_row("", ""))
+        add_btn.set_halign(Gtk.Align.START)
+        vbox.pack_start(add_btn, False, False, 0)
+
+        return vbox
+
+    def _add_api_key_row(self, env_name: str = "", value: str = "") -> None:
+        row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+
+        # Env name combo with entry
+        name_combo = Gtk.ComboBoxText.new_with_entry()
+        for suggestion in _SUGGESTED_ENV_KEYS:
+            name_combo.append_text(suggestion)
+        entry = name_combo.get_child()
+        entry.set_text(env_name)
+        entry.set_placeholder_text("ENV_VAR_NAME")
+        name_combo.set_hexpand(True)
+        row_box.pack_start(name_combo, True, True, 0)
+
+        # Value entry (password masked)
+        val_entry = Gtk.Entry()
+        val_entry.set_text(value)
+        val_entry.set_visibility(False)
+        val_entry.set_placeholder_text("API key value")
+        val_entry.set_hexpand(True)
+        row_box.pack_start(val_entry, True, True, 0)
+
+        # Show/hide toggle
+        toggle_btn = Gtk.Button(label="Show")
+        toggle_btn.connect("clicked", lambda b: self._toggle_key_visibility(b, val_entry))
+        row_box.pack_start(toggle_btn, False, False, 0)
+
+        # Delete button
+        del_btn = Gtk.Button(label="Delete")
+        row_data = {"box": row_box, "name_combo": name_combo, "val_entry": val_entry}
+        del_btn.connect("clicked", lambda *_: self._remove_api_key_row(row_data))
+        row_box.pack_start(del_btn, False, False, 0)
+
+        self._api_key_rows.append(row_data)
+        self._api_keys_box.pack_start(row_box, False, False, 0)
+        row_box.show_all()
+
+    def _remove_api_key_row(self, row_data: dict) -> None:
+        self._api_keys_box.remove(row_data["box"])
+        self._api_key_rows.remove(row_data)
+
+    def _toggle_key_visibility(self, button: Gtk.Button, entry: Gtk.Entry) -> None:
+        visible = not entry.get_visibility()
+        entry.set_visibility(visible)
+        button.set_label("Hide" if visible else "Show")
+
+    def _collect_api_keys(self) -> dict[str, str] | None:
+        """Collect API keys from rows. Returns None if duplicates found."""
+        keys: dict[str, str] = {}
+        seen_names: dict[str, int] = {}
+        has_dupes = False
+
+        for i, row_data in enumerate(self._api_key_rows):
+            name_entry = row_data["name_combo"].get_child()
+            name = name_entry.get_text().strip()
+            value = row_data["val_entry"].get_text().strip()
+            if not name:
+                continue
+            if name in seen_names:
+                has_dupes = True
+            seen_names[name] = i
+            keys[name] = value
+
+        if has_dupes:
+            self._api_keys_error_label.set_text("Duplicate environment variable names found!")
+            self._api_keys_error_label.show()
+            return None
+
+        self._api_keys_error_label.hide()
+        return keys
+
+    # ------------------------------------------------------------------
+    # Prompts tab (friend's, preserved with note update)
     # ------------------------------------------------------------------
 
     def _build_prompts_tab(self) -> Gtk.Widget:
@@ -394,7 +705,8 @@ class SettingsDialog(Gtk.Dialog):
 
         # Transcription prompt
         ts_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        ts_label = Gtk.Label(label="Transcription prompt:", xalign=0)
+        ts_label = Gtk.Label(xalign=0)
+        ts_label.set_markup("<b>Transcription Prompt</b>")
         ts_label.set_hexpand(True)
         ts_reset = Gtk.Button(label="Reset to default")
         ts_reset.connect("clicked", lambda *_: self._reset_prompt("transcription"))
@@ -402,12 +714,13 @@ class SettingsDialog(Gtk.Dialog):
         ts_header.pack_start(ts_reset, False, False, 0)
         vbox.pack_start(ts_header, False, False, 0)
 
-        whisper_note = Gtk.Label(
-            label="Note: Transcription prompts apply to Gemini only. Whisper does not use prompts.",
+        prompt_note = Gtk.Label(
+            label="Note: Transcription prompts apply to Gemini direct provider only. "
+                  "Whisper, ElevenLabs, and LiteLLM transcription providers do not use custom prompts.",
             xalign=0,
         )
-        whisper_note.set_line_wrap(True)
-        vbox.pack_start(whisper_note, False, False, 0)
+        prompt_note.set_line_wrap(True)
+        vbox.pack_start(prompt_note, False, False, 0)
 
         self._ts_prompt_view = Gtk.TextView()
         self._ts_prompt_view.set_wrap_mode(Gtk.WrapMode.WORD)
@@ -424,7 +737,8 @@ class SettingsDialog(Gtk.Dialog):
 
         # Summarization prompt
         ss_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        ss_label = Gtk.Label(label="Summarization prompt:", xalign=0)
+        ss_label = Gtk.Label(xalign=0)
+        ss_label.set_markup("<b>Summarization Prompt</b>")
         ss_label.set_hexpand(True)
         ss_reset = Gtk.Button(label="Reset to default")
         ss_reset.connect("clicked", lambda *_: self._reset_prompt("summarization"))
@@ -456,10 +770,8 @@ class SettingsDialog(Gtk.Dialog):
     # ------------------------------------------------------------------
 
     def _refresh_local_model_statuses(self) -> None:
-        t = threading.Thread(target=self._check_whisper_statuses, daemon=True)
-        t.start()
-        t2 = threading.Thread(target=self._check_ollama_statuses, daemon=True)
-        t2.start()
+        threading.Thread(target=self._check_whisper_statuses, daemon=True).start()
+        threading.Thread(target=self._check_ollama_statuses, daemon=True).start()
 
     def _check_whisper_statuses(self) -> None:
         for model in WHISPER_MODELS:
@@ -490,10 +802,9 @@ class SettingsDialog(Gtk.Dialog):
         if row:
             row["status"].set_text("Downloading\u2026")
             row["btn"].set_sensitive(False)
-        t = threading.Thread(
+        threading.Thread(
             target=self._do_whisper_download, args=(model,), daemon=True
-        )
-        t.start()
+        ).start()
 
     def _do_whisper_download(self, model: str) -> None:
         try:
@@ -503,15 +814,68 @@ class SettingsDialog(Gtk.Dialog):
         except Exception as exc:
             GLib.idle_add(self._set_whisper_error, model, str(exc))
 
+    def _on_ollama_pull_custom(self, *_) -> None:
+        model = self._ollama_model_combo.get_child().get_text().strip()
+        if not model:
+            return
+        host = self._ollama_host_entry.get_text().strip() or OLLAMA_DEFAULT_HOST
+        self._ollama_custom_dl_btn.set_label("Pulling\u2026")
+        self._ollama_custom_dl_btn.set_sensitive(False)
+        threading.Thread(
+            target=self._do_ollama_pull_custom, args=(model, host), daemon=True
+        ).start()
+
+    def _do_ollama_pull_custom(self, model: str, host: str) -> None:
+        """Fetch model info then pull. Updates button on completion."""
+        try:
+            # Try to pull — Ollama will download if not present
+            payload = json.dumps({"name": model, "stream": True}).encode()
+            req = urllib.request.Request(
+                f"{host}/api/pull", data=payload,
+                headers={"Content-Type": "application/json"}, method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=None) as resp:
+                while True:
+                    line = resp.readline()
+                    if not line:
+                        break
+                    try:
+                        data = json.loads(line.decode())
+                    except json.JSONDecodeError:
+                        continue
+                    status = data.get("status", "")
+                    total = data.get("total", 0)
+                    completed = data.get("completed", 0)
+                    if total and completed:
+                        pct = int(completed / total * 100)
+                        status = f"{status} {pct}%"
+                    GLib.idle_add(self._set_custom_pull_status, status)
+                    if data.get("status") == "success":
+                        GLib.idle_add(self._set_custom_pull_done, "Ready")
+                        return
+            GLib.idle_add(self._set_custom_pull_done, "Ready")
+        except Exception as exc:
+            GLib.idle_add(self._set_custom_pull_done, f"Error: {str(exc)[:40]}")
+
+    def _set_custom_pull_status(self, text: str) -> bool:
+        self._ollama_custom_dl_btn.set_label(text[:25])
+        return False
+
+    def _set_custom_pull_done(self, text: str) -> bool:
+        self._ollama_custom_dl_btn.set_label("Pull Model")
+        self._ollama_custom_dl_btn.set_sensitive(True)
+        if self._ollama_status_label:
+            self._ollama_status_label.set_text(text)
+        return False
+
     def _start_ollama_download(self, model: str, host: str) -> None:
         row = self._ollama_rows.get(model)
         if row:
             row["status"].set_text("Starting\u2026")
             row["btn"].set_sensitive(False)
-        t = threading.Thread(
+        threading.Thread(
             target=self._do_ollama_download, args=(model, host), daemon=True
-        )
-        t.start()
+        ).start()
 
     def _do_ollama_download(self, model: str, host: str) -> None:
         payload = json.dumps({"name": model, "stream": True}).encode()
@@ -631,17 +995,23 @@ class SettingsDialog(Gtk.Dialog):
     # Helpers
     # ------------------------------------------------------------------
 
-    def _make_combo(self, items: list[str], active: str) -> Gtk.ComboBoxText:
+    def _make_provider_combo(self, items: list[str], active: str) -> Gtk.ComboBoxText:
         combo = Gtk.ComboBoxText()
         for item in items:
-            combo.append(item, _SERVICE_LABELS.get(item, item))
+            combo.append(item, _PROVIDER_LABELS.get(item, item))
         combo.set_active_id(active)
         if combo.get_active_id() is None and items:
             combo.set_active(0)
         return combo
 
-    def _on_gemini_model_changed(self, combo) -> None:
-        self._cfg["gemini_model"] = combo.get_active_id() or GEMINI_MODELS[0]
+    def _make_combo(self, items: list[str], active: str) -> Gtk.ComboBoxText:
+        combo = Gtk.ComboBoxText()
+        for item in items:
+            combo.append(item, item)
+        combo.set_active_id(active)
+        if combo.get_active_id() is None and items:
+            combo.set_active(0)
+        return combo
 
     def _on_browse_folder(self, *_) -> None:
         dialog = Gtk.FileChooserDialog(
@@ -661,24 +1031,47 @@ class SettingsDialog(Gtk.Dialog):
         dialog.destroy()
 
     def _on_response(self, dialog: Gtk.Dialog, response_id: int) -> None:
-        if response_id == Gtk.ResponseType.OK:
+        if response_id == Gtk.ResponseType.APPLY:
             self._save()
+            self.stop_emission_by_name("response")  # prevent dialog close
 
     def _save(self) -> None:
+        # Collect and validate API keys first
+        api_keys = self._collect_api_keys()
+        if api_keys is None:
+            return  # duplicates found, save blocked
+
         cfg = settings.load()
-        cfg["transcription_service"] = self._ts_combo.get_active_id() or "gemini"
-        cfg["summarization_service"] = self._ss_combo.get_active_id() or "gemini"
-        cfg["gemini_api_key"] = self._gemini_key_entry.get_text().strip()
-        cfg["gemini_model"] = self._gemini_model_combo.get_active_id() or GEMINI_MODELS[0]
-        cfg["llm_request_timeout_minutes"] = int(self._timeout_combo.get_active_id() or "3")
-        cfg["whisper_model"] = self._whisper_model_combo.get_active_id() or WHISPER_MODELS[0]
-        cfg["ollama_model"] = self._ollama_model_combo.get_active_id() or OLLAMA_MODELS[0]
-        cfg["ollama_host"] = self._ollama_host_entry.get_text().strip() or OLLAMA_DEFAULT_HOST
+
+        # General tab
+        cfg["transcription_provider"] = self._ts_combo.get_active_id() or "gemini"
+        cfg["summarization_provider"] = self._ss_combo.get_active_id() or "litellm"
+        cfg["litellm_transcription_model"] = self._litellm_ts_combo.get_child().get_text().strip() or "groq/whisper-large-v3"
+        cfg["litellm_summarization_model"] = self._litellm_ss_combo.get_child().get_text().strip() or "gemini/gemini-2.5-flash"
         cfg["output_folder"] = self._folder_entry.get_text().strip() or "~/meetings"
         cfg["recording_quality"] = self._quality_combo.get_active_id() or "high"
+        cfg["llm_request_timeout_minutes"] = int(self._timeout_combo.get_active_id() or "5")
         cfg["call_detection_enabled"] = self._detection_switch.get_active()
         cfg["start_at_startup"] = self._startup_switch.get_active()
 
+        # Platform tab
+        cfg["audio_backend"] = self._audio_backend_combo.get_active_id() or "pipewire"
+        cfg["separate_audio_tracks"] = self._separate_tracks_switch.get_active()
+        cfg["screen_recording"] = self._screen_recording_switch.get_active()
+        cfg["screen_recorder"] = self._screen_recorder_combo.get_active_id() or "none"
+        cfg["monitors"] = self._monitors_entry.get_text().strip() or "all"
+        cfg["screen_fps"] = int(self._fps_spin.get_value())
+
+        # Models tab
+        cfg["gemini_model"] = self._gemini_model_combo.get_active_id() or GEMINI_MODELS[0]
+        cfg["whisper_model"] = self._whisper_model_combo.get_active_id() or WHISPER_MODELS[0]
+        cfg["ollama_model"] = self._ollama_model_combo.get_child().get_text().strip() or OLLAMA_MODELS[0]
+        cfg["ollama_host"] = self._ollama_host_entry.get_text().strip() or OLLAMA_DEFAULT_HOST
+
+        # API Keys
+        cfg["api_keys"] = api_keys
+
+        # Prompts
         ts_buf = self._ts_prompt_view.get_buffer()
         ts_text = ts_buf.get_text(ts_buf.get_start_iter(), ts_buf.get_end_iter(), False).strip()
         cfg["transcription_prompt"] = (
@@ -693,6 +1086,20 @@ class SettingsDialog(Gtk.Dialog):
 
         try:
             settings.save(cfg)
+            settings.inject_api_keys(cfg)
             update_autostart(cfg["start_at_startup"])
+            self._flash_saved()
         except Exception as exc:
             logger.error("Failed to save settings: %s", exc)
+
+    def _flash_saved(self) -> None:
+        btn = self.get_widget_for_response(Gtk.ResponseType.APPLY)
+        if btn:
+            btn.set_label("Saved!")
+            btn.set_sensitive(False)
+            GLib.timeout_add(1200, self._reset_save_btn, btn)
+
+    def _reset_save_btn(self, btn: Gtk.Widget) -> bool:
+        btn.set_label("Save")
+        btn.set_sensitive(True)
+        return False

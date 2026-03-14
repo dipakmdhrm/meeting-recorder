@@ -23,6 +23,16 @@ from ..utils.filename import output_paths
 
 logger = logging.getLogger(__name__)
 
+# Known litellm provider prefixes -> env var names
+_LITELLM_KEY_MAP = {
+    "gemini": "GEMINI_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "groq": "GROQ_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+    "deepgram": "DEEPGRAM_API_KEY",
+}
+
 
 class State(Enum):
     IDLE = auto()
@@ -53,10 +63,13 @@ def _format_time(seconds: int) -> str:
 
 
 class MainWindow(Gtk.ApplicationWindow):
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, audio_backend=None, screen_recorder=None, **kwargs) -> None:
         super().__init__(title="Meeting Recorder", **kwargs)
-        self.set_default_size(400, 350)
+        self.set_default_size(425, 375)
         self.set_resizable(True)
+
+        self._audio_backend = audio_backend
+        self._screen_recorder = screen_recorder
 
         self._state = State.IDLE
         self._recorder = None
@@ -371,16 +384,19 @@ class MainWindow(Gtk.ApplicationWindow):
         if self._state != State.IDLE:
             return
 
+        if not self._audio_backend:
+            self._show_error("No audio backend available. Check Settings \u2192 Platform.")
+            return
+
         cfg = settings.load()
-        ts = cfg.get("transcription_service", "gemini")
-        ss = cfg.get("summarization_service", "gemini")
+        ts = cfg.get("transcription_provider", "gemini")
+        ss = cfg.get("summarization_provider", "litellm")
         key_missing = self._check_api_keys(cfg, ts, ss)
         if key_missing:
             self._show_error(key_missing)
             return
 
-        from ..audio.devices import validate_devices
-        ok, err = validate_devices()
+        ok, err = self._audio_backend.validate()
         if not ok:
             self._show_error(f"Audio device error: {err}")
             return
@@ -395,14 +411,20 @@ class MainWindow(Gtk.ApplicationWindow):
 
         from ..audio.recorder import Recorder, RecordingError
         from ..config.defaults import RECORDING_QUALITIES
+        from ..platform.audio.base import CaptureMode
 
         q_key = cfg.get("recording_quality", "high")
         _, q_val = RECORDING_QUALITIES.get(q_key, RECORDING_QUALITIES["high"])
 
+        mode = CaptureMode(self._recording_mode)
+        separate = cfg.get("separate_audio_tracks", True)
+
         self._recorder = Recorder(
-            output_path=audio,
-            mode=self._recording_mode,
+            backend=self._audio_backend,
+            output_dir=audio.parent,
+            mode=mode,
             quality=q_val,
+            separate_tracks=separate,
             on_tick=self._on_tick,
             on_error=self._on_recording_error,
         )
@@ -412,8 +434,37 @@ class MainWindow(Gtk.ApplicationWindow):
             self._show_error(str(exc))
             return
 
+        # Start screen recording if configured
+        if cfg.get("screen_recording"):
+            if not self._screen_recorder:
+                self._show_error(
+                    "Screen recording is enabled but gpu-screen-recorder is not installed.\n"
+                    "Install it: yay -S gpu-screen-recorder"
+                )
+            elif hasattr(self._screen_recorder, "is_available") and not self._screen_recorder.is_available():
+                self._show_error(
+                    "Screen recording is enabled but gpu-screen-recorder is not found on PATH.\n"
+                    "Install it: yay -S gpu-screen-recorder"
+                )
+            else:
+                try:
+                    monitors_cfg = cfg.get("monitors", "all")
+                    if monitors_cfg == "all":
+                        monitor_names = [
+                            m.name for m in self._screen_recorder.list_monitors()
+                        ]
+                    else:
+                        monitor_names = [
+                            m.strip() for m in monitors_cfg.split(",") if m.strip()
+                        ]
+                    fps = cfg.get("screen_fps", 30)
+                    self._screen_recorder.start(monitor_names, audio.parent, fps)
+                except Exception as exc:
+                    logger.warning("Screen recording failed to start: %s", exc)
+                    self._show_error(f"Screen recording failed to start: {exc}")
+
         mode_label = "headphones" if self._recording_mode == "headphones" else "speaker"
-        self._transition(State.RECORDING, status=f"Recording… ({mode_label} mode)")
+        self._transition(State.RECORDING, status=f"Recording\u2026 ({mode_label} mode)")
 
     def on_use_existing_clicked(self) -> None:
         assert_main_thread()
@@ -421,8 +472,8 @@ class MainWindow(Gtk.ApplicationWindow):
             return
 
         cfg = settings.load()
-        ts = cfg.get("transcription_service", "gemini")
-        ss = cfg.get("summarization_service", "gemini")
+        ts = cfg.get("transcription_provider", "gemini")
+        ss = cfg.get("summarization_provider", "litellm")
         key_missing = self._check_api_keys(cfg, ts, ss)
         if key_missing:
             self._show_error(key_missing)
@@ -519,6 +570,11 @@ class MainWindow(Gtk.ApplicationWindow):
         return f"{time_part} {title}".strip() if title else time_part
 
     def _stop_recorder_bg(self, recorder) -> None:
+        if self._screen_recorder:
+            try:
+                self._screen_recorder.stop()
+            except Exception as exc:
+                logger.warning("Error stopping screen recorder: %s", exc)
         try:
             recorder.stop()
         except Exception as exc:
@@ -579,6 +635,11 @@ class MainWindow(Gtk.ApplicationWindow):
         self._transition(State.IDLE, status="Stopping recording…")
 
         def _bg():
+            if self._screen_recorder:
+                try:
+                    self._screen_recorder.stop()
+                except Exception:
+                    pass
             try:
                 recorder.stop()
             except Exception as exc:
@@ -608,9 +669,14 @@ class MainWindow(Gtk.ApplicationWindow):
         recorder = self._recorder
         audio_path = self._audio_path
         self._recorder = None
-        self._transition(State.IDLE, status="Cancelling…")
+        self._transition(State.IDLE, status="Cancelling\u2026")
 
         def _bg():
+            if self._screen_recorder:
+                try:
+                    self._screen_recorder.stop()
+                except Exception:
+                    pass
             try:
                 recorder.stop()
             except Exception as exc:
@@ -886,11 +952,30 @@ class MainWindow(Gtk.ApplicationWindow):
     # Helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _has_key(cfg: dict, env_name: str) -> bool:
+        """Check if API key is available in config or environment."""
+        return bool(cfg.get("api_keys", {}).get(env_name) or os.environ.get(env_name))
+
     def _check_api_keys(self, cfg: dict, ts: str, ss: str) -> str | None:
-        if ts == "gemini" and not cfg.get("gemini_api_key"):
-            return "Gemini API key is not configured. Please open Settings."
-        if ss == "gemini" and not cfg.get("gemini_api_key"):
-            return "Gemini API key is not configured. Please open Settings."
+        # Transcription provider checks
+        if ts == "gemini" and not self._has_key(cfg, "GEMINI_API_KEY"):
+            return "Gemini API key not set (add in Settings \u2192 API Keys)"
+        if ts == "elevenlabs" and not self._has_key(cfg, "ELEVENLABS_API_KEY"):
+            return "ElevenLabs API key not set (add in Settings \u2192 API Keys)"
+        if ts == "litellm":
+            model = cfg.get("litellm_transcription_model", "")
+            prefix = model.split("/")[0] if "/" in model else ""
+            env_key = _LITELLM_KEY_MAP.get(prefix)
+            if env_key and not self._has_key(cfg, env_key):
+                return f"{env_key} not set for {model} (add in Settings \u2192 API Keys)"
+        # Summarization provider checks
+        if ss == "litellm":
+            model = cfg.get("litellm_summarization_model", "")
+            prefix = model.split("/")[0] if "/" in model else ""
+            env_key = _LITELLM_KEY_MAP.get(prefix)
+            if env_key and not self._has_key(cfg, env_key):
+                return f"{env_key} not set for {model} (add in Settings \u2192 API Keys)"
         return None
 
     def _on_open_folder(self, *_) -> None:

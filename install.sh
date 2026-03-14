@@ -90,8 +90,9 @@ info "Launcher created at $LAUNCHER"
 
 # ── 9. Desktop entry ─────────────────────────────────────────────────────────
 mkdir -p "$APPS_DIR"
-sed "s|LAUNCHER_PATH|$LAUNCHER|g" "$SCRIPT_DIR/meeting-recorder.desktop.template" \
-    > "$DESKTOP"
+sed -e "s|LAUNCHER_PATH|$LAUNCHER|g" \
+    -e "s|ICON_PATH|$INSTALL_DIR/src/meeting_recorder/assets/icons/meeting-recorder.svg|g" \
+    "$SCRIPT_DIR/meeting-recorder.desktop.template" > "$DESKTOP"
 chmod +x "$DESKTOP"
 info "Desktop entry created at $DESKTOP"
 

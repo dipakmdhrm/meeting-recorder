@@ -7,8 +7,6 @@ INSTALL_DIR="$HOME/.local/share/$APP_NAME"
 BIN_DIR="$HOME/.local/bin"
 APPS_DIR="$HOME/.local/share/applications"
 AUTOSTART_DIR="$HOME/.config/autostart"
-SYSTEM_LOG_DIR="/var/log/meeting-recorder"
-
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 info() { echo -e "${GREEN}[info]${NC} $*"; }
 warn() { echo -e "${YELLOW}[warn]${NC} $*"; }
@@ -45,15 +43,12 @@ if [ -f "$AUTOSTART_DIR/$APP_NAME.desktop" ]; then
     rm -f "$AUTOSTART_DIR/$APP_NAME.desktop"
 fi
 
-# ── 6. System log directory ──────────────────────────────────────────────────
-if [ -d "$SYSTEM_LOG_DIR" ]; then
-    info "Removing system log directory $SYSTEM_LOG_DIR…"
-    sudo rm -rf "$SYSTEM_LOG_DIR"
-fi
-
-warn "Config file ~/.config/meeting-recorder/config.json was NOT removed."
-warn "To also remove your configuration and API keys, run:"
-warn "  rm -rf ~/.config/meeting-recorder"
+echo
+warn "The following were NOT removed (your data):"
+warn "  ~/.config/meeting-recorder/  (config + API keys)"
+warn "  ~/meetings/                  (recordings, transcripts, notes)"
+warn ""
+warn "To remove config:  rm -rf ~/.config/meeting-recorder"
 
 echo
 info "Uninstall complete."
