@@ -3,7 +3,10 @@ The execution entry point for the Meeting Recorder application. It allows the pa
 """
 
 import sys
+import setproctitle
 from .app import MeetingRecorderApp
+
+setproctitle.setproctitle("meeting-recorder")
 
 
 def main():
