@@ -80,7 +80,8 @@ DEFAULT_CONFIG: dict = {
     "transcription_service": "gemini",
     "summarization_service": "gemini",
     "gemini_api_key": "",
-    "gemini_model": "gemini-flash-latest",
+    "gemini_transcription_model": "gemini-flash-latest",
+    "gemini_summarization_model": "gemini-flash-latest",
 
     "output_folder": DEFAULT_OUTPUT_FOLDER,
     "recording_quality": "high",

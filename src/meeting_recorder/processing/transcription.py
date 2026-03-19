@@ -27,7 +27,7 @@ def create_transcription_provider(config: dict) -> TranscriptionProvider:
         from .providers.gemini import GeminiProvider
         return GeminiProvider(
             api_key=config["gemini_api_key"],
-            model=config.get("gemini_model", "gemini-2.5-flash"),
+            model=config.get("gemini_transcription_model", "gemini-2.5-flash"),
             transcription_prompt=config.get("transcription_prompt", ""),
             timeout_minutes=config.get("llm_request_timeout_minutes", 3),
         )

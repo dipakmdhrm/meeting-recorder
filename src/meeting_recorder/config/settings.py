@@ -32,6 +32,12 @@ def load() -> dict[str, Any]:
         try:
             with open(path) as f:
                 stored = json.load(f)
+
+            # Migration: if old gemini_model exists, copy it to the new keys
+            if "gemini_model" in stored:
+                stored.setdefault("gemini_transcription_model", stored["gemini_model"])
+                stored.setdefault("gemini_summarization_model", stored["gemini_model"])
+
             # Merge: stored values override defaults, unknown keys ignored
             for key in DEFAULT_CONFIG:
                 if key in stored:

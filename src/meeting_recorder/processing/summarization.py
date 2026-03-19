@@ -26,7 +26,7 @@ def create_summarization_provider(config: dict) -> SummarizationProvider:
         from .providers.gemini import GeminiProvider
         return GeminiProvider(
             api_key=config["gemini_api_key"],
-            model=config.get("gemini_model", "gemini-2.5-flash"),
+            model=config.get("gemini_summarization_model", "gemini-2.5-flash"),
             summarization_prompt=config.get("summarization_prompt", ""),
             timeout_minutes=config.get("llm_request_timeout_minutes", 3),
         )

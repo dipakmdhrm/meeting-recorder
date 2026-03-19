@@ -250,14 +250,19 @@ class SettingsDialog(Gtk.Dialog):
         self._gemini_key_entry.set_hexpand(True)
         gemini_grid.attach(self._gemini_key_entry, 1, 0, 1, 1)
 
-        gemini_grid.attach(Gtk.Label(label="Model:", xalign=0), 0, 1, 1, 1)
-        self._gemini_model_combo = self._make_combo(
-            GEMINI_MODELS, self._cfg.get("gemini_model", GEMINI_MODELS[0])
+        gemini_grid.attach(Gtk.Label(label="Transcription model:", xalign=0), 0, 1, 1, 1)
+        self._gemini_ts_model_combo = self._make_combo(
+            GEMINI_MODELS, self._cfg.get("gemini_transcription_model", GEMINI_MODELS[0])
         )
-        self._gemini_model_combo.connect("changed", self._on_gemini_model_changed)
-        gemini_grid.attach(self._gemini_model_combo, 1, 1, 1, 1)
+        gemini_grid.attach(self._gemini_ts_model_combo, 1, 1, 1, 1)
 
-        gemini_grid.attach(Gtk.Label(label="Processing timeout:", xalign=0), 0, 2, 1, 1)
+        gemini_grid.attach(Gtk.Label(label="Summarization model:", xalign=0), 0, 2, 1, 1)
+        self._gemini_ss_model_combo = self._make_combo(
+            GEMINI_MODELS, self._cfg.get("gemini_summarization_model", GEMINI_MODELS[0])
+        )
+        gemini_grid.attach(self._gemini_ss_model_combo, 1, 2, 1, 1)
+
+        gemini_grid.attach(Gtk.Label(label="Processing timeout:", xalign=0), 0, 3, 1, 1)
         self._timeout_combo = Gtk.ComboBoxText()
         current_timeout = self._cfg.get("llm_request_timeout_minutes", 3)
         for minutes in LLM_TIMEOUT_OPTIONS:
@@ -265,7 +270,7 @@ class SettingsDialog(Gtk.Dialog):
         self._timeout_combo.set_active_id(str(current_timeout))
         if self._timeout_combo.get_active_id() is None:
             self._timeout_combo.set_active_id("3")
-        gemini_grid.attach(self._timeout_combo, 1, 2, 1, 1)
+        gemini_grid.attach(self._timeout_combo, 1, 3, 1, 1)
 
         vbox.pack_start(gemini_grid, False, False, 0)
 
@@ -640,9 +645,6 @@ class SettingsDialog(Gtk.Dialog):
             combo.set_active(0)
         return combo
 
-    def _on_gemini_model_changed(self, combo) -> None:
-        self._cfg["gemini_model"] = combo.get_active_id() or GEMINI_MODELS[0]
-
     def _on_browse_folder(self, *_) -> None:
         dialog = Gtk.FileChooserDialog(
             title="Select Output Folder",
@@ -669,7 +671,12 @@ class SettingsDialog(Gtk.Dialog):
         cfg["transcription_service"] = self._ts_combo.get_active_id() or "gemini"
         cfg["summarization_service"] = self._ss_combo.get_active_id() or "gemini"
         cfg["gemini_api_key"] = self._gemini_key_entry.get_text().strip()
-        cfg["gemini_model"] = self._gemini_model_combo.get_active_id() or GEMINI_MODELS[0]
+        cfg["gemini_transcription_model"] = (
+            self._gemini_ts_model_combo.get_active_id() or GEMINI_MODELS[0]
+        )
+        cfg["gemini_summarization_model"] = (
+            self._gemini_ss_model_combo.get_active_id() or GEMINI_MODELS[0]
+        )
         cfg["llm_request_timeout_minutes"] = int(self._timeout_combo.get_active_id() or "3")
         cfg["whisper_model"] = self._whisper_model_combo.get_active_id() or WHISPER_MODELS[0]
         cfg["ollama_model"] = self._ollama_model_combo.get_active_id() or OLLAMA_MODELS[0]
