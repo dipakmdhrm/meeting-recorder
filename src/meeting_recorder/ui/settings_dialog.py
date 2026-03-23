@@ -34,7 +34,7 @@ from ..config.defaults import (
     WHISPER_MODEL_INFO,
     WHISPER_MODELS,
 )
-from ..utils.autostart import update_autostart, is_autostart_enabled, can_enable_autostart
+from ..utils.autostart import update_autostart, is_autostart_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -156,22 +156,9 @@ class SettingsDialog(Gtk.Dialog):
         self._startup_switch.set_active(is_autostart_enabled())
         self._startup_switch.set_halign(Gtk.Align.START)
 
-        can_enable = can_enable_autostart()
-        is_enabled = is_autostart_enabled()
-        self._startup_switch.set_sensitive(is_enabled or can_enable)
-
         grid.attach(Gtk.Label(label="Start at system startup:", xalign=0), 0, row, 1, 1)
         grid.attach(self._startup_switch, 1, row, 1, 1)
         row += 1
-
-        if not (is_enabled or can_enable):
-            note = Gtk.Label(
-                label="Note: To enable autostart, the app must first be installed via install.sh."
-            )
-            note.set_line_wrap(True)
-            note.set_xalign(0)
-            grid.attach(note, 0, row, 2, 1)
-            row += 1
 
         # Enable call detection
         self._detection_switch = Gtk.Switch()
