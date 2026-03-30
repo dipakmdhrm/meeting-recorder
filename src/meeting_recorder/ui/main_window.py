@@ -20,6 +20,7 @@ from gi.repository import Gtk, GLib
 from ..config import settings
 from ..utils.glib_bridge import assert_main_thread, idle_call
 from ..utils.filename import output_paths
+from .meeting_explorer import MeetingExplorer
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,7 @@ def _format_time(seconds: int) -> str:
 class MainWindow(Gtk.ApplicationWindow):
     def __init__(self, **kwargs) -> None:
         super().__init__(title="Meeting Recorder", **kwargs)
-        self.set_default_size(400, 350)
+        self.set_default_size(1200, 800)
         self.set_resizable(True)
 
         self._state = State.IDLE
@@ -99,13 +100,22 @@ class MainWindow(Gtk.ApplicationWindow):
         self._info_bar.set_no_show_all(True)
         outer.pack_start(self._info_bar, False, False, 0)
 
-        # Main content area
+        # Stack for views
+        self._stack = Gtk.Stack()
+        self._stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+        outer.pack_start(self._stack, True, True, 0)
+
+        # -------------------------------------------------------------
+        # View 1: Recorder
+        # -------------------------------------------------------------
+        recorder_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         vbox.set_margin_top(24)
         vbox.set_margin_bottom(24)
         vbox.set_margin_start(24)
         vbox.set_margin_end(24)
-        outer.pack_start(vbox, False, False, 0)
+        recorder_box.pack_start(vbox, False, False, 0)
 
         # Timer label
         self._timer_label = Gtk.Label(label="00:00")
@@ -176,19 +186,31 @@ class MainWindow(Gtk.ApplicationWindow):
         scroll.add(self._jobs_list)
         self._jobs_section.pack_start(scroll, False, False, 0)
 
-        # Pre-show static children so they're visible when _jobs_section.show()
-        # is called later.  (set_no_show_all blocks show_all() from reaching them.)
         sep.show()
         jobs_hdr.show_all()
         scroll.show()
         self._jobs_list.show()
 
-        outer.pack_start(self._jobs_section, False, False, 0)
+        recorder_box.pack_start(self._jobs_section, False, False, 0)
 
-        # HeaderBar with settings button
+        self._stack.add_titled(recorder_box, "recorder", "Record")
+
+        # -------------------------------------------------------------
+        # View 2: Meeting Explorer
+        # -------------------------------------------------------------
+        self._explorer = MeetingExplorer()
+        self._stack.add_titled(self._explorer, "explorer", "Library")
+        self._stack.connect("notify::visible-child-name", self._on_stack_switched)
+
+        # HeaderBar with settings button and stack switcher
         hb = Gtk.HeaderBar()
         hb.set_title("Meeting Recorder")
         hb.set_show_close_button(True)
+        
+        switcher = Gtk.StackSwitcher()
+        switcher.set_stack(self._stack)
+        hb.set_custom_title(switcher)
+
         settings_btn = Gtk.Button()
         settings_btn.set_image(
             Gtk.Image.new_from_icon_name("preferences-system", Gtk.IconSize.BUTTON)
@@ -197,6 +219,10 @@ class MainWindow(Gtk.ApplicationWindow):
         settings_btn.connect("clicked", self._on_settings_clicked)
         hb.pack_end(settings_btn)
         self.set_titlebar(hb)
+
+    def _on_stack_switched(self, stack, param):
+        if stack.get_visible_child_name() == "explorer":
+            self._explorer.refresh()
 
     def _make_timer_attrs(self):
         gi.require_version("Pango", "1.0")
@@ -450,14 +476,24 @@ class MainWindow(Gtk.ApplicationWindow):
         if response != Gtk.ResponseType.OK or not filename:
             return
 
-        audio_path = Path(filename)
-        stem = audio_path.stem
+        # Create a new session directory for the imported file
+        new_audio_path, new_transcript_path, new_notes_path = output_paths(
+            cfg.get("output_folder", "~/meetings")
+        )
+        
+        # Copy the user-selected audio to the new session directory
+        try:
+            shutil.copy(filename, new_audio_path)
+        except Exception as e:
+            self._show_error(f"Failed to copy audio file: {e}")
+            return
+
         job = _Job(
             job_id=self._next_job_id,
-            audio_path=audio_path,
-            transcript_path=audio_path.parent / f"{stem}_transcript.md",
-            notes_path=audio_path.parent / f"{stem}_notes.md",
-            label=audio_path.name,
+            audio_path=new_audio_path,
+            transcript_path=new_transcript_path,
+            notes_path=new_notes_path,
+            label=Path(filename).name,
         )
         self._next_job_id += 1
         self._jobs.append(job)
@@ -651,6 +687,14 @@ class MainWindow(Gtk.ApplicationWindow):
         )
         try:
             pipeline.run()
+            # Update job paths in case auto-title renamed the directory
+            audio_path, transcript_path, notes_path = pipeline.output_paths
+            job.audio_path = audio_path
+            if transcript_path:
+                job.transcript_path = transcript_path
+            if notes_path:
+                job.notes_path = notes_path
+
             if not job.cancelled:
                 idle_call(self._on_job_done, job)
         except Exception as exc:

@@ -89,6 +89,61 @@ class Pipeline:
 
         self._write_results(transcript, notes)
 
+        if self._config.get("auto_title", True):
+            self._auto_title(notes)
+
+    @property
+    def output_paths(self) -> tuple[Path | None, Path | None, Path | None]:
+        """Return (audio_path, transcript_path, notes_path) after run() completes."""
+        return self._audio_path, self._transcript_path, self._notes_path
+
+    def _auto_title(self, notes: str) -> None:
+        """Generate a title from the notes and rename the meeting directory."""
+        if not self._notes_path or not self._audio_path:
+            return
+
+        meeting_dir = self._audio_path.parent
+        import re
+        if not re.match(r"^\d{2}-\d{2}$", meeting_dir.name):
+            # User likely provided a title already
+            return
+
+        if self._on_status:
+            self._on_status("Generating title…")
+
+        try:
+            from .summarization import create_summarization_provider
+            from ..config.defaults import TITLE_PROMPT
+            from ..utils.meeting_scanner import rename_meeting_path, write_metadata
+            from datetime import datetime
+
+            provider = create_summarization_provider({
+                **self._config,
+                "summarization_prompt": self._config.get("title_prompt") or TITLE_PROMPT,
+            })
+            title = provider.summarize(notes)
+            title = title.strip().strip('"').strip("'").strip()
+
+            if not title:
+                return
+
+            write_metadata(meeting_dir, {
+                "title": title,
+                "generated_at": datetime.now().isoformat(),
+            })
+
+            new_path = rename_meeting_path(meeting_dir, title)
+            logger.info("Auto-titled meeting: %s -> %s", meeting_dir.name, new_path.name)
+
+            self._audio_path = new_path / self._audio_path.name
+            if self._transcript_path:
+                self._transcript_path = new_path / self._transcript_path.name
+            if self._notes_path:
+                self._notes_path = new_path / self._notes_path.name
+
+        except Exception as exc:
+            logger.warning("Auto-title failed: %s", exc)
+
     def _write_results(self, transcript: str, notes: str) -> None:
         if self._on_status:
             self._on_status("Saving results…")

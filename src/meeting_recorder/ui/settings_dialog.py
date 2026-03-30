@@ -29,6 +29,7 @@ from ..config.defaults import (
     RECORDING_QUALITIES,
     SUMMARIZATION_PROMPT,
     SUMMARIZATION_SERVICES,
+    TITLE_PROMPT,
     TRANSCRIPTION_SERVICES,
     WHISPER_HF_REPOS,
     WHISPER_MODEL_INFO,
@@ -181,6 +182,28 @@ class SettingsDialog(Gtk.Dialog):
         note_detection.set_line_wrap(True)
         note_detection.set_xalign(0)
         grid.attach(note_detection, 0, row, 2, 1)
+        row += 1
+
+        grid.attach(Gtk.Separator(), 0, row, 2, 1)
+        row += 1
+
+        # Auto-title
+        self._auto_title_switch = Gtk.Switch()
+        self._auto_title_switch.set_active(
+            self._cfg.get("auto_title", True)
+        )
+        self._auto_title_switch.set_halign(Gtk.Align.START)
+
+        grid.attach(Gtk.Label(label="Auto-title recordings:", xalign=0), 0, row, 1, 1)
+        grid.attach(self._auto_title_switch, 1, row, 1, 1)
+        row += 1
+
+        note_auto_title = Gtk.Label(
+            label="Automatically generate a short title based on meeting notes."
+        )
+        note_auto_title.set_line_wrap(True)
+        note_auto_title.set_xalign(0)
+        grid.attach(note_auto_title, 0, row, 2, 1)
         row += 1
 
         grid.attach(Gtk.Separator(), 0, row, 2, 1)
@@ -435,13 +458,45 @@ class SettingsDialog(Gtk.Dialog):
         ss_scroll.add(self._ss_prompt_view)
         vbox.pack_start(ss_scroll, True, True, 0)
 
+        vbox.pack_start(Gtk.Separator(), False, False, 4)
+
+        # Title prompt
+        title_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        title_label = Gtk.Label(label="Title prompt:", xalign=0)
+        title_label.set_hexpand(True)
+        title_reset = Gtk.Button(label="Reset to default")
+        title_reset.connect("clicked", lambda *_: self._reset_prompt("title"))
+        title_header.pack_start(title_label, True, True, 0)
+        title_header.pack_start(title_reset, False, False, 0)
+        vbox.pack_start(title_header, False, False, 0)
+
+        title_note = Gtk.Label(
+            label="Used for auto-titling recordings and the AI title button in the Library. Must contain {transcript}.",
+            xalign=0,
+        )
+        title_note.set_line_wrap(True)
+        vbox.pack_start(title_note, False, False, 0)
+
+        self._title_prompt_view = Gtk.TextView()
+        self._title_prompt_view.set_wrap_mode(Gtk.WrapMode.WORD)
+        self._title_prompt_view.set_monospace(True)
+        stored_title = self._cfg.get("title_prompt") or TITLE_PROMPT
+        self._title_prompt_view.get_buffer().set_text(stored_title)
+        title_scroll = Gtk.ScrolledWindow()
+        title_scroll.set_min_content_height(120)
+        title_scroll.set_vexpand(True)
+        title_scroll.add(self._title_prompt_view)
+        vbox.pack_start(title_scroll, True, True, 0)
+
         return vbox
 
     def _reset_prompt(self, which: str) -> None:
         if which == "transcription":
             self._ts_prompt_view.get_buffer().set_text(GEMINI_TRANSCRIPTION_PROMPT)
-        else:
+        elif which == "summarization":
             self._ss_prompt_view.get_buffer().set_text(SUMMARIZATION_PROMPT)
+        else:
+            self._title_prompt_view.get_buffer().set_text(TITLE_PROMPT)
 
     # ------------------------------------------------------------------
     # Background status checks
@@ -672,6 +727,7 @@ class SettingsDialog(Gtk.Dialog):
         cfg["recording_quality"] = self._quality_combo.get_active_id() or "high"
         cfg["call_detection_enabled"] = self._detection_switch.get_active()
         cfg["start_at_startup"] = self._startup_switch.get_active()
+        cfg["auto_title"] = self._auto_title_switch.get_active()
 
         ts_buf = self._ts_prompt_view.get_buffer()
         ts_text = ts_buf.get_text(ts_buf.get_start_iter(), ts_buf.get_end_iter(), False).strip()
@@ -683,6 +739,12 @@ class SettingsDialog(Gtk.Dialog):
         ss_text = ss_buf.get_text(ss_buf.get_start_iter(), ss_buf.get_end_iter(), False).strip()
         cfg["summarization_prompt"] = (
             "" if ss_text == SUMMARIZATION_PROMPT.strip() else ss_text
+        )
+
+        title_buf = self._title_prompt_view.get_buffer()
+        title_text = title_buf.get_text(title_buf.get_start_iter(), title_buf.get_end_iter(), False).strip()
+        cfg["title_prompt"] = (
+            "" if title_text == TITLE_PROMPT.strip() else title_text
         )
 
         try:
