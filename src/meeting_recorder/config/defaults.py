@@ -87,6 +87,7 @@ DEFAULT_CONFIG: dict = {
     "recording_quality": "high",
     "call_detection_enabled": False,
     "start_at_startup": False,
+    "auto_title": True,
 
     "llm_request_timeout_minutes": 5,
 
@@ -99,6 +100,7 @@ DEFAULT_CONFIG: dict = {
     # by clearing the field, without needing a separate "use default" flag.
     "transcription_prompt": "",
     "summarization_prompt": "",
+    "title_prompt": "",
 }
 
 # A single call start can trigger multiple source-output events (browser tabs, virtual
@@ -136,6 +138,11 @@ If there are no action items, omit this section entirely — do not write "None"
 TRANSCRIPT:
 {transcript}
 """
+
+TITLE_PROMPT = (
+    "Generate a concise 3-6 word title for this meeting based on the content below. "
+    "Return only the title text, nothing else.\n\n{transcript}"
+)
 
 GEMINI_TRANSCRIPTION_PROMPT = """\
 Transcribe this audio recording exactly as spoken.

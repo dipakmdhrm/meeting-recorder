@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 
-def _sanitize_title(title: str) -> str:
+def sanitize_title(title: str) -> str:
     """Remove characters unsafe for filenames, collapse spaces."""
     # Replace path separators and null bytes
     sanitized = re.sub(r'[/\\:\*\?"<>\|]', "", title)
@@ -39,7 +39,7 @@ def output_paths(
         dt = datetime.now()
     time_part = dt.strftime("%H-%M")
     if title and title.strip():
-        folder_name = f"{time_part}_{_sanitize_title(title)}"
+        folder_name = f"{time_part}_{sanitize_title(title)}"
     else:
         folder_name = time_part
     session_dir = (
