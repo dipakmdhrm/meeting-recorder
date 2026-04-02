@@ -75,11 +75,11 @@ class MeetingExplorer(Gtk.Box):
         self._list_box.set_margin_end(16)
         self._list_box.set_margin_bottom(16)
 
-        scroll = Gtk.ScrolledWindow()
-        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scroll.set_propagate_natural_height(True)
-        scroll.add(self._list_box)
-        self.pack_start(scroll, True, True, 0)
+        self._scroll = Gtk.ScrolledWindow()
+        self._scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self._scroll.set_propagate_natural_height(True)
+        self._scroll.add(self._list_box)
+        self.pack_start(self._scroll, True, True, 0)
 
         # Empty state label
         self._empty_label = Gtk.Label(label="No meetings found")
@@ -255,6 +255,11 @@ class MeetingExplorer(Gtk.Box):
         if not title_event_box.get_visible():
             return
 
+        # Save scroll position — grab_focus() on a newly added widget
+        # causes the ScrolledWindow to jump to the top before layout is done.
+        vadj = self._scroll.get_vadjustment()
+        saved_scroll = vadj.get_value()
+
         # Replace event_box+label with an Entry
         title_event_box.hide()
 
@@ -267,7 +272,15 @@ class MeetingExplorer(Gtk.Box):
         entry.grab_focus()
         entry.select_region(0, -1)
 
+        # Restore scroll position after layout settles
+        GLib.idle_add(lambda: vadj.set_value(saved_scroll))
+
+        focus_out_id = [None]
+
         def _commit(*_):
+            if focus_out_id[0] is not None:
+                entry.disconnect(focus_out_id[0])
+                focus_out_id[0] = None
             new_title = entry.get_text().strip()
             title_box.remove(entry)
             title_event_box.show()
@@ -296,8 +309,22 @@ class MeetingExplorer(Gtk.Box):
 
             threading.Thread(target=_bg, daemon=True).start()
 
+        def _cancel(*_):
+            if focus_out_id[0] is not None:
+                entry.disconnect(focus_out_id[0])
+                focus_out_id[0] = None
+            title_box.remove(entry)
+            title_event_box.show()
+
+        def _on_key_press(widget, event):
+            if event.keyval == Gdk.KEY_Escape:
+                _cancel()
+                return True
+            return False
+
         entry.connect("activate", _commit)
-        entry.connect("focus-out-event", lambda *_: _commit())
+        entry.connect("key-press-event", _on_key_press)
+        focus_out_id[0] = entry.connect("focus-out-event", lambda *_: _commit())
 
     def _on_title_double_click(self, widget, event, row_data: dict) -> bool:
         """On double-click, start the inline editing process."""
