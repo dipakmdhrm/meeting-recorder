@@ -54,9 +54,18 @@ class MeetingRecorderApp(Gtk.Application):
 
     @staticmethod
     def _setup_logging() -> None:
-        log_dir = Path(os.path.expanduser("~/.local/share/meeting-recorder"))
-        log_dir.mkdir(parents=True, exist_ok=True)
-        log_file = log_dir / "meeting-recorder.log"
+        class _BelowWarning(logging.Filter):
+            def filter(self, record: logging.LogRecord) -> bool:
+                return record.levelno < logging.WARNING
+
+        log_dir = Path("/var/log/meeting-recorder")
+        try:
+            log_dir.mkdir(parents=True, exist_ok=True)
+            (log_dir / ".write_test").touch()
+            (log_dir / ".write_test").unlink()
+        except OSError:
+            log_dir = Path(os.path.expanduser("~/.local/share/meeting-recorder"))
+            log_dir.mkdir(parents=True, exist_ok=True)
 
         root = logging.getLogger()
         root.setLevel(logging.DEBUG)
@@ -64,11 +73,16 @@ class MeetingRecorderApp(Gtk.Application):
             "%(asctime)s %(name)s %(levelname)s %(message)s"
         )
 
-        # Always log to file
-        fh = logging.FileHandler(log_file, encoding="utf-8")
-        fh.setLevel(logging.DEBUG)
-        fh.setFormatter(fmt)
-        root.addHandler(fh)
+        app_fh = logging.FileHandler(log_dir / "app.log", encoding="utf-8")
+        app_fh.setLevel(logging.DEBUG)
+        app_fh.addFilter(_BelowWarning())
+        app_fh.setFormatter(fmt)
+        root.addHandler(app_fh)
+
+        err_fh = logging.FileHandler(log_dir / "error.log", encoding="utf-8")
+        err_fh.setLevel(logging.WARNING)
+        err_fh.setFormatter(fmt)
+        root.addHandler(err_fh)
 
         # Also log to stderr if a terminal is attached
         if sys.stderr and sys.stderr.isatty():
@@ -78,7 +92,7 @@ class MeetingRecorderApp(Gtk.Application):
             root.addHandler(sh)
 
         logging.getLogger(__name__).info(
-            "Logging to %s", log_file
+            "Logging to %s/{app,error}.log", log_dir
         )
 
     def do_activate(self) -> None:

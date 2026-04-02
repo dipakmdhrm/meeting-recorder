@@ -5,43 +5,16 @@ Manages the audio recording lifecycle using ffmpeg as a subprocess. It implement
 from __future__ import annotations
 
 import logging
-import os
 import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import IO, Callable
+from typing import Callable
 
 from .devices import get_default_source, get_default_sink, get_monitor_source
 from .mixer import build_ffmpeg_command, build_ffmpeg_command_mic_only
 
 logger = logging.getLogger(__name__)
-
-# Set by install.sh launcher when running as an installed app.
-_INSTALLED = bool(os.environ.get("MEETING_RECORDER_INSTALLED"))
-_SYSTEM_LOG_DIR = Path("/var/log/meeting-recorder")
-
-
-def _ffmpeg_log_path(output_path: Path) -> Path:
-    """
-    Return the path where ffmpeg stderr should be written.
-
-    Installed (MEETING_RECORDER_INSTALLED=1):
-        /var/log/meeting-recorder/ffmpeg-<session-dir>.log
-        e.g. /var/log/meeting-recorder/ffmpeg-14-32.log
-
-    Dev mode (PYTHONPATH=src python3 -m meeting_recorder):
-        <recording-dir>/ffmpeg.log
-        e.g. ~/meetings/2026/March/05/14-32/ffmpeg.log
-    """
-    if _INSTALLED:
-        try:
-            _SYSTEM_LOG_DIR.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            # Fall back to recording dir if system log dir is inaccessible.
-            return output_path.with_name("ffmpeg.log")
-        return _SYSTEM_LOG_DIR / f"ffmpeg-{output_path.parent.name}.log"
-    return output_path.with_name("ffmpeg.log")
 
 
 class RecordingError(Exception):
@@ -80,8 +53,6 @@ class Recorder:
         self._on_error = on_error
 
         self._ffmpeg: subprocess.Popen | None = None
-        self._stderr_log: IO[bytes] | None = None
-        self._ffmpeg_log_path: Path | None = None
 
         self._segments: list[Path] = []
         self._segment_index: int = 0
@@ -195,23 +166,20 @@ class Recorder:
         else:
             cmd = build_ffmpeg_command(self._mic_source, self._monitor_source, seg_path, quality=self._quality)
 
-        log_path = _ffmpeg_log_path(self._output_path)
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        self._ffmpeg_log_path = log_path
-        # Append so all segments' logs are in one file.
-        self._stderr_log = open(log_path, "ab")
-
         try:
             self._ffmpeg = subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
-                stderr=self._stderr_log,
+                stderr=subprocess.PIPE,
             )
         except FileNotFoundError:
-            self._stderr_log.close()
-            self._stderr_log = None
             raise RecordingError("ffmpeg not found. Please install ffmpeg.")
 
+        threading.Thread(
+            target=self._drain_stderr,
+            args=(self._ffmpeg, self._segment_index),
+            daemon=True,
+        ).start()
         threading.Thread(
             target=self._monitor_ffmpeg,
             args=(self._ffmpeg, self._segment_index),
@@ -220,7 +188,7 @@ class Recorder:
         logger.info("ffmpeg segment %d → %s", self._segment_index, seg_path)
 
     def _stop_ffmpeg_segment(self) -> None:
-        """Terminate the current ffmpeg process and close the log file."""
+        """Terminate the current ffmpeg process."""
         if self._ffmpeg and self._ffmpeg.poll() is None:
             self._ffmpeg.terminate()
             try:
@@ -230,10 +198,6 @@ class Recorder:
                 self._ffmpeg.kill()
                 self._ffmpeg.wait()
 
-        if self._stderr_log:
-            self._stderr_log.close()
-            self._stderr_log = None
-
     def _concatenate_segments(self) -> None:
         """Use ffmpeg concat demuxer to merge all segments into the output file."""
         concat_list = self._output_path.parent / f"{self._output_path.stem}_concat.txt"
@@ -242,21 +206,23 @@ class Recorder:
                 for seg in self._segments:
                     f.write(f"file '{seg.resolve()}'\n")
 
-            log_path = _ffmpeg_log_path(self._output_path)
-            with open(log_path, "ab") as log:
-                result = subprocess.run(
-                    [
-                        "ffmpeg", "-y",
-                        "-hide_banner", "-loglevel", "error",
-                        "-f", "concat", "-safe", "0",
-                        "-i", str(concat_list),
-                        "-c", "copy",
-                        str(self._output_path),
-                    ],
-                    stdout=subprocess.DEVNULL,
-                    stderr=log,
-                    timeout=300,
-                )
+            result = subprocess.run(
+                [
+                    "ffmpeg", "-y",
+                    "-hide_banner", "-loglevel", "error",
+                    "-f", "concat", "-safe", "0",
+                    "-i", str(concat_list),
+                    "-c", "copy",
+                    str(self._output_path),
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                timeout=300,
+            )
+            if result.stderr:
+                for line in result.stderr.decode("utf-8", errors="replace").splitlines():
+                    if line.strip():
+                        logger.debug("ffmpeg concat: %s", line)
             if result.returncode != 0:
                 logger.error("ffmpeg concat failed (code %d)", result.returncode)
             else:
@@ -285,6 +251,12 @@ class Recorder:
                     if self._on_tick:
                         self._on_tick(self._elapsed)
 
+    def _drain_stderr(self, proc: subprocess.Popen, seg_index: int) -> None:
+        for line in proc.stderr:
+            text = line.decode("utf-8", errors="replace").rstrip()
+            if text:
+                logger.debug("ffmpeg[seg%d]: %s", seg_index, text)
+
     def _monitor_ffmpeg(self, proc: subprocess.Popen, seg_index: int) -> None:
         """Watch for unexpected ffmpeg exit and report error."""
         retcode = proc.wait()
@@ -292,10 +264,7 @@ class Recorder:
         with self._lock:
             is_paused = self._paused
         if not self._stop_event.is_set() and not is_paused and retcode != 0:
-            msg = (
-                f"ffmpeg exited unexpectedly on segment {seg_index} (code {retcode})"
-                + (f", see {self._ffmpeg_log_path}" if self._ffmpeg_log_path else "")
-            )
+            msg = f"ffmpeg exited unexpectedly on segment {seg_index} (code {retcode})"
             logger.error(msg)
             if self._on_error:
                 self._on_error(msg)
