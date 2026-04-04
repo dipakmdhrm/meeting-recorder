@@ -60,10 +60,21 @@ else
     exit 1
 fi
 
-# ── 3. GNOME appindicator warning ───────────────────────────────────────────
-if [[ "${XDG_CURRENT_DESKTOP:-}" == *GNOME* ]]; then
-    warn "GNOME detected. For system tray support, you may need to install the AppIndicator extension."
-fi
+install_gnome_extensions() {
+    if [[ "${XDG_CURRENT_DESKTOP:-}" == *GNOME* ]]; then
+        info "GNOME detected. Installing AppIndicator extension..."
+        if command -v apt-get &>/dev/null; then
+            sudo apt-get install -y gnome-shell-extension-appindicator
+        elif command -v dnf &>/dev/null; then
+            sudo dnf install -y gnome-shell-extension-appindicator
+        elif command -v pacman &>/dev/null; then
+            sudo pacman -S --noconfirm gnome-shell-extension-appindicator
+        fi
+        warn "Please enable the 'AppIndicator and KStatusNotifierItem Support' extension in the GNOME Extensions app, and then log out and log back in."
+    fi
+}
+
+install_gnome_extensions
 
 # ── 4. Virtual environment ───────────────────────────────────────────────────
 info "Creating virtual environment at $VENV_DIR…"
