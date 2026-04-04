@@ -60,14 +60,6 @@ else
     exit 1
 fi
 
-# ── 2. Ollama ────────────────────────────────────────────────────────────────
-if command -v ollama &>/dev/null; then
-    info "Ollama already installed: $(ollama --version 2>/dev/null || echo 'version unknown')"
-else
-    info "Installing Ollama…"
-    curl -fsSL https://ollama.com/install.sh | sh
-fi
-
 # ── 3. GNOME appindicator warning ───────────────────────────────────────────
 if [[ "${XDG_CURRENT_DESKTOP:-}" == *GNOME* ]]; then
     warn "GNOME detected. For system tray support, you may need to install the AppIndicator extension."

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import threading
 import urllib.error
 import urllib.request
@@ -332,10 +333,35 @@ class SettingsDialog(Gtk.Dialog):
         vbox.pack_start(Gtk.Separator(), False, False, 4)
 
         # --- Ollama section ---
+        self._ollama_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        vbox.pack_start(self._ollama_vbox, False, False, 0)
+
         ollama_title = Gtk.Label(xalign=0)
         ollama_title.set_markup("<b>Ollama</b>")
-        vbox.pack_start(ollama_title, False, False, 0)
+        self._ollama_vbox.pack_start(ollama_title, False, False, 0)
 
+        if not shutil.which("ollama"):
+            self._build_ollama_installer()
+        else:
+            self._build_ollama_ui()
+
+        return outer_scroll
+
+    def _build_ollama_installer(self):
+        self._ollama_install_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self._ollama_vbox.pack_start(self._ollama_install_box, False, False, 0)
+
+        info = Gtk.Label(xalign=0, label="Ollama is not installed. It is required for local summarization.")
+        self._ollama_install_box.pack_start(info, False, False, 0)
+
+        self._ollama_install_button = Gtk.Button(label="Install Ollama")
+        self._ollama_install_button.connect("clicked", self._on_install_ollama)
+        self._ollama_install_box.pack_start(self._ollama_install_button, False, False, 0)
+        self._ollama_install_box.show_all()
+
+    def _build_ollama_ui(self):
+        self._ollama_config_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self._ollama_vbox.pack_start(self._ollama_config_box, False, False, 0)
         ollama_config_grid = Gtk.Grid(column_spacing=12, row_spacing=8)
 
         ollama_config_grid.attach(Gtk.Label(label="Ollama model:", xalign=0), 0, 0, 1, 1)
@@ -352,19 +378,19 @@ class SettingsDialog(Gtk.Dialog):
         self._ollama_host_entry.set_hexpand(True)
         ollama_config_grid.attach(self._ollama_host_entry, 1, 1, 1, 1)
 
-        vbox.pack_start(ollama_config_grid, False, False, 0)
+        self._ollama_config_box.pack_start(ollama_config_grid, False, False, 0)
 
         self._ollama_status_label = Gtk.Label(
             label="Checking Ollama connection…", xalign=0
         )
-        vbox.pack_start(self._ollama_status_label, False, False, 0)
+        self._ollama_config_box.pack_start(self._ollama_status_label, False, False, 0)
 
         ollama_note = Gtk.Label(
             label="Requires Ollama to be installed and running (ollama serve).",
             xalign=0,
         )
         ollama_note.set_line_wrap(True)
-        vbox.pack_start(ollama_note, False, False, 0)
+        self._ollama_config_box.pack_start(ollama_note, False, False, 0)
 
         ollama_grid = Gtk.Grid(column_spacing=12, row_spacing=8)
         for col, text in enumerate(["Model", "Size", "Note", "Status", ""]):
@@ -392,9 +418,36 @@ class SettingsDialog(Gtk.Dialog):
 
             self._ollama_rows[model] = {"status": status_lbl, "btn": btn}
 
-        vbox.pack_start(ollama_grid, False, False, 0)
+        self._ollama_config_box.pack_start(ollama_grid, False, False, 0)
+        self._ollama_config_box.show_all()
 
-        return outer_scroll
+    def _on_install_ollama(self, button: Gtk.Button):
+        self._ollama_install_button.set_sensitive(False)
+        self._ollama_install_button.set_label("Installing...")
+        thread = threading.Thread(target=self._do_install_ollama)
+        thread.start()
+
+    def _do_install_ollama(self):
+        try:
+            # This is a simplified version. A real implementation should handle
+            # potential issues with curl, sh, and permissions.
+            os.system("curl -fsSL https://ollama.com/install.sh | sh")
+            GLib.idle_add(self._on_ollama_install_finished)
+        except Exception as e:
+            logger.error("Failed to install Ollama: %s", e)
+            GLib.idle_add(self._on_ollama_install_finished, success=False)
+
+    def _on_ollama_install_finished(self, success=True):
+        if success and shutil.which("ollama"):
+            self._ollama_install_box.destroy()
+            self._build_ollama_ui()
+            self._refresh_local_model_statuses()
+        else:
+            self._ollama_install_button.set_sensitive(True)
+            self._ollama_install_button.set_label("Retry Install")
+            # You might want to show an error message to the user here
+
+
 
     # ------------------------------------------------------------------
     # Prompts tab
@@ -516,6 +569,8 @@ class SettingsDialog(Gtk.Dialog):
                 GLib.idle_add(self._set_whisper_not_downloaded, model)
 
     def _check_ollama_statuses(self) -> None:
+        if not shutil.which("ollama"):
+            return
         host = self._cfg.get("ollama_host", OLLAMA_DEFAULT_HOST)
         installed = _get_ollama_installed_models(host)
         if installed is None:
