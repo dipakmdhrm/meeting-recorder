@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install.sh — Install Meeting Recorder on Debian-based Linux
+# install.sh — Install Meeting Recorder on Debian, Fedora, or Arch-based Linux
 set -euo pipefail
 
 APP_NAME="meeting-recorder"
@@ -18,27 +18,55 @@ warn()    { echo -e "${YELLOW}[warn]${NC} $*"; }
 err()     { echo -e "${RED}[error]${NC} $*" >&2; }
 
 # ── 1. System dependencies ──────────────────────────────────────────────────
-info "Installing system dependencies (requires sudo)…"
-sudo apt-get update -qq
-sudo apt-get install -y \
-    python3 \
-    python3-venv \
-    python3-gi \
-    python3-gi-cairo \
-    gir1.2-gtk-3.0 \
-    gir1.2-ayatanaappindicator3-0.1 \
-    libayatana-appindicator3-1 \
-    gir1.2-notify-0.7 \
-    libnotify4 \
-    libnotify-bin \
-    ffmpeg \
-    pulseaudio-utils \
-    pipewire-pulse 2>/dev/null || true
+install_deps_apt() {
+    info "Installing system dependencies (apt)..."
+    sudo apt-get update -qq
+    sudo apt-get install -y 
+        python3 python3-venv python3-gi python3-gi-cairo gir1.2-gtk-3.0 
+        gir1.2-ayatanaappindicator3-0.1 libayatana-appindicator3-1 
+        gir1.2-notify-0.7 libnotify4 libnotify-bin ffmpeg pulseaudio-utils 
+        pipewire-pulse 2>/dev/null || true
+    
+    info "Installing CUDA runtime libraries (apt)..."
+    sudo apt-get install -y libcublas12 libcudart12 || 
+        warn "Could not install CUDA libs — Whisper will fall back to CPU transcription."
+}
 
-# CUDA runtime libs for GPU-accelerated Whisper transcription (NVIDIA only, safe to skip)
-info "Installing CUDA runtime libraries (required for GPU Whisper transcription)…"
-sudo apt-get install -y libcublas12 libcudart12 || \
-    warn "Could not install CUDA libs — Whisper will fall back to CPU transcription."
+install_deps_dnf() {
+    info "Installing system dependencies (dnf)..."
+    sudo dnf install -y 
+        python3 python3-devel python3-gobject gtk3 libayatana-appindicator-gtk3 
+        libnotify pulseaudio-utils pipewire-pulseaudio ffmpeg
+    
+    info "Installing CUDA runtime libraries (dnf)..."
+    if ! sudo dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/fedora$(rpm -E %fedora)/x86_64/cuda-fedora$(rpm -E %fedora).repo; then
+        warn "Could not add NVIDIA CUDA repository."
+    fi
+    sudo dnf install -y libcublas-12-x cuda-cudart-12-x || 
+        warn "Could not install CUDA libs — Whisper will fall back to CPU transcription."
+}
+
+install_deps_pacman() {
+    info "Installing system dependencies (pacman)..."
+    sudo pacman -Syu --noconfirm 
+        python python-gobject gtk3 libayatana-appindicator libnotify libpulse 
+        pipewire-pulse ffmpeg
+        
+    info "Installing CUDA runtime libraries (pacman)..."
+    sudo pacman -Syu --noconfirm cuda || 
+        warn "Could not install CUDA libs — Whisper will fall back to CPU transcription."
+}
+
+if command -v apt-get &>/dev/null; then
+    install_deps_apt
+elif command -v dnf &>/dev/null; then
+    install_deps_dnf
+elif command -v pacman &>/dev/null; then
+    install_deps_pacman
+else
+    err "Unsupported package manager. Please install dependencies manually."
+    exit 1
+fi
 
 # ── 2. Ollama ────────────────────────────────────────────────────────────────
 if command -v ollama &>/dev/null; then
@@ -50,10 +78,7 @@ fi
 
 # ── 3. GNOME appindicator warning ───────────────────────────────────────────
 if [[ "${XDG_CURRENT_DESKTOP:-}" == *GNOME* ]]; then
-    warn "GNOME detected. For system tray support, install the AppIndicator extension:"
-    warn "  sudo apt install gnome-shell-extension-appindicator"
-    warn "  Then enable it via GNOME Extensions app or:"
-    warn "  gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com"
+    warn "GNOME detected. For system tray support, you may need to install the AppIndicator extension."
 fi
 
 # ── 4. Virtual environment ───────────────────────────────────────────────────
@@ -90,7 +115,7 @@ info "Launcher created at $LAUNCHER"
 
 # ── 9. Desktop entry ─────────────────────────────────────────────────────────
 mkdir -p "$APPS_DIR"
-sed "s|LAUNCHER_PATH|$LAUNCHER|g" "$SCRIPT_DIR/meeting-recorder.desktop.template" \
+sed "s|LAUNCHER_PATH|$LAUNCHER|g" "$SCRIPT_DIR/meeting-recorder.desktop.template" 
     > "$DESKTOP"
 chmod +x "$DESKTOP"
 info "Desktop entry created at $DESKTOP"
@@ -101,7 +126,7 @@ update-desktop-database "$APPS_DIR" 2>/dev/null || true
 # ── 10. Add ~/.local/bin to PATH hint ────────────────────────────────────────
 if ! echo "$PATH" | grep -q "$BIN_DIR"; then
     warn "$BIN_DIR is not in your PATH."
-    warn "Add it to your shell profile: export PATH=\"\$HOME/.local/bin:\$PATH\""
+    warn "Add it to your shell profile: export PATH="\$HOME/.local/bin:\$PATH""
 fi
 
 echo
