@@ -776,8 +776,9 @@ class SettingsDialog(Gtk.Dialog):
         )
         cfg["llm_request_timeout_minutes"] = int(self._timeout_combo.get_active_id() or "3")
         cfg["whisper_model"] = self._whisper_model_combo.get_active_id() or WHISPER_MODELS[0]
-        cfg["ollama_model"] = self._ollama_model_combo.get_active_id() or OLLAMA_MODELS[0]
-        cfg["ollama_host"] = self._ollama_host_entry.get_text().strip() or OLLAMA_DEFAULT_HOST
+        if shutil.which("ollama"):
+            cfg["ollama_model"] = self._ollama_model_combo.get_active_id() or OLLAMA_MODELS[0]
+            cfg["ollama_host"] = self._ollama_host_entry.get_text().strip() or OLLAMA_DEFAULT_HOST
         cfg["output_folder"] = self._folder_entry.get_text().strip() or "~/meetings"
         cfg["recording_quality"] = self._quality_combo.get_active_id() or "high"
         cfg["call_detection_enabled"] = self._detection_switch.get_active()
