@@ -76,6 +76,10 @@ def _get_ollama_installed_models(host: str) -> list[str] | None:
 def _ollama_model_installed(model: str, installed: list[str]) -> bool:
     return any(n == model or n.startswith(f"{model}:") for n in installed)
 
+def _check_cuda_installed() -> bool:
+    """Checks if NVIDIA CUDA runtime libraries are installed."""
+    return shutil.which("nvidia-smi") is not None
+
 
 # ---------------------------------------------------------------------------
 # Dialog
@@ -421,6 +425,21 @@ class SettingsDialog(Gtk.Dialog):
         self._ollama_config_box.pack_start(ollama_grid, False, False, 0)
         self._ollama_config_box.show_all()
 
+        vbox.pack_start(Gtk.Separator(), False, False, 4)
+
+        # --- CUDA section ---
+        self._cuda_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        vbox.pack_start(self._cuda_vbox, False, False, 0)
+
+        cuda_title = Gtk.Label(xalign=0)
+        cuda_title.set_markup("<b>CUDA Libraries (GPU Acceleration)</b>")
+        self._cuda_vbox.pack_start(cuda_title, False, False, 0)
+
+        if not _check_cuda_installed():
+            self._build_cuda_installer()
+        else:
+            self._build_cuda_ui()
+
     def _on_install_ollama(self, button: Gtk.Button):
         self._ollama_install_button.set_sensitive(False)
         self._ollama_install_button.set_label("Installing...")
@@ -445,6 +464,63 @@ class SettingsDialog(Gtk.Dialog):
         else:
             self._ollama_install_button.set_sensitive(True)
             self._ollama_install_button.set_label("Retry Install")
+            # You might want to show an error message to the user here
+
+    def _build_cuda_installer(self):
+        self._cuda_install_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self._cuda_vbox.pack_start(self._cuda_install_box, False, False, 0)
+
+        info_label = Gtk.Label(xalign=0, label=(
+            "NVIDIA CUDA libraries are not installed. Installing them enables GPU-accelerated "
+            "transcription with Whisper, which is significantly faster. This is optional and "
+            "only beneficial if you have a compatible NVIDIA GPU."
+        ))
+        info_label.set_line_wrap(True)
+        self._cuda_install_box.pack_start(info_label, False, False, 0)
+
+        self._cuda_install_button = Gtk.Button(label="Install CUDA Libraries")
+        self._cuda_install_button.connect("clicked", self._on_install_cuda)
+        self._cuda_install_box.pack_start(self._cuda_install_button, False, False, 0)
+        self._cuda_install_box.show_all()
+
+    def _build_cuda_ui(self):
+        self._cuda_info_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self._cuda_vbox.pack_start(self._cuda_info_box, False, False, 0)
+
+        info_label = Gtk.Label(xalign=0, label="NVIDIA CUDA libraries detected. GPU acceleration for Whisper is available.")
+        info_label.set_line_wrap(True)
+        self._cuda_info_box.pack_start(info_label, False, False, 0)
+        self._cuda_info_box.show_all()
+
+    def _on_install_cuda(self, button: Gtk.Button):
+        self._cuda_install_button.set_sensitive(False)
+        self._cuda_install_button.set_label("Installing...")
+        thread = threading.Thread(target=self._do_install_cuda)
+        thread.start()
+
+    def _do_install_cuda(self):
+        try:
+            if shutil.which("apt-get"):
+                os.system("sudo apt-get update -qq && sudo apt-get install -y libcublas12 libcudart12")
+            elif shutil.which("dnf"):
+                # Dynamically get fedora version
+                fedora_version = os.popen("rpm -E %fedora").read().strip()
+                os.system(f"sudo dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/fedora{fedora_version}/x86_64/cuda-fedora{fedora_version}.repo && sudo dnf install -y libcublas-12-x cuda-cudart-12-x")
+            elif shutil.which("pacman"):
+                os.system("sudo pacman -Syu --noconfirm cuda")
+            GLib.idle_add(self._on_cuda_install_finished)
+        except Exception as e:
+            logger.error("Failed to install CUDA: %s", e)
+            GLib.idle_add(self._on_cuda_install_finished, success=False)
+
+    def _on_cuda_install_finished(self, success=True):
+        if success and _check_cuda_installed():
+            self._cuda_install_box.destroy()
+            self._build_cuda_ui()
+            # No need to refresh statuses for models, as CUDA is system-wide
+        else:
+            self._cuda_install_button.set_sensitive(True)
+            self._cuda_install_button.set_label("Retry Install")
             # You might want to show an error message to the user here
 
 
