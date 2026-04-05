@@ -70,7 +70,7 @@ class CudaInstaller:
                 fedora_version = self._popen("rpm -E %fedora").read().strip()
                 code = self._shell(
                     f"sudo dnf config-manager --add-repo https://developer.download.nvidia.com/"
-                    f"compute/cuda/repos/fedora{fedora_version}/x86_64/"
+                    f"compute/cuda/repos/fedora{fedora_version}/$(uname -m)/"
                     f"cuda-fedora{fedora_version}.repo"
                     f" && sudo dnf install -y libcublas-12-x cuda-cudart-12-x"
                 )

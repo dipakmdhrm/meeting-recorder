@@ -98,7 +98,7 @@ info "Launcher created at $LAUNCHER"
 
 # ── 9. Desktop entry ─────────────────────────────────────────────────────────
 mkdir -p "$APPS_DIR"
-sed "s|LAUNCHER_PATH|$LAUNCHER|g" "$SCRIPT_DIR/meeting-recorder.desktop.template" 
+sed "s|LAUNCHER_PATH|$LAUNCHER|g" "$SCRIPT_DIR/meeting-recorder.desktop.template" \
     > "$DESKTOP"
 chmod +x "$DESKTOP"
 info "Desktop entry created at $DESKTOP"
@@ -109,7 +109,7 @@ update-desktop-database "$APPS_DIR" 2>/dev/null || true
 # ── 10. Add ~/.local/bin to PATH hint ────────────────────────────────────────
 if ! echo "$PATH" | grep -q "$BIN_DIR"; then
     warn "$BIN_DIR is not in your PATH."
-    warn "Add it to your shell profile: export PATH="\$HOME/.local/bin:\$PATH""
+    warn "Add it to your shell profile: export PATH=\"\$HOME/.local/bin:\$PATH\""
 fi
 
 echo
