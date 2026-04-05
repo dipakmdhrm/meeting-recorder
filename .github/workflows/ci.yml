@@ -163,7 +163,7 @@ jobs:
 
           useradd -m builder
           chown -R builder:builder arch-build
-          su builder -c "cd arch-build && makepkg --noconfirm --skipinteg"
+          su builder -c "cd arch-build && makepkg --noconfirm --skipinteg --nodeps"
 
       - name: Verify pacman package structure
         if: matrix.pkg == 'pacman'
