@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install.sh — Install Meeting Recorder on Debian-based Linux
+# install.sh — Install Meeting Recorder on Debian, Fedora, or Arch-based Linux
 set -euo pipefail
 
 APP_NAME="meeting-recorder"
@@ -18,43 +18,51 @@ warn()    { echo -e "${YELLOW}[warn]${NC} $*"; }
 err()     { echo -e "${RED}[error]${NC} $*" >&2; }
 
 # ── 1. System dependencies ──────────────────────────────────────────────────
-info "Installing system dependencies (requires sudo)…"
-sudo apt-get update -qq
-sudo apt-get install -y \
-    python3 \
-    python3-venv \
-    python3-gi \
-    python3-gi-cairo \
-    gir1.2-gtk-3.0 \
-    gir1.2-ayatanaappindicator3-0.1 \
-    libayatana-appindicator3-1 \
-    gir1.2-notify-0.7 \
-    libnotify4 \
-    libnotify-bin \
-    ffmpeg \
-    pulseaudio-utils \
-    pipewire-pulse 2>/dev/null || true
+install_deps_apt() {
+    info "Installing system dependencies (apt)..."
+    sudo apt-get update -qq
+    sudo apt-get install -y python3 python3-venv python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1 libayatana-appindicator3-1 gir1.2-notify-0.7 libnotify4 libnotify-bin ffmpeg pulseaudio-utils pipewire-pulse 2>/dev/null || true
+    
+}
 
-# CUDA runtime libs for GPU-accelerated Whisper transcription (NVIDIA only, safe to skip)
-info "Installing CUDA runtime libraries (required for GPU Whisper transcription)…"
-sudo apt-get install -y libcublas12 libcudart12 || \
-    warn "Could not install CUDA libs — Whisper will fall back to CPU transcription."
+install_deps_dnf() {
+    info "Installing system dependencies (dnf)..."
+    sudo dnf install -y python3 python3-devel python3-gobject gtk3 libayatana-appindicator-gtk3 libnotify pulseaudio-utils pipewire-pulseaudio ffmpeg
+    
+}
 
-# ── 2. Ollama ────────────────────────────────────────────────────────────────
-if command -v ollama &>/dev/null; then
-    info "Ollama already installed: $(ollama --version 2>/dev/null || echo 'version unknown')"
+install_deps_pacman() {
+    info "Installing system dependencies (pacman)..."
+    sudo pacman -Syu --noconfirm python python-gobject gtk3 libayatana-appindicator libnotify libpulse pipewire-pulse ffmpeg
+    
+}
+
+if command -v apt-get &>/dev/null; then
+    install_deps_apt
+elif command -v dnf &>/dev/null; then
+    install_deps_dnf
+elif command -v pacman &>/dev/null; then
+    install_deps_pacman
 else
-    info "Installing Ollama…"
-    curl -fsSL https://ollama.com/install.sh | sh
+    err "Unsupported package manager. Please install dependencies manually."
+    exit 1
 fi
 
-# ── 3. GNOME appindicator warning ───────────────────────────────────────────
-if [[ "${XDG_CURRENT_DESKTOP:-}" == *GNOME* ]]; then
-    warn "GNOME detected. For system tray support, install the AppIndicator extension:"
-    warn "  sudo apt install gnome-shell-extension-appindicator"
-    warn "  Then enable it via GNOME Extensions app or:"
-    warn "  gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com"
-fi
+install_gnome_extensions() {
+    if [[ "${XDG_CURRENT_DESKTOP:-}" == *GNOME* ]]; then
+        info "GNOME detected. Installing AppIndicator extension..."
+        if command -v apt-get &>/dev/null; then
+            sudo apt-get install -y gnome-shell-extension-appindicator
+        elif command -v dnf &>/dev/null; then
+            sudo dnf install -y gnome-shell-extension-appindicator
+        elif command -v pacman &>/dev/null; then
+            sudo pacman -S --noconfirm gnome-shell-extension-appindicator
+        fi
+        warn "Please enable the 'AppIndicator and KStatusNotifierItem Support' extension in the GNOME Extensions app, and then log out and log back in."
+    fi
+}
+
+install_gnome_extensions
 
 # ── 4. Virtual environment ───────────────────────────────────────────────────
 info "Creating virtual environment at $VENV_DIR…"

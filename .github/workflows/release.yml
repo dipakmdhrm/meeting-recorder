@@ -28,19 +28,26 @@ on:
       - 'v*'
 
 jobs:
-  release:
+  # ── Extract version from tag ─────────────────────────────────────────────────
+  get-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.VERSION }}
+    steps:
+      - id: v
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+  # ── Build .deb and update hosted apt repository ───────────────────────────────
+  build-deb:
+    needs: get-version
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pages: write
-
+    env:
+      VERSION: ${{ needs.get-version.outputs.version }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Get version from tag
-        id: version
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
 
       - name: Install build tools
         run: sudo apt-get install -y reprepro
@@ -57,32 +64,23 @@ jobs:
 
       - name: Build .deb
         run: |
-          VERSION="${{ steps.version.outputs.VERSION }}"
           STAGING=$(mktemp -d)
-
-          # Directory structure
           mkdir -p "$STAGING/DEBIAN"
           mkdir -p "$STAGING/opt/meeting-recorder/src"
           mkdir -p "$STAGING/usr/bin"
           mkdir -p "$STAGING/usr/share/applications"
 
-          # App source and Python dependencies list
           cp -r src/. "$STAGING/opt/meeting-recorder/src/"
           cp requirements.txt "$STAGING/opt/meeting-recorder/"
-
-          # Launcher and desktop entry
           cp packaging/usr/bin/meeting-recorder "$STAGING/usr/bin/meeting-recorder"
           chmod 755 "$STAGING/usr/bin/meeting-recorder"
           cp packaging/usr/share/applications/meeting-recorder.desktop \
              "$STAGING/usr/share/applications/meeting-recorder.desktop"
-
-          # DEBIAN maintainer scripts
           for f in postinst prerm postrm; do
             cp "packaging/DEBIAN/$f" "$STAGING/DEBIAN/$f"
             chmod 755 "$STAGING/DEBIAN/$f"
           done
 
-          # Generate control file with version
           {
             echo "Package: meeting-recorder"
             echo "Version: ${VERSION}"
@@ -104,11 +102,9 @@ jobs:
           FINGERPRINT: ${{ steps.gpg.outputs.FINGERPRINT }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          VERSION="${{ steps.version.outputs.VERSION }}"
           DEB="meeting-recorder_${VERSION}_all.deb"
           REPO_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
 
-          # Clone gh-pages branch if it exists, otherwise initialise a new one
           if git ls-remote --exit-code --heads origin gh-pages; then
             git clone --depth 1 --branch gh-pages "$REPO_URL" gh-pages-dir
           else
@@ -121,8 +117,6 @@ jobs:
           fi
 
           cd gh-pages-dir
-
-          # reprepro configuration
           mkdir -p conf
           {
             echo "Origin: Meeting Recorder"
@@ -134,40 +128,133 @@ jobs:
             echo "SignWith: ${FINGERPRINT}"
           } > conf/distributions
 
-          # Export public key for users
           gpg --armor --export "$FINGERPRINT" | gpg --dearmor > key.gpg
-
-          # Remove previous version and add new .deb
           reprepro -b . remove stable meeting-recorder 2>/dev/null || true
           reprepro -b . includedeb stable "../${DEB}"
 
-          # Commit and push
           git config user.email "github-actions@github.com"
           git config user.name "GitHub Actions"
           git add -A
           git commit -m "Release v${VERSION}"
           git push origin gh-pages
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb
+          path: meeting-recorder_*.deb
+
+  # ── Build .rpm ────────────────────────────────────────────────────────────────
+  build-rpm:
+    needs: get-version
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    env:
+      VERSION: ${{ needs.get-version.outputs.version }}
+    steps:
+      - name: Install build tools
+        run: dnf install -y git rpm-build
+
+      - uses: actions/checkout@v4
+
+      - name: Build .rpm
+        run: |
+          mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+
+          # Source tarball
+          SRCDIR=$(mktemp -d)
+          mkdir "${SRCDIR}/meeting-recorder-${VERSION}"
+          cp -r src requirements.txt packaging "${SRCDIR}/meeting-recorder-${VERSION}/"
+          tar -czf "rpmbuild/SOURCES/meeting-recorder-${VERSION}.tar.gz" \
+            -C "${SRCDIR}" "meeting-recorder-${VERSION}"
+
+          # Inject version and changelog date into spec
+          CHANGELOG_DATE=$(date "+%a %b %d %Y")
+          sed -e "s/@VERSION@/${VERSION}/g" \
+              -e "s/@CHANGELOG_DATE@/${CHANGELOG_DATE}/g" \
+              packaging/rpm/meeting-recorder.spec > rpmbuild/SPECS/meeting-recorder.spec
+
+          rpmbuild --define "_topdir ${PWD}/rpmbuild" -bb rpmbuild/SPECS/meeting-recorder.spec
+
+          # Move to workspace root for upload
+          find rpmbuild/RPMS -name '*.rpm' -exec cp {} . \;
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpm
+          path: "*.rpm"
+
+  # ── Build pacman .pkg.tar.zst ─────────────────────────────────────────────────
+  build-arch:
+    needs: get-version
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    env:
+      VERSION: ${{ needs.get-version.outputs.version }}
+    steps:
+      - name: Install build tools
+        run: pacman -Syu --noconfirm git base-devel
+
+      - uses: actions/checkout@v4
+
+      - name: Build pacman package
+        run: |
+          mkdir -p arch-build
+
+          # Source tarball
+          SRCDIR=$(mktemp -d)
+          mkdir "${SRCDIR}/meeting-recorder-${VERSION}"
+          cp -r src requirements.txt packaging "${SRCDIR}/meeting-recorder-${VERSION}/"
+          tar -czf "arch-build/meeting-recorder-${VERSION}.tar.gz" \
+            -C "${SRCDIR}" "meeting-recorder-${VERSION}"
+
+          # Inject version into PKGBUILD
+          sed "s/@VERSION@/${VERSION}/g" packaging/arch/PKGBUILD > arch-build/PKGBUILD
+          cp packaging/arch/meeting-recorder.install arch-build/
+
+          # makepkg refuses to run as root
+          useradd -m builder
+          chown -R builder:builder arch-build
+          su builder -c "cd arch-build && makepkg --noconfirm --skipinteg"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arch
+          path: arch-build/*.pkg.tar.zst
+
+  # ── Create source tarball and GitHub Release with all artifacts ───────────────
+  release:
+    needs: [get-version, build-deb, build-rpm, build-arch]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.get-version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
       - name: Create source tarball
         run: |
-          VERSION="${{ steps.version.outputs.VERSION }}"
           SRC=$(mktemp -d)
-
-          cp -r . "$SRC/meeting-recorder-${VERSION}"
+          cp -r . "${SRC}/meeting-recorder-${VERSION}"
           rm -rf \
-            "$SRC/meeting-recorder-${VERSION}/.git" \
-            "$SRC/meeting-recorder-${VERSION}/.claude" \
-            "$SRC/meeting-recorder-${VERSION}/packaging" \
-            "$SRC/meeting-recorder-${VERSION}/gh-pages-dir"
-          find "$SRC" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
-          find "$SRC" -name '*.pyc' -delete 2>/dev/null || true
-
-          tar -czf "meeting-recorder_${VERSION}.tar.gz" -C "$SRC" "meeting-recorder-${VERSION}"
+            "${SRC}/meeting-recorder-${VERSION}/.git" \
+            "${SRC}/meeting-recorder-${VERSION}/.claude" \
+            "${SRC}/meeting-recorder-${VERSION}/gh-pages-dir"
+          find "${SRC}" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+          find "${SRC}" -name '*.pyc' -delete 2>/dev/null || true
+          tar -czf "meeting-recorder_${VERSION}.tar.gz" -C "${SRC}" "meeting-recorder-${VERSION}"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             meeting-recorder_*.deb
+            *.rpm
+            *.pkg.tar.zst
             meeting-recorder_*.tar.gz
           generate_release_notes: true

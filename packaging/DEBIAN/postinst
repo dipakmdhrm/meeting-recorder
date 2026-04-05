@@ -13,12 +13,6 @@ python3 -m venv "$VENV_DIR" --system-site-packages
 "$VENV_DIR/bin/pip" install --quiet --upgrade pip
 "$VENV_DIR/bin/pip" install --quiet -r "$APP_DIR/requirements.txt"
 
-# Install Ollama on fresh installs only (not upgrades)
-if [ -z "$2" ] && ! command -v ollama >/dev/null 2>&1; then
-    curl -fsSL https://ollama.com/install.sh | sh || \
-        echo "[warn] Ollama installation failed. Install manually from https://ollama.com if needed."
-fi
-
 # Create system log directory, world-writable so any user can write logs
 mkdir -p "$LOG_DIR"
 chmod 1777 "$LOG_DIR"

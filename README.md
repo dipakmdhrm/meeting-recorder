@@ -33,7 +33,7 @@ When using "Use Existing Recording", transcript and notes are saved next to the 
 
 ## Requirements
 
-- Debian/Ubuntu-based Linux (tested on Ubuntu 22.04+)
+- Linux with a supported package manager: **apt** (Debian/Ubuntu/Mint), **dnf** (Fedora/RHEL), or **pacman** (Arch/Manjaro)
 - System packages installed by `install.sh`: `ffmpeg`, `pulseaudio-utils`, `pipewire-pulse`, Python 3 with GTK3 bindings
 - Python packages (installed into a venv): see `requirements.txt`
 
@@ -47,22 +47,33 @@ Depending on which services you use:
 
 ## Installation
 
-### Option 1: .deb package (recommended)
+### Option 1: native package (recommended)
 
-Download the latest `.deb` from the [Releases](../../releases) page and install it:
+Download the package for your distro from the [Releases](../../releases) page.
 
+**Debian / Ubuntu / Mint (.deb)**
 ```bash
 sudo dpkg -i meeting-recorder_*.deb
 sudo apt-get install -f   # installs any missing dependencies
-```
-
-The installer sets up all system dependencies, creates a Python venv at `/opt/meeting-recorder/venv`, and installs Ollama if not already present.
-
-To uninstall:
-
-```bash
+# To uninstall:
 sudo apt remove meeting-recorder
 ```
+
+**Fedora / RHEL / openSUSE (.rpm)**
+```bash
+sudo dnf install ./meeting-recorder-*.rpm
+# To uninstall:
+sudo dnf remove meeting-recorder
+```
+
+**Arch / Manjaro (.pkg.tar.zst)**
+```bash
+sudo pacman -U meeting-recorder-*.pkg.tar.zst
+# To uninstall:
+sudo pacman -R meeting-recorder
+```
+
+All packages set up a Python venv at `/opt/meeting-recorder/venv` on first install. Ollama and CUDA can be installed later from **Settings → Models**.
 
 ### Option 2: install.sh (from source)
 
@@ -72,7 +83,7 @@ cd meeting-recorder
 ./install.sh
 ```
 
-`install.sh` installs all system dependencies, sets up Ollama if not already installed, and creates a Python venv with all required packages.
+`install.sh` detects your package manager (apt / dnf / pacman) and installs all system dependencies, then creates a Python venv with all required packages. Ollama and CUDA can be installed later from **Settings → Models**.
 
 To uninstall:
 
@@ -87,11 +98,16 @@ meeting-recorder
 # or from your application menu: "Meeting Recorder"
 ```
 
-> **GNOME users:** System tray requires the AppIndicator extension:
+> **GNOME users:** System tray requires the AppIndicator extension. `install.sh` installs it automatically; if you installed via a native package (.deb/.rpm/.pkg.tar.zst), install it manually:
 > ```bash
+> # Debian/Ubuntu
 > sudo apt install gnome-shell-extension-appindicator
-> gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com
+> # Fedora
+> sudo dnf install gnome-shell-extension-appindicator
+> # Arch
+> sudo pacman -S gnome-shell-extension-appindicator
 > ```
+> Then enable it in the GNOME Extensions app and log out/in.
 
 ## Running from Source
 
@@ -178,9 +194,11 @@ Available Whisper models:
 | `medium` | ~1.5 GB | Good balance |
 | `small` | ~500 MB | Fast, lower accuracy |
 
-GPU acceleration is used automatically if CUDA libraries are present (installed by `install.sh` on NVIDIA systems). Falls back to CPU otherwise.
+GPU acceleration is used automatically if CUDA libraries are present. If they are not installed, a **Install CUDA Libraries** button appears in this section — it detects your package manager and runs the appropriate install command. Falls back to CPU otherwise.
 
 **Ollama**
+
+If Ollama is not installed, an **Install Ollama** button appears instead of the configuration UI. Once installed, the UI switches to the normal model management view automatically.
 
 | Setting | Description |
 |---|---|
@@ -243,9 +261,25 @@ Application logs:
 ```
 
 FFmpeg (recording) logs:
-- **.deb install**: `/var/log/meeting-recorder/ffmpeg-<session-dir>.log`
-- **install.sh**: `/var/log/meeting-recorder/ffmpeg-<session-dir>.log`
+- **Native package or install.sh**: `/var/log/meeting-recorder/ffmpeg-<session-dir>.log`
 - **Dev mode**: `ffmpeg.log` inside the recording directory
+
+## Development
+
+### Running tests
+
+```bash
+pip install pytest
+pytest
+```
+
+Tests cover the service layer (`OllamaInstaller`, `CudaInstaller`, `OllamaClient`, `WhisperStatusChecker`) using dependency injection — no real shell commands or network calls are made. The cross-distro branch isolation tests in `tests/services/test_system_installer.py` are the key regression guard: they assert that changes to the apt-get path cannot silently affect the dnf or pacman path and vice-versa.
+
+### CI
+
+Every pull request to `main` runs:
+- **Unit tests** on Python 3.10 and 3.12
+- **Package build smoke tests** — builds `.deb` (ubuntu:24.04), `.rpm` (fedora:41), and `.pkg.tar.zst` (archlinux) in distro containers and verifies required paths are present in each artifact
 
 ## License
 
