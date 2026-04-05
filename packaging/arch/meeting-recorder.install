@@ -1,0 +1,28 @@
+post_install() {
+    python3 -m venv /opt/meeting-recorder/venv --system-site-packages
+    /opt/meeting-recorder/venv/bin/pip install --quiet --upgrade pip
+    /opt/meeting-recorder/venv/bin/pip install --quiet -r /opt/meeting-recorder/requirements.txt
+    mkdir -p /var/log/meeting-recorder
+    chmod 1777 /var/log/meeting-recorder
+    update-desktop-database /usr/share/applications 2>/dev/null || true
+}
+
+post_upgrade() {
+    post_install
+}
+
+pre_remove() {
+    if pgrep -f "meeting_recorder" >/dev/null 2>&1; then
+        pkill -f "meeting_recorder" || true
+        sleep 1
+    fi
+}
+
+post_remove() {
+    rm -rf /opt/meeting-recorder/venv
+    rm -rf /var/log/meeting-recorder
+    for home_dir in /home/*; do
+        rm -f "${home_dir}/.config/autostart/meeting-recorder.desktop" 2>/dev/null || true
+    done
+    update-desktop-database /usr/share/applications 2>/dev/null || true
+}

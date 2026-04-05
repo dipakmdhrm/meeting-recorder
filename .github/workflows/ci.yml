@@ -1,0 +1,174 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  # ── Unit tests ──────────────────────────────────────────────────────────────
+  #
+  # Runs on every PR.  No system dependencies required — all shell/network
+  # calls are replaced with fakes via the services' dependency-injection hooks.
+  unit-tests:
+    name: Unit tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install pytest
+        run: pip install pytest
+
+      - name: Run tests
+        run: pytest --tb=short
+
+  # ── Package build smoke tests ───────────────────────────────────────────────
+  #
+  # Verifies that the packaging toolchain produces a structurally valid
+  # artifact for each supported distro family.  Each job runs inside a
+  # matching distro container so the native build tools are available.
+  package-build:
+    name: Build ${{ matrix.pkg }} package
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pkg: deb
+            container: ubuntu:24.04
+          - pkg: rpm
+            container: fedora:41
+          - pkg: pacman
+            container: archlinux:latest
+    container: ${{ matrix.container }}
+
+    steps:
+      # ── deb ────────────────────────────────────────────────────────────────
+
+      - name: Install deb build tools
+        if: matrix.pkg == 'deb'
+        run: apt-get update -qq && apt-get install -y --no-install-recommends dpkg-dev
+
+      - uses: actions/checkout@v4
+        if: matrix.pkg == 'deb'
+
+      - name: Build .deb
+        if: matrix.pkg == 'deb'
+        run: |
+          STAGING=$(mktemp -d)
+          mkdir -p "$STAGING/DEBIAN"
+          mkdir -p "$STAGING/opt/meeting-recorder/src"
+          mkdir -p "$STAGING/usr/bin"
+          mkdir -p "$STAGING/usr/share/applications"
+
+          cp -r src/. "$STAGING/opt/meeting-recorder/src/"
+          cp requirements.txt "$STAGING/opt/meeting-recorder/"
+          cp packaging/usr/bin/meeting-recorder "$STAGING/usr/bin/meeting-recorder"
+          chmod 755 "$STAGING/usr/bin/meeting-recorder"
+          cp packaging/usr/share/applications/meeting-recorder.desktop \
+             "$STAGING/usr/share/applications/meeting-recorder.desktop"
+          for f in postinst prerm postrm; do
+            cp "packaging/DEBIAN/$f" "$STAGING/DEBIAN/$f"
+            chmod 755 "$STAGING/DEBIAN/$f"
+          done
+
+          {
+            echo "Package: meeting-recorder"
+            echo "Version: 0.0.0-ci"
+            echo "Section: utils"
+            echo "Priority: optional"
+            echo "Architecture: all"
+            echo "Depends: python3 (>= 3.10)"
+            echo "Maintainer: CI <ci@example.com>"
+            echo "Description: CI build test"
+          } > "$STAGING/DEBIAN/control"
+
+          dpkg-deb --build "$STAGING" meeting-recorder.deb
+
+      - name: Verify .deb structure
+        if: matrix.pkg == 'deb'
+        run: |
+          dpkg --info meeting-recorder.deb
+          dpkg --contents meeting-recorder.deb | grep -q "usr/bin/meeting-recorder"
+          dpkg --contents meeting-recorder.deb | grep -q "opt/meeting-recorder/src"
+          dpkg --contents meeting-recorder.deb | grep -q "usr/share/applications/meeting-recorder.desktop"
+          echo "All required paths present in .deb"
+
+      # ── rpm ────────────────────────────────────────────────────────────────
+
+      - name: Install rpm build tools
+        if: matrix.pkg == 'rpm'
+        run: dnf install -y git rpm-build
+
+      - uses: actions/checkout@v4
+        if: matrix.pkg == 'rpm'
+
+      - name: Build .rpm
+        if: matrix.pkg == 'rpm'
+        run: |
+          mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+
+          SRCDIR=$(mktemp -d)
+          mkdir "${SRCDIR}/meeting-recorder-0.0.0"
+          cp -r src requirements.txt packaging "${SRCDIR}/meeting-recorder-0.0.0/"
+          tar -czf rpmbuild/SOURCES/meeting-recorder-0.0.0.tar.gz \
+            -C "${SRCDIR}" meeting-recorder-0.0.0
+
+          CHANGELOG_DATE=$(date "+%a %b %d %Y")
+          sed -e "s/@VERSION@/0.0.0/g" \
+              -e "s/@CHANGELOG_DATE@/${CHANGELOG_DATE}/g" \
+              packaging/rpm/meeting-recorder.spec > rpmbuild/SPECS/meeting-recorder.spec
+
+          rpmbuild --define "_topdir ${PWD}/rpmbuild" -bb rpmbuild/SPECS/meeting-recorder.spec
+
+      - name: Verify .rpm structure
+        if: matrix.pkg == 'rpm'
+        run: |
+          rpm -qlp rpmbuild/RPMS/noarch/*.rpm | grep -q /usr/bin/meeting-recorder
+          rpm -qlp rpmbuild/RPMS/noarch/*.rpm | grep -q /opt/meeting-recorder/src
+          rpm -qlp rpmbuild/RPMS/noarch/*.rpm | grep -q /usr/share/applications/meeting-recorder.desktop
+          echo "All required paths present in .rpm"
+
+      # ── pacman ─────────────────────────────────────────────────────────────
+
+      - name: Install pacman build tools
+        if: matrix.pkg == 'pacman'
+        run: pacman -Syu --noconfirm git base-devel
+
+      - uses: actions/checkout@v4
+        if: matrix.pkg == 'pacman'
+
+      - name: Build pacman package
+        if: matrix.pkg == 'pacman'
+        run: |
+          mkdir -p arch-build
+
+          SRCDIR=$(mktemp -d)
+          mkdir "${SRCDIR}/meeting-recorder-0.0.0"
+          cp -r src requirements.txt packaging "${SRCDIR}/meeting-recorder-0.0.0/"
+          tar -czf arch-build/meeting-recorder-0.0.0.tar.gz \
+            -C "${SRCDIR}" meeting-recorder-0.0.0
+
+          sed "s/@VERSION@/0.0.0/g" packaging/arch/PKGBUILD > arch-build/PKGBUILD
+          cp packaging/arch/meeting-recorder.install arch-build/
+
+          useradd -m builder
+          chown -R builder:builder arch-build
+          su builder -c "cd arch-build && makepkg --noconfirm --skipinteg"
+
+      - name: Verify pacman package structure
+        if: matrix.pkg == 'pacman'
+        run: |
+          bsdtar -tf arch-build/*.pkg.tar.zst | grep -q usr/bin/meeting-recorder
+          bsdtar -tf arch-build/*.pkg.tar.zst | grep -q opt/meeting-recorder/src
+          bsdtar -tf arch-build/*.pkg.tar.zst | grep -q usr/share/applications/meeting-recorder.desktop
+          echo "All required paths present in pacman package"
