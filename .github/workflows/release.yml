@@ -214,7 +214,7 @@ jobs:
           # makepkg refuses to run as root
           useradd -m builder
           chown -R builder:builder arch-build
-          su builder -c "cd arch-build && makepkg --noconfirm --skipinteg"
+          su builder -c "cd arch-build && makepkg --noconfirm --skipinteg --nodeps"
 
       - uses: actions/upload-artifact@v4
         with:
