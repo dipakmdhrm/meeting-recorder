@@ -60,8 +60,8 @@ class MeetingRepository(private val rootDir: File) {
 
     fun createMeetingDir(title: String?): File {
         val now = LocalDateTime.now()
-        val datePart = "%04d-%02d-%02d".format(now.year, now.monthValue, now.dayOfMonth)
-        val timePart = "%02d-%02d".format(now.hour, now.minute)
+        val datePart = "${now.year.toString().padStart(4, '0')}-${now.monthValue.toString().padStart(2, '0')}-${now.dayOfMonth.toString().padStart(2, '0')}"
+        val timePart = "${now.hour.toString().padStart(2, '0')}-${now.minute.toString().padStart(2, '0')}"
 
         val folderName = if (title != null) {
             val sanitized = title.replace(Regex("[^a-zA-Z0-9_\\-]"), "_").take(30)

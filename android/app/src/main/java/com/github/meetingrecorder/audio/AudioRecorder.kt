@@ -9,6 +9,7 @@ class AudioRecorder(private val context: Context) {
     private var recorder: MediaRecorder? = null
 
     fun start(outputDir: File): File {
+        stop()
         val file = File(outputDir, "recording.m4a")
         recorder = MediaRecorder(context).apply {
             setAudioSource(MediaRecorder.AudioSource.MIC)
@@ -25,7 +26,11 @@ class AudioRecorder(private val context: Context) {
 
     fun stop() {
         recorder?.apply {
-            stop()
+            try {
+                stop()
+            } catch (_: RuntimeException) {
+                // stop() throws if called in an invalid state (e.g. no audio data recorded)
+            }
             release()
         }
         recorder = null

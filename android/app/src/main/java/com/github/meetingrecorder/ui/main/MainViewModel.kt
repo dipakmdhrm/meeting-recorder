@@ -61,7 +61,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             audioRecorder.start(meetingDir)
         } catch (e: Exception) {
             lockFile?.delete()
+            lockFile = null
             meetingDir.deleteRecursively()
+            currentMeetingDir = null
             _state.value = RecordingState.Error("Could not start recording: ${e.message}")
             return
         }
