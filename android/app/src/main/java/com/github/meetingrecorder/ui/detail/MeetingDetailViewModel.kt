@@ -49,12 +49,21 @@ class MeetingDetailViewModel(application: Application) : AndroidViewModel(applic
                 _notes.value = File(dir, "notes.md")
                     .takeIf { it.exists() }?.readText()
 
+                mediaPlayer?.release()
+                mediaPlayer = null
+                _hasAudio.value = false
+
                 audioFile = sequenceOf(File(dir, "recording.m4a"), File(dir, "recording.mp3"))
                     .firstOrNull { it.exists() }
 
                 if (audioFile != null) {
                     mediaPlayer = MediaPlayer().apply {
                         setDataSource(audioFile!!.absolutePath)
+                        setOnCompletionListener {
+                            _isPlaying.value = false
+                            _currentTime.value = "00:00"
+                            timeUpdaterJob?.cancel()
+                        }
                         prepare()
                         _totalTime.value = formatDuration(duration.toLong())
                     }
@@ -80,14 +89,7 @@ class MeetingDetailViewModel(application: Application) : AndroidViewModel(applic
 
     fun stop() {
         mediaPlayer?.let {
-            if (it.isPlaying) {
-                it.stop()
-                try {
-                    it.prepare() // To allow playing again
-                } catch (e: Exception) {
-                    // Ignore, player might be in a bad state
-                }
-            }
+            it.pause()
             it.seekTo(0)
             _isPlaying.value = false
             _currentTime.value = "00:00"

@@ -79,24 +79,36 @@ fun MeetingDetailScreen(
 
             when (selectedTab) {
                 0 -> {
-                    Text(
-                        text = notes ?: "",
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(16.dp)
-                            .verticalScroll(rememberScrollState()),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+                    if (notes != null) {
+                        Text(
+                            text = notes,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(16.dp)
+                                .verticalScroll(rememberScrollState()),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    } else {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("No notes available")
+                        }
+                    }
                 }
                 1 -> {
-                    Text(
-                        text = transcript ?: "",
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(16.dp)
-                            .verticalScroll(rememberScrollState()),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+                    if (transcript != null) {
+                        Text(
+                            text = transcript,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(16.dp)
+                                .verticalScroll(rememberScrollState()),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    } else {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("No transcript available")
+                        }
+                    }
                 }
                 2 -> {
                     AudioPlayer(viewModel)

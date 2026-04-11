@@ -88,8 +88,8 @@ private fun GeneralTab(viewModel: SettingsViewModel) {
     val audioQuality by viewModel.audioQuality.collectAsState()
 
     var apiKeyDraft by rememberSaveable { mutableStateOf(apiKey) }
-    var modelDraft by remember { mutableStateOf(model) }
-    var audioQualityDraft by remember { mutableStateOf(audioQuality) }
+    var modelDraft by rememberSaveable { mutableStateOf(model) }
+    var audioQualityDraft by rememberSaveable { mutableStateOf(audioQuality) }
     var modelMenuExpanded by remember { mutableStateOf(false) }
     var qualityMenuExpanded by remember { mutableStateOf(false) }
 
