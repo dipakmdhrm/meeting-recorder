@@ -6,12 +6,12 @@ plugins {
 
 android {
     namespace = "com.github.meetingrecorder"
-    compileSdk = 36
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.github.meetingrecorder"
         minSdk = 31
-        targetSdk = 36
+        targetSdk = 35
         versionCode = (System.getenv("VERSION_CODE") ?: "1").toInt()
         versionName = System.getenv("VERSION_NAME") ?: "dev"
 

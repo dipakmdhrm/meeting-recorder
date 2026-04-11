@@ -191,7 +191,7 @@ jobs:
       - name: Install Android SDK platform + build tools
         run: |
           yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager \
-            "platforms;android-36" "build-tools;36.0.0"
+            "platforms;android-35" "build-tools;35.0.0"
 
       - name: Run unit tests
         working-directory: android

@@ -197,7 +197,7 @@ class GeminiClientTest {
         .setBody("""{"name":"files/test","state":"$state"}""")
 
     private fun contentResponse(text: String): MockResponse {
-        val escaped = text.replace("\\", "\\\\").replace("\"", "\\\"")
+        val escaped = text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
         return MockResponse()
             .setResponseCode(200)
             .setBody("""{"candidates":[{"content":{"parts":[{"text":"$escaped"}]}}]}""")
