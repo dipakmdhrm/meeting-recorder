@@ -50,7 +50,11 @@ class GeminiClient(
         onStatus("Generating meeting notes…")
         val summarizeTemplate = config.summarizationPrompt.ifBlank { Config.DEFAULT_SUMMARIZATION_PROMPT }
         generateContent(
-            prompt = summarizeTemplate.replace("{transcript}", transcript),
+            prompt = if (summarizeTemplate.contains("{transcript}")) {
+                summarizeTemplate.replace("{transcript}", transcript)
+            } else {
+                "$summarizeTemplate\n\n$transcript"
+            },
         )
     }
 
@@ -61,7 +65,11 @@ class GeminiClient(
         onStatus("Generating title…")
         val titleTemplate = config.titlePrompt.ifBlank { Config.DEFAULT_TITLE_PROMPT }
         generateContent(
-            prompt = titleTemplate.replace("{transcript}", notes),
+            prompt = if (titleTemplate.contains("{notes}")) {
+                titleTemplate.replace("{notes}", notes)
+            } else {
+                "$titleTemplate\n\n$notes"
+            },
         )
     }
 

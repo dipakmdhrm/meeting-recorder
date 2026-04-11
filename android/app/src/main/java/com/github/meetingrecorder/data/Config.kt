@@ -78,7 +78,7 @@ class Config(context: Context) {
         val DEFAULT_TITLE_PROMPT = """
             Generate a concise 3-6 word title for this meeting based on the content below. Return only the title text, nothing else.
 
-            {transcript}
+            {notes}
         """.trimIndent()
     }
 }
