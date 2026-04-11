@@ -3,9 +3,6 @@ package com.github.meetingrecorder.data
 import org.json.JSONObject
 import java.io.File
 import java.time.LocalDateTime
-import java.time.Month
-import java.time.format.TextStyle
-import java.util.Locale
 
 class MeetingRepository(private val rootDir: File) {
 
@@ -13,54 +10,49 @@ class MeetingRepository(private val rootDir: File) {
         val meetings = mutableListOf<Meeting>()
         if (!rootDir.exists()) return meetings
 
-        // Traverse YYYY/MonthName/DD/HH-MM[_title]/ structure
-        rootDir.listFiles()?.forEach { yearDir ->
-            val year = yearDir.name.toIntOrNull() ?: return@forEach
-            yearDir.listFiles()?.forEach { monthDir ->
-                val month = parseMonth(monthDir.name) ?: return@forEach
-                monthDir.listFiles()?.forEach { dayDir ->
-                    val day = dayDir.name.toIntOrNull() ?: return@forEach
-                    dayDir.listFiles()?.forEach { meetingDir ->
-                        if (!meetingDir.isDirectory) return@forEach
-                        // Skip in-progress recordings
-                        if (File(meetingDir, ".recording").exists()) return@forEach
+        // Flat structure: BASE_DIR/YYYY-MM-DD_HH-MM[_title]/
+        val pattern = Regex("""^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})(?:_.*)?$""")
+        rootDir.listFiles()?.forEach { meetingDir ->
+            if (!meetingDir.isDirectory) return@forEach
+            if (File(meetingDir, ".recording").exists()) return@forEach
 
-                        val folderName = meetingDir.name
-                        val timePart = folderName.substringBefore("_")
-                        val hour = timePart.substringBefore("-").toIntOrNull() ?: return@forEach
-                        val minute = timePart.substringAfter("-").toIntOrNull() ?: return@forEach
+            val match = pattern.matchEntire(meetingDir.name) ?: return@forEach
+            val date = try {
+                LocalDateTime.of(
+                    match.groupValues[1].toInt(),
+                    match.groupValues[2].toInt(),
+                    match.groupValues[3].toInt(),
+                    match.groupValues[4].toInt(),
+                    match.groupValues[5].toInt(),
+                )
+            } catch (_: Exception) { return@forEach }
 
-                        val date = LocalDateTime.of(year, month, day, hour, minute)
-
-                        var title: String? = null
-                        var durationSeconds: Int? = null
-                        val metaFile = File(meetingDir, "meeting.json")
-                        if (metaFile.exists()) {
-                            try {
-                                val json = JSONObject(metaFile.readText())
-                                title = json.optString("title").ifBlank { null }
-                                if (json.has("duration_seconds")) {
-                                    durationSeconds = json.getInt("duration_seconds")
-                                }
-                            } catch (_: Exception) {
-                            }
-                        }
-
-                        meetings.add(
-                            Meeting(
-                                path = meetingDir,
-                                timeLabel = folderName,
-                                date = date,
-                                title = title,
-                                hasNotes = File(meetingDir, "notes.md").exists(),
-                                hasTranscript = File(meetingDir, "transcript.md").exists(),
-                                hasAudio = File(meetingDir, "recording.m4a").exists(),
-                                durationSeconds = durationSeconds,
-                            )
-                        )
+            var title: String? = null
+            var durationSeconds: Int? = null
+            val metaFile = File(meetingDir, "meeting.json")
+            if (metaFile.exists()) {
+                try {
+                    val json = JSONObject(metaFile.readText())
+                    title = json.optString("title").ifBlank { null }
+                    if (json.has("duration_seconds")) {
+                        durationSeconds = json.getInt("duration_seconds")
                     }
+                } catch (_: Exception) {
                 }
             }
+
+            meetings.add(
+                Meeting(
+                    path = meetingDir,
+                    timeLabel = meetingDir.name,
+                    date = date,
+                    title = title,
+                    hasNotes = File(meetingDir, "notes.md").exists(),
+                    hasTranscript = File(meetingDir, "transcript.md").exists(),
+                    hasAudio = File(meetingDir, "recording.m4a").exists(),
+                    durationSeconds = durationSeconds,
+                )
+            )
         }
 
         return meetings.sortedByDescending { it.date }
@@ -68,19 +60,17 @@ class MeetingRepository(private val rootDir: File) {
 
     fun createMeetingDir(title: String?): File {
         val now = LocalDateTime.now()
-        val year = now.year.toString()
-        val monthName = now.month.getDisplayName(TextStyle.FULL, Locale.US)
-        val day = now.dayOfMonth.toString().padStart(2, '0')
-        val time = "%02d-%02d".format(now.hour, now.minute)
+        val datePart = "%04d-%02d-%02d".format(now.year, now.monthValue, now.dayOfMonth)
+        val timePart = "%02d-%02d".format(now.hour, now.minute)
 
         val folderName = if (title != null) {
             val sanitized = title.replace(Regex("[^a-zA-Z0-9_\\-]"), "_").take(30)
-            "${time}_${sanitized}"
+            "${datePart}_${timePart}_${sanitized}"
         } else {
-            time
+            "${datePart}_${timePart}"
         }
 
-        val dir = File(rootDir, "$year/$monthName/$day/$folderName")
+        val dir = File(rootDir, folderName)
         dir.mkdirs()
         return dir
     }
@@ -92,10 +82,4 @@ class MeetingRepository(private val rootDir: File) {
         File(dir, "meeting.json").writeText(json.toString())
     }
 
-    private fun parseMonth(name: String): Month? =
-        try {
-            Month.valueOf(name.uppercase(Locale.US))
-        } catch (_: Exception) {
-            null
-        }
 }

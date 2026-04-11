@@ -15,14 +15,8 @@ logger = logging.getLogger(__name__)
 
 _AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".webm"}
 
-_MONTH_NAMES = {
-    "January": 1, "February": 2, "March": 3, "April": 4,
-    "May": 5, "June": 6, "July": 7, "August": 8,
-    "September": 9, "October": 10, "November": 11, "December": 12,
-}
-
-# Matches folder names like "14-30" or "14-30_Some_Title"
-_TIME_PATTERN = re.compile(r"^(\d{2})-(\d{2})(?:_.*)?$")
+# Matches flat folder names like "2026-03-01_14-30" or "2026-03-01_14-30_Some_Title"
+_FOLDER_PATTERN = re.compile(r"^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})(?:_.*)?$")
 
 
 @dataclass
@@ -38,62 +32,51 @@ class Meeting:
 
 
 def scan_meetings(output_folder: str) -> list[Meeting]:
-    """Walk the output folder and return all meetings, newest first."""
+    """Walk the output folder and return all meetings, newest first.
+
+    Expects a flat structure: <output_folder>/<YYYY-MM-DD_HH-MM[_title]>/
+    """
     import os
     root = Path(os.path.expanduser(output_folder))
     if not root.is_dir():
         return []
 
     meetings: list[Meeting] = []
-    for year_dir in _iter_dirs(root):
-        if not year_dir.name.isdigit():
+    for meeting_dir in _iter_dirs(root):
+        match = _FOLDER_PATTERN.match(meeting_dir.name)
+        if not match:
             continue
-        year = int(year_dir.name)
+        # Skip active recordings / processing
+        if (meeting_dir / ".recording").exists():
+            continue
 
-        for month_dir in _iter_dirs(year_dir):
-            month_num = _MONTH_NAMES.get(month_dir.name)
-            if month_num is None:
-                continue
+        year, month, day = int(match.group(1)), int(match.group(2)), int(match.group(3))
+        hour, minute = int(match.group(4)), int(match.group(5))
+        try:
+            dt = datetime(year, month, day, hour, minute)
+        except ValueError:
+            continue
 
-            for day_dir in _iter_dirs(month_dir):
-                if not day_dir.name.isdigit():
-                    continue
-                day = int(day_dir.name)
-
-                for meeting_dir in _iter_dirs(day_dir):
-                    match = _TIME_PATTERN.match(meeting_dir.name)
-                    if not match:
-                        continue
-                    # Skip active recordings / processing
-                    if (meeting_dir / ".recording").exists():
-                        continue
-                    hour, minute = int(match.group(1)), int(match.group(2))
-
-                    try:
-                        dt = datetime(year, month_num, day, hour, minute)
-                    except ValueError:
-                        continue
-
-                    meta = read_metadata(meeting_dir)
-                    audio_files = [
-                        f for f in meeting_dir.iterdir()
-                        if f.is_file() and f.suffix in _AUDIO_EXTENSIONS
-                    ]
-                    duration = meta.get("duration_seconds")
-                    if duration is None and audio_files:
-                        duration = _probe_audio_duration(audio_files[0])
-                        if duration is not None:
-                            write_metadata(meeting_dir, {"duration_seconds": duration})
-                    meetings.append(Meeting(
-                        path=meeting_dir,
-                        time_label=meeting_dir.name,
-                        date=dt,
-                        title=meta.get("title"),
-                        has_notes=(meeting_dir / "notes.md").exists(),
-                        has_transcript=(meeting_dir / "transcript.md").exists(),
-                        has_audio=bool(audio_files),
-                        duration_seconds=int(duration) if duration is not None else None,
-                    ))
+        meta = read_metadata(meeting_dir)
+        audio_files = [
+            f for f in meeting_dir.iterdir()
+            if f.is_file() and f.suffix in _AUDIO_EXTENSIONS
+        ]
+        duration = meta.get("duration_seconds")
+        if duration is None and audio_files:
+            duration = _probe_audio_duration(audio_files[0])
+            if duration is not None:
+                write_metadata(meeting_dir, {"duration_seconds": duration})
+        meetings.append(Meeting(
+            path=meeting_dir,
+            time_label=meeting_dir.name,
+            date=dt,
+            title=meta.get("title"),
+            has_notes=(meeting_dir / "notes.md").exists(),
+            has_transcript=(meeting_dir / "transcript.md").exists(),
+            has_audio=bool(audio_files),
+            duration_seconds=int(duration) if duration is not None else None,
+        ))
 
     meetings.sort(key=lambda m: m.date, reverse=True)
     return meetings
@@ -146,12 +129,7 @@ def delete_meetings(
     meetings: list[Meeting],
     output_folder: str = "~/meetings",
 ) -> tuple[list[Meeting], list[tuple[Meeting, str]]]:
-    """Delete meeting directories. Returns (succeeded, failures).
-
-    Prunes empty parent dirs up to (but not including) the output_folder root.
-    """
-    import os
-    root = Path(os.path.expanduser(output_folder)).resolve()
+    """Delete meeting directories. Returns (succeeded, failures)."""
     succeeded: list[Meeting] = []
     failures: list[tuple[Meeting, str]] = []
 
@@ -162,30 +140,21 @@ def delete_meetings(
         except Exception as exc:
             failures.append((meeting, str(exc)))
 
-    # Prune empty parent dirs (day -> month -> year), stop at root
-    for meeting in succeeded:
-        for parent in (meeting.path.parent, meeting.path.parent.parent,
-                       meeting.path.parent.parent.parent):
-            try:
-                if parent.resolve() == root:
-                    break  # never delete the output folder itself
-                if parent.is_dir() and not any(parent.iterdir()):
-                    parent.rmdir()
-            except OSError:
-                break
-
     return succeeded, failures
 
 
 def rename_meeting_path(meeting_dir: Path, new_title: str) -> Path:
-    """Rename a meeting directory to {HH-MM}_{sanitized_title}. Returns new path."""
-    match = _TIME_PATTERN.match(meeting_dir.name)
+    """Rename a meeting directory to {YYYY-MM-DD_HH-MM}_{sanitized_title}. Returns new path."""
+    match = _FOLDER_PATTERN.match(meeting_dir.name)
     if not match:
-        raise ValueError(f"Cannot parse time from folder name: {meeting_dir.name}")
+        raise ValueError(f"Cannot parse date-time from folder name: {meeting_dir.name}")
 
-    time_part = f"{match.group(1)}-{match.group(2)}"
+    date_time_part = (
+        f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
+        f"_{match.group(4)}-{match.group(5)}"
+    )
     safe_title = sanitize_title(new_title)
-    new_name = f"{time_part}_{safe_title}"
+    new_name = f"{date_time_part}_{safe_title}"
     new_path = meeting_dir.parent / new_name
 
     # Handle collision

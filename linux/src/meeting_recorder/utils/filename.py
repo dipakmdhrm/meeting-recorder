@@ -29,26 +29,17 @@ def output_paths(
 ) -> tuple[Path, Path, Path]:
     """Return (audio_path, transcript_path, notes_path) for a recording session.
 
-    Structure: <output_folder>/<YYYY>/<Month>/<DD>/<HH-MM[_title]>/
-    e.g. ~/meetings/2026/March/01/14-30_Standup/
-
-    The year/month/day hierarchy prevents a flat directory from accumulating hundreds
-    of entries. Month names (not numbers) make browsing more readable.
+    Structure: <output_folder>/<YYYY-MM-DD_HH-MM[_title]>/
+    e.g. ~/meetings/2026-03-01_14-30_Standup/
     """
     if dt is None:
         dt = datetime.now()
-    time_part = dt.strftime("%H-%M")
+    date_time_part = dt.strftime("%Y-%m-%d_%H-%M")
     if title and title.strip():
-        folder_name = f"{time_part}_{sanitize_title(title)}"
+        folder_name = f"{date_time_part}_{sanitize_title(title)}"
     else:
-        folder_name = time_part
-    session_dir = (
-        Path(os.path.expanduser(output_folder))
-        / dt.strftime("%Y")
-        / dt.strftime("%B")
-        / dt.strftime("%d")
-        / folder_name
-    )
+        folder_name = date_time_part
+    session_dir = Path(os.path.expanduser(output_folder)) / folder_name
     session_dir.mkdir(parents=True, exist_ok=True)
     return (
         session_dir / "recording.mp3",

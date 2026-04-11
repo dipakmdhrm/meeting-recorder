@@ -31,7 +31,7 @@ class MeetingRepositoryTest {
 
     @Test
     fun `listMeetings skips directories with recording lock file`() {
-        val meetingDir = File(tempDir.root, "2024/January/01/14-30_Test").also { it.mkdirs() }
+        val meetingDir = File(tempDir.root, "2024-01-01_14-30_Test").also { it.mkdirs() }
         File(meetingDir, ".recording").createNewFile()
 
         assertEquals(0, repo().listMeetings().size)
@@ -39,7 +39,7 @@ class MeetingRepositoryTest {
 
     @Test
     fun `listMeetings parses valid meeting correctly`() {
-        val meetingDir = File(tempDir.root, "2024/January/15/10-30_Standup").also { it.mkdirs() }
+        val meetingDir = File(tempDir.root, "2024-01-15_10-30_Standup").also { it.mkdirs() }
         File(meetingDir, "recording.m4a").createNewFile()
         File(meetingDir, "notes.md").writeText("## Notes")
         File(meetingDir, "meeting.json").writeText(
@@ -66,7 +66,7 @@ class MeetingRepositoryTest {
 
     @Test
     fun `listMeetings returns null title when meeting_json has no title`() {
-        val meetingDir = File(tempDir.root, "2024/February/05/09-00").also { it.mkdirs() }
+        val meetingDir = File(tempDir.root, "2024-02-05_09-00").also { it.mkdirs() }
         File(meetingDir, "recording.m4a").createNewFile()
 
         val meetings = repo().listMeetings()
@@ -76,9 +76,9 @@ class MeetingRepositoryTest {
 
     @Test
     fun `listMeetings sorts meetings newest first`() {
-        File(tempDir.root, "2024/January/01/08-00").mkdirs()
-        File(tempDir.root, "2024/January/02/09-00").mkdirs()
-        File(tempDir.root, "2024/March/10/14-30").mkdirs()
+        File(tempDir.root, "2024-01-01_08-00").mkdirs()
+        File(tempDir.root, "2024-01-02_09-00").mkdirs()
+        File(tempDir.root, "2024-03-10_14-30").mkdirs()
 
         val meetings = repo().listMeetings()
         assertEquals(3, meetings.size)
@@ -127,25 +127,25 @@ class MeetingRepositoryTest {
 
     @Test
     fun `listMeetings skips folder with non-numeric hour`() {
-        File(tempDir.root, "2024/January/15/ab-30_Bad").mkdirs()
+        File(tempDir.root, "2024-01-15_ab-30_Bad").mkdirs()
         assertEquals(0, repo().listMeetings().size)
     }
 
     @Test
     fun `listMeetings skips folder with non-numeric minute`() {
-        File(tempDir.root, "2024/January/15/10-xx_Bad").mkdirs()
+        File(tempDir.root, "2024-01-15_10-xx_Bad").mkdirs()
         assertEquals(0, repo().listMeetings().size)
     }
 
     @Test
-    fun `listMeetings skips unknown month name`() {
-        File(tempDir.root, "2024/Octember/15/10-00").mkdirs()
+    fun `listMeetings skips folder with invalid format`() {
+        File(tempDir.root, "not-a-valid-folder").mkdirs()
         assertEquals(0, repo().listMeetings().size)
     }
 
     @Test
     fun `listMeetings handles corrupted meeting_json without crashing`() {
-        val meetingDir = File(tempDir.root, "2024/January/15/10-30").also { it.mkdirs() }
+        val meetingDir = File(tempDir.root, "2024-01-15_10-30").also { it.mkdirs() }
         File(meetingDir, "meeting.json").writeText("not valid json {{{")
 
         val meetings = repo().listMeetings()
@@ -156,7 +156,7 @@ class MeetingRepositoryTest {
 
     @Test
     fun `listMeetings handles empty meeting_json without crashing`() {
-        val meetingDir = File(tempDir.root, "2024/January/15/11-00").also { it.mkdirs() }
+        val meetingDir = File(tempDir.root, "2024-01-15_11-00").also { it.mkdirs() }
         File(meetingDir, "meeting.json").writeText("")
 
         val meetings = repo().listMeetings()
@@ -166,7 +166,7 @@ class MeetingRepositoryTest {
 
     @Test
     fun `listMeetings correctly reads all file presence flags`() {
-        val dir = File(tempDir.root, "2024/February/01/09-00").also { it.mkdirs() }
+        val dir = File(tempDir.root, "2024-02-01_09-00").also { it.mkdirs() }
         File(dir, "recording.m4a").createNewFile()
         File(dir, "transcript.md").writeText("Transcript")
         File(dir, "notes.md").writeText("Notes")
@@ -182,25 +182,27 @@ class MeetingRepositoryTest {
     // -------------------------------------------------------------------------
 
     @Test
-    fun `createMeetingDir with null title produces no underscore in folder name`() {
+    fun `createMeetingDir with null title produces no trailing underscore`() {
         val dir = repo().createMeetingDir(null)
-        // Folder is just HH-MM with no underscore separator
-        assertFalse("Folder name should have no underscore: ${dir.name}", dir.name.contains("_"))
+        // Folder is YYYY-MM-DD_HH-MM with no trailing underscore
+        assertFalse("Folder name should not end with underscore: ${dir.name}", dir.name.endsWith("_"))
     }
 
     @Test
     fun `createMeetingDir truncates title longer than 30 characters`() {
         val longTitle = "A".repeat(100)
         val dir = repo().createMeetingDir(longTitle)
-        // HH-MM_ (6 chars) + max 30 from title = 36 chars max
-        assertTrue("Folder name too long: ${dir.name}", dir.name.length <= 37)
+        // YYYY-MM-DD_HH-MM_ (17 chars) + max 30 from title = 47 chars max
+        assertTrue("Folder name too long: ${dir.name}", dir.name.length <= 47)
     }
 
     @Test
     fun `createMeetingDir replaces special characters in title`() {
         val dir = repo().createMeetingDir("Q3 Review: Budget & Goals!")
-        // Only alphanumeric, underscore, hyphen allowed after HH-MM_
-        val titlePart = dir.name.substringAfter("_")
+        // Title part is after the third segment when splitting by "_"
+        // YYYY-MM-DD _ HH-MM _ title_part → split("_", limit=3)[2]
+        val parts = dir.name.split("_", limit = 3)
+        val titlePart = parts.getOrElse(2) { "" }
         assertTrue(
             "Title part contains illegal chars: $titlePart",
             titlePart.matches(Regex("[a-zA-Z0-9_\\-]+"))
