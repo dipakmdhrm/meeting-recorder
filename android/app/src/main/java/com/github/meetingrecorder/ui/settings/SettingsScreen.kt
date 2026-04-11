@@ -9,6 +9,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -85,6 +86,10 @@ private fun GeneralTab(viewModel: SettingsViewModel) {
     val apiKey by viewModel.apiKey.collectAsState()
     val model by viewModel.model.collectAsState()
     val audioQuality by viewModel.audioQuality.collectAsState()
+
+    var apiKeyDraft by rememberSaveable { mutableStateOf(apiKey) }
+    var modelDraft by rememberSaveable { mutableStateOf(model) }
+    var audioQualityDraft by rememberSaveable { mutableStateOf(audioQuality) }
     var modelMenuExpanded by remember { mutableStateOf(false) }
     var qualityMenuExpanded by remember { mutableStateOf(false) }
 
@@ -96,8 +101,8 @@ private fun GeneralTab(viewModel: SettingsViewModel) {
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         OutlinedTextField(
-            value = apiKey,
-            onValueChange = { viewModel.setApiKey(it) },
+            value = apiKeyDraft,
+            onValueChange = { apiKeyDraft = it },
             label = { Text("Gemini API Key") },
             visualTransformation = PasswordVisualTransformation(),
             modifier = Modifier.fillMaxWidth(),
@@ -109,7 +114,7 @@ private fun GeneralTab(viewModel: SettingsViewModel) {
             onExpandedChange = { modelMenuExpanded = it },
         ) {
             OutlinedTextField(
-                value = model,
+                value = modelDraft,
                 onValueChange = {},
                 readOnly = true,
                 label = { Text("Model") },
@@ -128,7 +133,7 @@ private fun GeneralTab(viewModel: SettingsViewModel) {
                     DropdownMenuItem(
                         text = { Text(m) },
                         onClick = {
-                            viewModel.setModel(m)
+                            modelDraft = m
                             modelMenuExpanded = false
                         },
                     )
@@ -141,7 +146,7 @@ private fun GeneralTab(viewModel: SettingsViewModel) {
             onExpandedChange = { qualityMenuExpanded = it },
         ) {
             OutlinedTextField(
-                value = audioQuality.label,
+                value = audioQualityDraft.label,
                 onValueChange = {},
                 readOnly = true,
                 label = { Text("Recording Quality") },
@@ -160,12 +165,23 @@ private fun GeneralTab(viewModel: SettingsViewModel) {
                     DropdownMenuItem(
                         text = { Text(q.label) },
                         onClick = {
-                            viewModel.setAudioQuality(q)
+                            audioQualityDraft = q
                             qualityMenuExpanded = false
                         },
                     )
                 }
             }
+        }
+
+        Button(
+            onClick = {
+                viewModel.setApiKey(apiKeyDraft)
+                viewModel.setModel(modelDraft)
+                viewModel.setAudioQuality(audioQualityDraft)
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Save")
         }
     }
 }
@@ -176,6 +192,16 @@ private fun PromptsTab(viewModel: SettingsViewModel) {
     val summarizationPrompt by viewModel.summarizationPrompt.collectAsState()
     val titlePrompt by viewModel.titlePrompt.collectAsState()
 
+    var transcriptionDraft by rememberSaveable {
+        mutableStateOf(transcriptionPrompt.ifBlank { Config.DEFAULT_TRANSCRIPTION_PROMPT })
+    }
+    var summarizationDraft by rememberSaveable {
+        mutableStateOf(summarizationPrompt.ifBlank { Config.DEFAULT_SUMMARIZATION_PROMPT })
+    }
+    var titleDraft by rememberSaveable {
+        mutableStateOf(titlePrompt.ifBlank { Config.DEFAULT_TITLE_PROMPT })
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -185,22 +211,40 @@ private fun PromptsTab(viewModel: SettingsViewModel) {
     ) {
         PromptField(
             label = "Transcription Prompt",
-            value = transcriptionPrompt,
-            placeholder = Config.DEFAULT_TRANSCRIPTION_PROMPT,
-            onValueChange = { viewModel.setTranscriptionPrompt(it) },
+            value = transcriptionDraft,
+            onValueChange = { transcriptionDraft = it },
+            isDefault = transcriptionDraft == Config.DEFAULT_TRANSCRIPTION_PROMPT,
         )
         PromptField(
             label = "Summarization Prompt",
-            value = summarizationPrompt,
-            placeholder = Config.DEFAULT_SUMMARIZATION_PROMPT,
-            onValueChange = { viewModel.setSummarizationPrompt(it) },
+            value = summarizationDraft,
+            onValueChange = { summarizationDraft = it },
+            isDefault = summarizationDraft == Config.DEFAULT_SUMMARIZATION_PROMPT,
         )
         PromptField(
             label = "Meeting Title Prompt",
-            value = titlePrompt,
-            placeholder = Config.DEFAULT_TITLE_PROMPT,
-            onValueChange = { viewModel.setTitlePrompt(it) },
+            value = titleDraft,
+            onValueChange = { titleDraft = it },
+            isDefault = titleDraft == Config.DEFAULT_TITLE_PROMPT,
         )
+        Button(
+            onClick = {
+                // Store blank when the user hasn't changed from the default,
+                // so the app continues to pick up future default changes.
+                viewModel.setTranscriptionPrompt(
+                    if (transcriptionDraft == Config.DEFAULT_TRANSCRIPTION_PROMPT) "" else transcriptionDraft
+                )
+                viewModel.setSummarizationPrompt(
+                    if (summarizationDraft == Config.DEFAULT_SUMMARIZATION_PROMPT) "" else summarizationDraft
+                )
+                viewModel.setTitlePrompt(
+                    if (titleDraft == Config.DEFAULT_TITLE_PROMPT) "" else titleDraft
+                )
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Save")
+        }
     }
 }
 
@@ -208,16 +252,15 @@ private fun PromptsTab(viewModel: SettingsViewModel) {
 private fun PromptField(
     label: String,
     value: String,
-    placeholder: String,
     onValueChange: (String) -> Unit,
+    isDefault: Boolean = false,
 ) {
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },
-        placeholder = { Text(placeholder) },
-        supportingText = if (value.isBlank()) {
-            { Text("Using default — type to override") }
+        supportingText = if (isDefault) {
+            { Text("Showing default — edit to customize") }
         } else null,
         modifier = Modifier.fillMaxWidth(),
         minLines = 5,

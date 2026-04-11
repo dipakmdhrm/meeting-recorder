@@ -279,6 +279,7 @@ error.log  — WARNING and above
 - **Summarize** into structured Markdown notes with Google Gemini
 - **Auto-title** — generates a meeting title from the notes when none is provided
 - **Meetings browser** — browse, search, and read past transcripts and notes
+- **Audio playback** — play back recordings directly in the meeting detail view
 - Recordings saved to `Documents/Meetings/` — same structure as the Linux app
 
 ### Requirements
