@@ -1,4 +1,0 @@
-#!/usr/bin/env bash
-export PYTHONPATH="/opt/meeting-recorder/src"
-export MEETING_RECORDER_INSTALLED=1
-exec /opt/meeting-recorder/venv/bin/python -m meeting_recorder "$@"

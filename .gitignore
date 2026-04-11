@@ -29,3 +29,16 @@ build/
 *.swo
 .DS_Store
 Thumbs.db
+.env
+
+# Keystores (signing keys — never commit)
+*.keystore
+*.jks
+
+# Android build output and local config
+android/local.properties
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+android/captures/
