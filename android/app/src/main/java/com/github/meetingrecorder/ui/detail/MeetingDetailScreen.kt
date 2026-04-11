@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MeetingDetailScreen(
@@ -40,6 +41,7 @@ fun MeetingDetailScreen(
 
     val transcript by viewModel.transcript.collectAsState()
     val notes by viewModel.notes.collectAsState()
+    val hasAudio by viewModel.hasAudio.collectAsState()
     var selectedTab by remember { mutableIntStateOf(0) }
 
     Scaffold(
@@ -66,28 +68,38 @@ fun MeetingDetailScreen(
                     onClick = { selectedTab = 1 },
                     text = { Text("Transcript") },
                 )
+                if (hasAudio) {
+                    Tab(
+                        selected = selectedTab == 2,
+                        onClick = { selectedTab = 2 },
+                        text = { Text("Audio") },
+                    )
+                }
             }
 
-            val content = when (selectedTab) {
-                0 -> notes
-                else -> transcript
-            }
-
-            if (content != null) {
-                Text(
-                    text = content,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(16.dp)
-                        .verticalScroll(rememberScrollState()),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            } else {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("No content available")
+            when (selectedTab) {
+                0 -> {
+                    Text(
+                        text = notes ?: "",
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(16.dp)
+                            .verticalScroll(rememberScrollState()),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                1 -> {
+                    Text(
+                        text = transcript ?: "",
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(16.dp)
+                            .verticalScroll(rememberScrollState()),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                2 -> {
+                    AudioPlayer(viewModel)
                 }
             }
         }
