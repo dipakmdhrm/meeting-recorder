@@ -122,6 +122,8 @@ class SettingsDialog(Gtk.Dialog):
         notebook.append_page(self._build_models_tab(),  Gtk.Label(label="Models"))
         notebook.append_page(self._build_prompts_tab(), Gtk.Label(label="Prompts"))
         self.show_all()
+        # Apply initial visibility based on selected services.
+        self._update_models_visibility()
         # Kick off background status checks after show_all so widgets are realized.
         self._refresh_local_model_statuses()
 
@@ -137,23 +139,6 @@ class SettingsDialog(Gtk.Dialog):
         grid.set_margin_end(16)
 
         row = 0
-
-        grid.attach(Gtk.Label(label="Transcription service:", xalign=0), 0, row, 1, 1)
-        self._ts_combo = self._make_combo(
-            TRANSCRIPTION_SERVICES, self._cfg.get("transcription_service", "gemini")
-        )
-        grid.attach(self._ts_combo, 1, row, 1, 1)
-        row += 1
-
-        grid.attach(Gtk.Label(label="Summarization service:", xalign=0), 0, row, 1, 1)
-        self._ss_combo = self._make_combo(
-            SUMMARIZATION_SERVICES, self._cfg.get("summarization_service", "gemini")
-        )
-        grid.attach(self._ss_combo, 1, row, 1, 1)
-        row += 1
-
-        grid.attach(Gtk.Separator(), 0, row, 2, 1)
-        row += 1
 
         self._startup_switch = Gtk.Switch()
         self._startup_switch.set_active(is_autostart_enabled())
@@ -236,15 +221,70 @@ class SettingsDialog(Gtk.Dialog):
         vbox.set_margin_end(16)
         outer_scroll.add(vbox)
 
-        vbox.pack_start(self._build_gemini_section(),  False, False, 0)
-        vbox.pack_start(Gtk.Separator(),               False, False, 4)
-        vbox.pack_start(self._build_whisper_section(), False, False, 0)
-        vbox.pack_start(Gtk.Separator(),               False, False, 4)
-        vbox.pack_start(self._build_ollama_section(),  False, False, 0)
-        vbox.pack_start(Gtk.Separator(),               False, False, 4)
-        vbox.pack_start(self._build_cuda_section(),    False, False, 0)
+        # --- Services selectors ---
+        services_grid = Gtk.Grid(column_spacing=12, row_spacing=8)
+        services_grid.attach(Gtk.Label(label="Transcription service:", xalign=0), 0, 0, 1, 1)
+        self._ts_combo = self._make_combo(
+            TRANSCRIPTION_SERVICES, self._cfg.get("transcription_service", "gemini")
+        )
+        self._ts_combo.connect("changed", lambda *_: self._update_models_visibility())
+        services_grid.attach(self._ts_combo, 1, 0, 1, 1)
+
+        services_grid.attach(Gtk.Label(label="Summarization service:", xalign=0), 0, 1, 1, 1)
+        self._ss_combo = self._make_combo(
+            SUMMARIZATION_SERVICES, self._cfg.get("summarization_service", "gemini")
+        )
+        self._ss_combo.connect("changed", lambda *_: self._update_models_visibility())
+        services_grid.attach(self._ss_combo, 1, 1, 1, 1)
+
+        vbox.pack_start(services_grid, False, False, 0)
+        vbox.pack_start(Gtk.Separator(), False, False, 4)
+
+        # --- Model sections (stored for show/hide) ---
+        self._gemini_section_widget = self._build_gemini_section()
+        self._gemini_sep = Gtk.Separator()
+        self._whisper_section_widget = self._build_whisper_section()
+        self._whisper_sep = Gtk.Separator()
+        self._ollama_section_widget = self._build_ollama_section()
+        self._ollama_sep = Gtk.Separator()
+        self._cuda_section_widget = self._build_cuda_section()
+
+        vbox.pack_start(self._gemini_section_widget,  False, False, 0)
+        vbox.pack_start(self._gemini_sep,             False, False, 4)
+        vbox.pack_start(self._whisper_section_widget, False, False, 0)
+        vbox.pack_start(self._whisper_sep,            False, False, 4)
+        vbox.pack_start(self._ollama_section_widget,  False, False, 0)
+        vbox.pack_start(self._ollama_sep,             False, False, 4)
+        vbox.pack_start(self._cuda_section_widget,    False, False, 0)
 
         return outer_scroll
+
+    def _update_models_visibility(self) -> None:
+        ts = self._ts_combo.get_active_id() or "gemini"
+        ss = self._ss_combo.get_active_id() or "gemini"
+        needs_gemini  = ts == "gemini"  or ss == "gemini"
+        needs_whisper = ts == "whisper"
+        needs_ollama  = ts == "ollama"  or ss == "ollama"
+        needs_cuda    = needs_whisper
+
+        # Only show a separator when a visible section follows it.
+        show_gemini_sep  = needs_gemini  and (needs_whisper or needs_ollama or needs_cuda)
+        show_whisper_sep = needs_whisper and (needs_ollama or needs_cuda)
+        show_ollama_sep  = needs_ollama  and needs_cuda
+
+        for widget, visible in [
+            (self._gemini_section_widget,  needs_gemini),
+            (self._gemini_sep,             show_gemini_sep),
+            (self._whisper_section_widget, needs_whisper),
+            (self._whisper_sep,            show_whisper_sep),
+            (self._ollama_section_widget,  needs_ollama),
+            (self._ollama_sep,             show_ollama_sep),
+            (self._cuda_section_widget,    needs_cuda),
+        ]:
+            if visible:
+                widget.show_all()
+            else:
+                widget.hide()
 
     def _build_gemini_section(self) -> Gtk.Widget:
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
