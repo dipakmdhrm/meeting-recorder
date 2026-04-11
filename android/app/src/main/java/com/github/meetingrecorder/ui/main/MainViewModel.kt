@@ -58,7 +58,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         lockFile = File(meetingDir, ".recording").also { it.createNewFile() }
 
         try {
-            audioRecorder.start(meetingDir)
+            audioRecorder.start(meetingDir, app.config.audioQuality.bitrate)
         } catch (e: Exception) {
             lockFile?.delete()
             lockFile = null

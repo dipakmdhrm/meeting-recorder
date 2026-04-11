@@ -37,7 +37,7 @@ class GeminiClient(
 
         onStatus("Transcribing…")
         generateContent(
-            prompt = "Please transcribe this audio recording accurately. Format as plain text.",
+            prompt = config.transcriptionPrompt.ifBlank { Config.DEFAULT_TRANSCRIPTION_PROMPT },
             fileUri = "$baseUrl/v1beta/$uploadedFileName",
             mimeType = "audio/mp4",
         )
@@ -48,9 +48,9 @@ class GeminiClient(
         onStatus: (String) -> Unit = {},
     ): String = withContext(Dispatchers.IO) {
         onStatus("Generating meeting notes…")
+        val summarizeTemplate = config.summarizationPrompt.ifBlank { Config.DEFAULT_SUMMARIZATION_PROMPT }
         generateContent(
-            prompt = "Generate concise meeting notes from this transcript. " +
-                "Include key decisions, action items, and important discussion points:\n\n$transcript",
+            prompt = summarizeTemplate.replace("{transcript}", transcript),
         )
     }
 
@@ -59,9 +59,9 @@ class GeminiClient(
         onStatus: (String) -> Unit = {},
     ): String = withContext(Dispatchers.IO) {
         onStatus("Generating title…")
+        val titleTemplate = config.titlePrompt.ifBlank { Config.DEFAULT_TITLE_PROMPT }
         generateContent(
-            prompt = "Generate a short, descriptive title (max 5 words) for this meeting " +
-                "based on the notes. Return only the title, no quotes:\n\n$notes",
+            prompt = titleTemplate.replace("{transcript}", notes),
         )
     }
 
