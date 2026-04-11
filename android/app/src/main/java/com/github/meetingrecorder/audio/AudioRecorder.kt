@@ -8,14 +8,14 @@ class AudioRecorder(private val context: Context) {
 
     private var recorder: MediaRecorder? = null
 
-    fun start(outputDir: File): File {
+    fun start(outputDir: File, bitrate: Int = 64_000): File {
         stop()
         val file = File(outputDir, "recording.m4a")
         recorder = MediaRecorder(context).apply {
             setAudioSource(MediaRecorder.AudioSource.MIC)
             setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-            setAudioEncodingBitRate(128_000)
+            setAudioEncodingBitRate(bitrate)
             setAudioSamplingRate(44_100)
             setOutputFile(file.absolutePath)
             prepare()
