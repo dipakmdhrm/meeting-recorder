@@ -66,18 +66,18 @@ jobs:
         run: |
           STAGING=$(mktemp -d)
           mkdir -p "$STAGING/DEBIAN"
-          mkdir -p "$STAGING/opt/meeting-recorder/src"
+          mkdir -p "$STAGING/opt/meeting-recorder/linux/src"
           mkdir -p "$STAGING/usr/bin"
           mkdir -p "$STAGING/usr/share/applications"
 
-          cp -r src/. "$STAGING/opt/meeting-recorder/src/"
-          cp requirements.txt "$STAGING/opt/meeting-recorder/"
-          cp packaging/usr/bin/meeting-recorder "$STAGING/usr/bin/meeting-recorder"
+          cp -r linux/src/. "$STAGING/opt/meeting-recorder/linux/src/"
+          cp linux/requirements.txt "$STAGING/opt/meeting-recorder/"
+          cp linux/packaging/usr/bin/meeting-recorder "$STAGING/usr/bin/meeting-recorder"
           chmod 755 "$STAGING/usr/bin/meeting-recorder"
-          cp packaging/usr/share/applications/meeting-recorder.desktop \
+          cp linux/packaging/usr/share/applications/meeting-recorder.desktop \
              "$STAGING/usr/share/applications/meeting-recorder.desktop"
           for f in postinst prerm postrm; do
-            cp "packaging/DEBIAN/$f" "$STAGING/DEBIAN/$f"
+            cp "linux/packaging/DEBIAN/$f" "$STAGING/DEBIAN/$f"
             chmod 755 "$STAGING/DEBIAN/$f"
           done
 
@@ -163,7 +163,7 @@ jobs:
           # Source tarball
           SRCDIR=$(mktemp -d)
           mkdir "${SRCDIR}/meeting-recorder-${VERSION}"
-          cp -r src requirements.txt packaging "${SRCDIR}/meeting-recorder-${VERSION}/"
+          cp -r linux "${SRCDIR}/meeting-recorder-${VERSION}/"
           tar -czf "rpmbuild/SOURCES/meeting-recorder-${VERSION}.tar.gz" \
             -C "${SRCDIR}" "meeting-recorder-${VERSION}"
 
@@ -171,7 +171,7 @@ jobs:
           CHANGELOG_DATE=$(date "+%a %b %d %Y")
           sed -e "s/@VERSION@/${VERSION}/g" \
               -e "s/@CHANGELOG_DATE@/${CHANGELOG_DATE}/g" \
-              packaging/rpm/meeting-recorder.spec > rpmbuild/SPECS/meeting-recorder.spec
+              linux/packaging/rpm/meeting-recorder.spec > rpmbuild/SPECS/meeting-recorder.spec
 
           rpmbuild --define "_topdir ${PWD}/rpmbuild" -bb rpmbuild/SPECS/meeting-recorder.spec
 
@@ -203,13 +203,13 @@ jobs:
           # Source tarball
           SRCDIR=$(mktemp -d)
           mkdir "${SRCDIR}/meeting-recorder-${VERSION}"
-          cp -r src requirements.txt packaging "${SRCDIR}/meeting-recorder-${VERSION}/"
+          cp -r linux "${SRCDIR}/meeting-recorder-${VERSION}/"
           tar -czf "arch-build/meeting-recorder-${VERSION}.tar.gz" \
             -C "${SRCDIR}" "meeting-recorder-${VERSION}"
 
           # Inject version into PKGBUILD
-          sed "s/@VERSION@/${VERSION}/g" packaging/arch/PKGBUILD > arch-build/PKGBUILD
-          cp packaging/arch/meeting-recorder.install arch-build/
+          sed "s/@VERSION@/${VERSION}/g" linux/packaging/arch/PKGBUILD > arch-build/PKGBUILD
+          cp linux/packaging/arch/meeting-recorder.install arch-build/
 
           # makepkg refuses to run as root
           useradd -m builder

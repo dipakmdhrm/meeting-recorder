@@ -1,8 +1,19 @@
 # Meeting Recorder
 
-A Linux desktop applet that records meetings, transcribes them, and generates structured notes — all in a few clicks. Supports both cloud (Google Gemini) and local (Whisper + Ollama) processing.
+A meeting recorder that transcribes audio and generates structured notes using Google Gemini.
 
-## Features
+This repository is a monorepo with two independent apps — a Linux desktop applet and a native Android app — that share the same storage format so recordings are accessible from both.
+
+| Path | Contents |
+|---|---|
+| `linux/` | GTK3 desktop applet (Debian / Ubuntu / Fedora / Arch) |
+| `android/` | Native Android app (Kotlin + Jetpack Compose) |
+
+---
+
+## Linux App
+
+### Features
 
 - **Record** system audio + microphone simultaneously, or microphone only
 - **Transcribe** with Google Gemini or local Whisper (timestamped, speaker-labeled transcript)
@@ -12,9 +23,8 @@ A Linux desktop applet that records meetings, transcribes them, and generates st
 - **System tray** integration (AyatanaAppIndicator3 / pystray fallback)
 - **Call detection** — optionally monitor for active calls and get notified to start recording
 - **Start at system startup** — optionally launch automatically on login
-- **Organized output** — files saved in a dated hierarchy under your chosen output folder
 
-## Output Structure
+### Output Structure
 
 Each recording session creates a folder:
 
@@ -29,13 +39,11 @@ Each recording session creates a folder:
                 └── notes.md
 ```
 
-When using "Use Existing Recording", transcript and notes are saved next to the selected file.
-
-## Requirements
+### Requirements
 
 - Linux with a supported package manager: **apt** (Debian/Ubuntu/Mint), **dnf** (Fedora/RHEL), or **pacman** (Arch/Manjaro)
-- System packages installed by `install.sh`: `ffmpeg`, `pulseaudio-utils`, `pipewire-pulse`, Python 3 with GTK3 bindings
-- Python packages (installed into a venv): see `requirements.txt`
+- System packages installed by `linux/install.sh`: `ffmpeg`, `pulseaudio-utils`, `pipewire-pulse`, Python 3 with GTK3 bindings
+- Python packages (installed into a venv): see `linux/requirements.txt`
 
 Depending on which services you use:
 
@@ -45,9 +53,9 @@ Depending on which services you use:
 | **Whisper** (local transcription) | Model downloaded from HuggingFace (~500 MB – 3 GB); NVIDIA GPU optional |
 | **Ollama** (local summarization) | [Ollama](https://ollama.com) installed and running (`ollama serve`) |
 
-## Installation
+### Installation
 
-### Option 1: native package (recommended)
+#### Option 1: native package (recommended)
 
 Download the package for your distro from the [Releases](../../releases) page.
 
@@ -75,20 +83,20 @@ sudo pacman -R meeting-recorder
 
 All packages set up a Python venv at `/opt/meeting-recorder/venv` on first install. Ollama and CUDA can be installed later from **Settings → Models**.
 
-### Option 2: install.sh (from source)
+#### Option 2: install.sh (from source)
 
 ```bash
 git clone <repo-url>
 cd meeting-recorder
-./install.sh
+linux/install.sh
 ```
 
-`install.sh` detects your package manager (apt / dnf / pacman) and installs all system dependencies, then creates a Python venv with all required packages. Ollama and CUDA can be installed later from **Settings → Models**.
+`linux/install.sh` detects your package manager (apt / dnf / pacman) and installs all system dependencies, then creates a Python venv with all required packages.
 
 To uninstall:
 
 ```bash
-./uninstall.sh
+linux/uninstall.sh
 ```
 
 Then launch either way:
@@ -98,7 +106,7 @@ meeting-recorder
 # or from your application menu: "Meeting Recorder"
 ```
 
-> **GNOME users:** System tray requires the AppIndicator extension. `install.sh` installs it automatically; if you installed via a native package (.deb/.rpm/.pkg.tar.zst), install it manually:
+> **GNOME users:** System tray requires the AppIndicator extension. `install.sh` installs it automatically; if you installed via a native package, install it manually:
 > ```bash
 > # Debian/Ubuntu
 > sudo apt install gnome-shell-extension-appindicator
@@ -109,32 +117,32 @@ meeting-recorder
 > ```
 > Then enable it in the GNOME Extensions app and log out/in.
 
-## Running from Source
+### Running from Source
 
 ```bash
 cd meeting-recorder
 python3 -m venv .venv --system-site-packages
-.venv/bin/pip install -r requirements.txt
-PYTHONPATH=src python3 -m meeting_recorder
+.venv/bin/pip install -r linux/requirements.txt
+PYTHONPATH=linux/src python3 -m meeting_recorder
 ```
 
-## Recording Modes
+### Recording Modes
 
 | Mode | What is captured | When to use |
 |------|-----------------|-------------|
 | **Record (Headphones)** | Microphone + system audio (calls, browser, etc.) | You're wearing headphones — no echo risk |
 | **Record (Speaker)** | Microphone only | Laptop speakers — avoids loopback echo |
 
-## Services
+### Services
 
-### Transcription
+#### Transcription
 
 | Service | How it works | Requires |
 |---|---|---|
 | **Google Gemini** | Audio sent to Gemini API | API key |
 | **Whisper** | Runs locally on your machine | Model downloaded in Settings → Models |
 
-### Summarization
+#### Summarization
 
 | Service | How it works | Requires |
 |---|---|---|
@@ -143,7 +151,7 @@ PYTHONPATH=src python3 -m meeting_recorder
 
 Mix and match freely — e.g. Whisper for transcription + Ollama for summarization runs fully offline with no API key.
 
-## First-Time Setup
+### First-Time Setup
 
 Open **Settings** (gear icon or tray menu):
 
@@ -154,9 +162,9 @@ Open **Settings** (gear icon or tray menu):
    - *Ollama*: set host and click Download next to your preferred model
 3. **Prompts tab** — optionally customize the transcription or summarization prompt
 
-## Settings Reference
+### Settings Reference
 
-### General tab
+#### General tab
 
 | Setting | Description |
 |---|---|
@@ -167,7 +175,7 @@ Open **Settings** (gear icon or tray menu):
 | Output folder | Where recordings and notes are saved (default: `~/meetings`) |
 | Recording quality | Audio bitrate preset (Very High / High / Medium / Low) |
 
-### Models tab
+#### Models tab
 
 **Gemini**
 
@@ -194,11 +202,9 @@ Available Whisper models:
 | `medium` | ~1.5 GB | Good balance |
 | `small` | ~500 MB | Fast, lower accuracy |
 
-GPU acceleration is used automatically if CUDA libraries are present. If they are not installed, a **Install CUDA Libraries** button appears in this section — it detects your package manager and runs the appropriate install command. Falls back to CPU otherwise.
+GPU acceleration is used automatically if CUDA libraries are present. Falls back to CPU otherwise.
 
 **Ollama**
-
-If Ollama is not installed, an **Install Ollama** button appears instead of the configuration UI. Once installed, the UI switches to the normal model management view automatically.
 
 | Setting | Description |
 |---|---|
@@ -216,13 +222,13 @@ Available Ollama models:
 | `llama3.1:8b` | ~5 GB | Very capable |
 | `gemma3:12b` | ~8 GB | Best quality, high RAM required |
 
-### Prompts tab
+#### Prompts tab
 
 Customize the transcription and summarization prompts. Each has a **Reset to default** button. The `{transcript}` placeholder in the summarization prompt is replaced with the transcript text.
 
 Note: transcription prompts apply to Gemini only — Whisper does not use a prompt.
 
-## Workflow
+### Workflow
 
 1. Click **Record (Headphones)** or **Record (Speaker)** to start
 2. The timer shows elapsed recording time; **Pause** / **Resume** as needed
@@ -230,7 +236,7 @@ Note: transcription prompts apply to Gemini only — Whisper does not use a prom
 4. After 5 seconds, transcription starts automatically
 5. When done, links to the transcript and notes files appear in the window
 
-## Noise Reduction (Optional)
+### Noise Reduction (Optional)
 
 If your microphone picks up too much ambient noise, enable PipeWire's WebRTC noise suppression:
 
@@ -253,33 +259,127 @@ Then restart PipeWire:
 systemctl --user restart pipewire pipewire-pulse
 ```
 
-## Logs
+### Logs
 
-Application logs:
+Application logs written to `/var/log/meeting-recorder/` (fallback: `~/.local/share/meeting-recorder/`):
+
 ```
-~/.local/share/meeting-recorder/meeting-recorder.log
+app.log    — DEBUG and INFO messages
+error.log  — WARNING and above
 ```
 
-FFmpeg (recording) logs:
-- **Native package or install.sh**: `/var/log/meeting-recorder/ffmpeg-<session-dir>.log`
-- **Dev mode**: `ffmpeg.log` inside the recording directory
+---
+
+## Android App
+
+### Features
+
+- **Record** microphone audio (AAC/M4A)
+- **Transcribe** with Google Gemini
+- **Summarize** into structured Markdown notes with Google Gemini
+- **Auto-title** — generates a meeting title from the notes when none is provided
+- **Meetings browser** — browse, search, and read past transcripts and notes
+- Recordings saved to `Documents/Meetings/` — same structure as the Linux app
+
+### Requirements
+
+- Android 12+ (API 31)
+- Google Gemini API key — free from [aistudio.google.com](https://aistudio.google.com)
+- "All files access" (`MANAGE_EXTERNAL_STORAGE`) permission — required to read/write `Documents/Meetings/`
+
+### Installation
+
+Download `meeting-recorder-android-*.apk` from the [Releases](../../releases) page, transfer it to your phone, and install it (enable **Install from unknown sources** in Settings if prompted).
+
+### Output Structure
+
+Recordings are saved to `Documents/Meetings/` on external storage, in the same dated hierarchy as the Linux app:
+
+```
+Documents/Meetings/
+└── 2026/
+    └── March/
+        └── 04/
+            └── 14-30_Standup/
+                ├── recording.m4a
+                ├── transcript.md
+                └── notes.md
+```
+
+### First-Time Setup
+
+1. Open the app and tap the **Settings** icon
+2. Paste your Gemini API key and choose a model (`gemini-flash-latest` recommended)
+3. Return to the main screen — grant **All files access** when prompted
+4. Tap the microphone button to start recording
+
+### Building from Source
+
+```bash
+# Requires Android SDK (API 36) and JDK 17
+cd android
+./gradlew assembleDebug
+# APK: app/build/outputs/apk/debug/app-debug.apk
+
+# Release build (requires signing credentials)
+set -x KEYSTORE_PASSWORD your_store_pass
+set -x KEY_ALIAS meetingrecorder
+set -x KEY_PASSWORD your_key_pass
+./gradlew assembleRelease
+# APK: app/build/outputs/apk/release/app-release.apk
+```
+
+---
 
 ## Development
 
-### Running tests
+### Repository layout
+
+```
+linux/
+├── src/meeting_recorder/  # GTK3 desktop app (Python)
+├── tests/                 # Unit tests
+├── packaging/             # .deb / .rpm / PKGBUILD / launcher scripts
+├── install.sh / uninstall.sh
+└── requirements.txt
+android/
+├── app/src/main/
+│   ├── java/com/github/meetingrecorder/
+│   │   ├── audio/         # MediaRecorder wrapper
+│   │   ├── data/          # Config, Meeting, MeetingRepository, GeminiClient
+│   │   └── ui/            # Compose screens + ViewModels
+│   └── res/
+├── app/src/test/          # Unit tests (no device required)
+└── build.gradle.kts / settings.gradle.kts
+```
+
+### Running Linux tests
 
 ```bash
 pip install pytest
 pytest
 ```
 
-Tests cover the service layer (`OllamaInstaller`, `CudaInstaller`, `OllamaClient`, `WhisperStatusChecker`) using dependency injection — no real shell commands or network calls are made. The cross-distro branch isolation tests in `tests/services/test_system_installer.py` are the key regression guard: they assert that changes to the apt-get path cannot silently affect the dnf or pacman path and vice-versa.
+### Running Android unit tests
+
+```bash
+cd android && ./gradlew test
+```
 
 ### CI
 
 Every pull request to `main` runs:
-- **Unit tests** on Python 3.10 and 3.12
-- **Package build smoke tests** — builds `.deb` (ubuntu:24.04), `.rpm` (fedora:41), and `.pkg.tar.zst` (archlinux) in distro containers and verifies required paths are present in each artifact
+
+- **Unit tests** — Python 3.10 and 3.12
+- **Package build smoke tests** — builds `.deb` (ubuntu:24.04), `.rpm` (fedora:41), and `.pkg.tar.zst` (archlinux) in distro containers
+- **Android debug build** — compiles the Kotlin app with `./gradlew assembleDebug`
+
+Pushing a tag triggers the release workflows:
+
+| Tag pattern | Workflow | Output |
+|---|---|---|
+| `v*` (e.g. `v1.2.0`) | `release.yml` | `.deb`, `.rpm`, `.pkg.tar.zst` attached to GitHub Release; apt repo on `gh-pages` updated |
+| `android-*` (e.g. `android-1.0.0`) | `release-android.yml` | Signed `.apk` attached to GitHub Release |
 
 ## License
 

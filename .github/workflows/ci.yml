@@ -66,18 +66,18 @@ jobs:
         run: |
           STAGING=$(mktemp -d)
           mkdir -p "$STAGING/DEBIAN"
-          mkdir -p "$STAGING/opt/meeting-recorder/src"
+          mkdir -p "$STAGING/opt/meeting-recorder/linux/src"
           mkdir -p "$STAGING/usr/bin"
           mkdir -p "$STAGING/usr/share/applications"
 
-          cp -r src/. "$STAGING/opt/meeting-recorder/src/"
-          cp requirements.txt "$STAGING/opt/meeting-recorder/"
-          cp packaging/usr/bin/meeting-recorder "$STAGING/usr/bin/meeting-recorder"
+          cp -r linux/src/. "$STAGING/opt/meeting-recorder/linux/src/"
+          cp linux/requirements.txt "$STAGING/opt/meeting-recorder/"
+          cp linux/packaging/usr/bin/meeting-recorder "$STAGING/usr/bin/meeting-recorder"
           chmod 755 "$STAGING/usr/bin/meeting-recorder"
-          cp packaging/usr/share/applications/meeting-recorder.desktop \
+          cp linux/packaging/usr/share/applications/meeting-recorder.desktop \
              "$STAGING/usr/share/applications/meeting-recorder.desktop"
           for f in postinst prerm postrm; do
-            cp "packaging/DEBIAN/$f" "$STAGING/DEBIAN/$f"
+            cp "linux/packaging/DEBIAN/$f" "$STAGING/DEBIAN/$f"
             chmod 755 "$STAGING/DEBIAN/$f"
           done
 
@@ -99,7 +99,7 @@ jobs:
         run: |
           dpkg --info meeting-recorder.deb
           dpkg --contents meeting-recorder.deb | grep -q "usr/bin/meeting-recorder"
-          dpkg --contents meeting-recorder.deb | grep -q "opt/meeting-recorder/src"
+          dpkg --contents meeting-recorder.deb | grep -q "opt/meeting-recorder/linux/src"
           dpkg --contents meeting-recorder.deb | grep -q "usr/share/applications/meeting-recorder.desktop"
           echo "All required paths present in .deb"
 
@@ -119,14 +119,14 @@ jobs:
 
           SRCDIR=$(mktemp -d)
           mkdir "${SRCDIR}/meeting-recorder-0.0.0"
-          cp -r src requirements.txt packaging "${SRCDIR}/meeting-recorder-0.0.0/"
+          cp -r linux "${SRCDIR}/meeting-recorder-0.0.0/"
           tar -czf rpmbuild/SOURCES/meeting-recorder-0.0.0.tar.gz \
             -C "${SRCDIR}" meeting-recorder-0.0.0
 
           CHANGELOG_DATE=$(date "+%a %b %d %Y")
           sed -e "s/@VERSION@/0.0.0/g" \
               -e "s/@CHANGELOG_DATE@/${CHANGELOG_DATE}/g" \
-              packaging/rpm/meeting-recorder.spec > rpmbuild/SPECS/meeting-recorder.spec
+              linux/packaging/rpm/meeting-recorder.spec > rpmbuild/SPECS/meeting-recorder.spec
 
           rpmbuild --define "_topdir ${PWD}/rpmbuild" -bb rpmbuild/SPECS/meeting-recorder.spec
 
@@ -134,7 +134,7 @@ jobs:
         if: matrix.pkg == 'rpm'
         run: |
           rpm -qlp rpmbuild/RPMS/noarch/*.rpm | grep -q /usr/bin/meeting-recorder
-          rpm -qlp rpmbuild/RPMS/noarch/*.rpm | grep -q /opt/meeting-recorder/src
+          rpm -qlp rpmbuild/RPMS/noarch/*.rpm | grep -q /opt/meeting-recorder/linux/src
           rpm -qlp rpmbuild/RPMS/noarch/*.rpm | grep -q /usr/share/applications/meeting-recorder.desktop
           echo "All required paths present in .rpm"
 
@@ -154,12 +154,12 @@ jobs:
 
           SRCDIR=$(mktemp -d)
           mkdir "${SRCDIR}/meeting-recorder-0.0.0"
-          cp -r src requirements.txt packaging "${SRCDIR}/meeting-recorder-0.0.0/"
+          cp -r linux "${SRCDIR}/meeting-recorder-0.0.0/"
           tar -czf arch-build/meeting-recorder-0.0.0.tar.gz \
             -C "${SRCDIR}" meeting-recorder-0.0.0
 
-          sed "s/@VERSION@/0.0.0/g" packaging/arch/PKGBUILD > arch-build/PKGBUILD
-          cp packaging/arch/meeting-recorder.install arch-build/
+          sed "s/@VERSION@/0.0.0/g" linux/packaging/arch/PKGBUILD > arch-build/PKGBUILD
+          cp linux/packaging/arch/meeting-recorder.install arch-build/
 
           useradd -m builder
           chown -R builder:builder arch-build
@@ -169,6 +169,37 @@ jobs:
         if: matrix.pkg == 'pacman'
         run: |
           bsdtar -tf arch-build/*.pkg.tar.zst | grep -q usr/bin/meeting-recorder
-          bsdtar -tf arch-build/*.pkg.tar.zst | grep -q opt/meeting-recorder/src
+          bsdtar -tf arch-build/*.pkg.tar.zst | grep -q opt/meeting-recorder/linux/src
           bsdtar -tf arch-build/*.pkg.tar.zst | grep -q usr/share/applications/meeting-recorder.desktop
           echo "All required paths present in pacman package"
+
+  # ── Android unit tests + debug build ────────────────────────────────────────
+  #
+  # Unit tests run on the JVM — no emulator or device required.
+  # assembleDebug verifies the full Kotlin/Compose compile succeeds.
+  build-android:
+    name: Android unit tests + debug build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install Android SDK platform + build tools
+        run: |
+          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager \
+            "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Run unit tests
+        working-directory: android
+        run: ./gradlew test --no-daemon
+
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Verify APK exists
+        run: ls -lh android/app/build/outputs/apk/debug/app-debug.apk
