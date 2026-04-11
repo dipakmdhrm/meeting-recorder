@@ -18,9 +18,9 @@ jobs:
       matrix:
         python-version: ["3.10", "3.12"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -58,7 +58,7 @@ jobs:
         if: matrix.pkg == 'deb'
         run: apt-get update -qq && apt-get install -y --no-install-recommends dpkg-dev
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         if: matrix.pkg == 'deb'
 
       - name: Build .deb
@@ -109,7 +109,7 @@ jobs:
         if: matrix.pkg == 'rpm'
         run: dnf install -y git rpm-build
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         if: matrix.pkg == 'rpm'
 
       - name: Build .rpm
@@ -144,7 +144,7 @@ jobs:
         if: matrix.pkg == 'pacman'
         run: pacman -Syu --noconfirm git base-devel
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         if: matrix.pkg == 'pacman'
 
       - name: Build pacman package
@@ -181,7 +181,7 @@ jobs:
     name: Android unit tests + debug build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-java@v4
         with:
