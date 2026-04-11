@@ -42,6 +42,8 @@ fun MeetingDetailScreen(
     val transcript by viewModel.transcript.collectAsState()
     val notes by viewModel.notes.collectAsState()
     val hasAudio by viewModel.hasAudio.collectAsState()
+    val currentNotes = notes
+    val currentTranscript = transcript
     var selectedTab by remember { mutableIntStateOf(0) }
 
     Scaffold(
@@ -79,9 +81,9 @@ fun MeetingDetailScreen(
 
             when (selectedTab) {
                 0 -> {
-                    if (notes != null) {
+                    if (currentNotes != null) {
                         Text(
-                            text = notes,
+                            text = currentNotes,
                             modifier = Modifier
                                 .fillMaxSize()
                                 .padding(16.dp)
@@ -95,9 +97,9 @@ fun MeetingDetailScreen(
                     }
                 }
                 1 -> {
-                    if (transcript != null) {
+                    if (currentTranscript != null) {
                         Text(
-                            text = transcript,
+                            text = currentTranscript,
                             modifier = Modifier
                                 .fillMaxSize()
                                 .padding(16.dp)
