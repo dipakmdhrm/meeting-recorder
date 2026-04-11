@@ -267,13 +267,18 @@ class SettingsDialog(Gtk.Dialog):
         needs_ollama  = ts == "ollama"  or ss == "ollama"
         needs_cuda    = needs_whisper
 
+        # Only show a separator when a visible section follows it.
+        show_gemini_sep  = needs_gemini  and (needs_whisper or needs_ollama or needs_cuda)
+        show_whisper_sep = needs_whisper and (needs_ollama or needs_cuda)
+        show_ollama_sep  = needs_ollama  and needs_cuda
+
         for widget, visible in [
             (self._gemini_section_widget,  needs_gemini),
-            (self._gemini_sep,             needs_gemini),
+            (self._gemini_sep,             show_gemini_sep),
             (self._whisper_section_widget, needs_whisper),
-            (self._whisper_sep,            needs_whisper),
+            (self._whisper_sep,            show_whisper_sep),
             (self._ollama_section_widget,  needs_ollama),
-            (self._ollama_sep,             needs_ollama),
+            (self._ollama_sep,             show_ollama_sep),
             (self._cuda_section_widget,    needs_cuda),
         ]:
             if visible:
