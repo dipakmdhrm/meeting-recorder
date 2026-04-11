@@ -30,6 +30,9 @@ class GeminiClientTest {
         val config = mock<Config>().also {
             whenever(it.apiKey).thenReturn("test-key")
             whenever(it.model).thenReturn("gemini-flash-latest")
+            whenever(it.transcriptionPrompt).thenReturn("")
+            whenever(it.summarizationPrompt).thenReturn("")
+            whenever(it.titlePrompt).thenReturn("")
         }
         client = GeminiClient(config, server.url("/").toString().trimEnd('/'))
     }
