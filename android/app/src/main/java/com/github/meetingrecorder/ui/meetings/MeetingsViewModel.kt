@@ -2,6 +2,7 @@ package com.github.meetingrecorder.ui.meetings
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import com.github.meetingrecorder.R
 import androidx.lifecycle.viewModelScope
 import com.github.meetingrecorder.MeetingRecorderApp
 import com.github.meetingrecorder.data.Meeting
@@ -43,7 +44,7 @@ class MeetingsViewModel(application: Application) : AndroidViewModel(application
                 withContext(Dispatchers.IO) { repo.renameMeeting(meeting.path, newTitle) }
                 loadMeetings()
             } catch (e: Exception) {
-                _errorMessage.value = "Failed to rename meeting"
+                _errorMessage.value = getApplication<Application>().getString(R.string.error_rename_failed)
             }
         }
     }
