@@ -6,11 +6,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -30,10 +30,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,8 +45,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.github.meetingrecorder.R
 import com.github.meetingrecorder.data.Meeting
 import java.time.format.DateTimeFormatter
 
@@ -56,6 +61,15 @@ fun MeetingsScreen(
 ) {
     val meetings by viewModel.meetings.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val errorMessage by viewModel.errorMessage.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(errorMessage) {
+        errorMessage?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearError()
+        }
+    }
 
     var renamingMeeting by remember { mutableStateOf<Meeting?>(null) }
     var deletingMeeting by remember { mutableStateOf<Meeting?>(null) }
@@ -85,14 +99,15 @@ fun MeetingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Meetings") },
+                title = { Text(stringResource(R.string.title_meetings)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                     }
                 },
             )
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         when {
             isLoading -> Box(
@@ -106,7 +121,7 @@ fun MeetingsScreen(
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("No meetings yet", style = MaterialTheme.typography.bodyLarge)
+                Text(stringResource(R.string.meetings_empty), style = MaterialTheme.typography.bodyLarge)
             }
 
             else -> LazyColumn(
@@ -137,21 +152,21 @@ private fun RenameDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Rename meeting") },
+        title = { Text(stringResource(R.string.dialog_rename_title)) },
         text = {
             OutlinedTextField(
                 value = draft,
                 onValueChange = { draft = it },
-                label = { Text("Title") },
-                placeholder = { Text("e.g. Standup, Design Review…") },
+                label = { Text(stringResource(R.string.label_title)) },
+                placeholder = { Text(stringResource(R.string.placeholder_meeting_title)) },
                 singleLine = true,
             )
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(draft) }) { Text("Rename") }
+            TextButton(onClick = { onConfirm(draft) }) { Text(stringResource(R.string.action_rename)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
         },
     )
 }
@@ -203,7 +218,7 @@ private fun MeetingCard(
                 IconButton(onClick = onRenameClick, modifier = Modifier.size(32.dp)) {
                     Icon(
                         imageVector = Icons.Default.Edit,
-                        contentDescription = "Rename meeting",
+                        contentDescription = stringResource(R.string.cd_rename_meeting),
                         modifier = Modifier.size(16.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -227,13 +242,13 @@ private fun MeetingCard(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             imageVector = Icons.Filled.Audiotrack,
-                            contentDescription = "Audio available",
+                            contentDescription = stringResource(R.string.cd_audio_available),
                             modifier = Modifier.size(16.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            "Audio",
+                            stringResource(R.string.label_audio),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -243,13 +258,13 @@ private fun MeetingCard(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             imageVector = Icons.Filled.Description,
-                            contentDescription = "Transcript available",
+                            contentDescription = stringResource(R.string.cd_transcript_available),
                             modifier = Modifier.size(16.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            "Transcript",
+                            stringResource(R.string.label_transcript),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -259,13 +274,13 @@ private fun MeetingCard(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             imageVector = Icons.Filled.Note,
-                            contentDescription = "Notes available",
+                            contentDescription = stringResource(R.string.cd_notes_available),
                             modifier = Modifier.size(16.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            "Notes",
+                            stringResource(R.string.label_notes),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

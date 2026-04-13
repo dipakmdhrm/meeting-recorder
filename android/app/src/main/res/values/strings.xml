@@ -1,4 +1,72 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Meeting Recorder</string>
+
+    <!-- Common actions / labels (shared across screens) -->
+    <string name="action_back">Back</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_save">Save</string>
+    <string name="action_ok">OK</string>
+    <string name="action_rename">Rename</string>
+    <string name="action_discard">Discard</string>
+    <string name="label_title">Title</string>
+    <string name="label_audio">Audio</string>
+    <string name="label_transcript">Transcript</string>
+    <string name="label_notes">Notes</string>
+    <string name="placeholder_meeting_title">e.g. Standup, Design Review…</string>
+
+    <!-- Main Screen -->
+    <string name="cd_meetings">Meetings</string>
+    <string name="cd_settings">Settings</string>
+    <string name="cd_start_recording">Start recording</string>
+    <string name="cd_stop_recording">Stop recording</string>
+    <string name="dialog_no_api_key_title">API key required</string>
+    <string name="dialog_no_api_key_body">Add your Gemini API key in Settings before recording.</string>
+    <string name="action_open_settings">Open Settings</string>
+    <string name="dialog_meeting_title">Meeting title (optional)</string>
+    <string name="storage_permission_title">Storage permission required</string>
+    <string name="storage_permission_rationale">Grant \'All files access\' so recordings can be saved to Documents/Meetings.</string>
+    <string name="action_grant_permission">Grant permission</string>
+    <string name="status_ready">Ready to record</string>
+    <string name="status_recording">Recording… %1$02d:%2$02d</string>
+    <string name="status_countdown">Starting transcription in %1$ds…</string>
+    <string name="countdown_hint">Cancel to save audio only (no transcription)</string>
+    <string name="action_cancel_transcription">Cancel transcription</string>
+    <string name="status_processing_complete">Processing complete!</string>
+    <string name="label_notes_preview">Notes preview:</string>
+    <string name="error_with_message">Error: %1$s</string>
+
+    <!-- Meetings Screen -->
+    <string name="title_meetings">Meetings</string>
+    <string name="meetings_empty">No meetings yet</string>
+    <string name="cd_rename_meeting">Rename meeting</string>
+    <string name="cd_audio_available">Audio available</string>
+    <string name="cd_transcript_available">Transcript available</string>
+    <string name="cd_notes_available">Notes available</string>
+    <string name="dialog_rename_title">Rename meeting</string>
+    <string name="error_rename_failed">Failed to rename meeting</string>
+
+    <!-- Settings Screen -->
+    <string name="title_settings">Settings</string>
+    <string name="tab_general">General</string>
+    <string name="tab_prompts">Prompts</string>
+    <string name="label_gemini_api_key">Gemini API Key</string>
+    <string name="label_model">Model</string>
+    <string name="label_recording_quality">Recording Quality</string>
+    <string name="label_processing_countdown">Processing countdown (5 s)</string>
+    <string name="desc_processing_countdown">Show a 5-second countdown after stopping — cancel to skip transcription and save audio only.</string>
+    <string name="label_transcription_prompt">Transcription Prompt</string>
+    <string name="label_summarization_prompt">Summarization Prompt</string>
+    <string name="label_meeting_title_prompt">Meeting Title Prompt</string>
+    <string name="hint_showing_default">Showing default — edit to customize</string>
+
+    <!-- Meeting Detail Screen -->
+    <string name="title_meeting_detail">Meeting Detail</string>
+    <string name="no_notes">No notes available</string>
+    <string name="no_transcript">No transcript available</string>
+
+    <!-- Audio Player -->
+    <string name="cd_pause">Pause</string>
+    <string name="cd_play">Play</string>
+    <string name="cd_stop">Stop</string>
 </resources>
