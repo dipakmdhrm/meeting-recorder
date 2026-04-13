@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Note
 import androidx.compose.material3.AlertDialog
@@ -57,6 +58,7 @@ fun MeetingsScreen(
     val isLoading by viewModel.isLoading.collectAsState()
 
     var renamingMeeting by remember { mutableStateOf<Meeting?>(null) }
+    var deletingMeeting by remember { mutableStateOf<Meeting?>(null) }
 
     renamingMeeting?.let { meeting ->
         RenameDialog(
@@ -66,6 +68,17 @@ fun MeetingsScreen(
                 renamingMeeting = null
             },
             onDismiss = { renamingMeeting = null },
+        )
+    }
+
+    deletingMeeting?.let { meeting ->
+        DeleteDialog(
+            title = meeting.title ?: meeting.timeLabel,
+            onConfirm = {
+                viewModel.deleteMeeting(meeting)
+                deletingMeeting = null
+            },
+            onDismiss = { deletingMeeting = null },
         )
     }
 
@@ -106,6 +119,7 @@ fun MeetingsScreen(
                         meeting = meeting,
                         onClick = { onMeetingClick(meeting.path.absolutePath) },
                         onRenameClick = { renamingMeeting = meeting },
+                        onDeleteClick = { deletingMeeting = meeting },
                     )
                 }
             }
@@ -142,10 +156,32 @@ private fun RenameDialog(
     )
 }
 
+@Composable
+private fun DeleteDialog(title: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Delete meeting?") },
+        text = { Text("\"$title\" and all its files will be permanently deleted.") },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text("Delete", color = MaterialTheme.colorScheme.error)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
+}
+
 private val dateFormatter = DateTimeFormatter.ofPattern("MMM d, yyyy  HH:mm")
 
 @Composable
-private fun MeetingCard(meeting: Meeting, onClick: () -> Unit, onRenameClick: () -> Unit) {
+private fun MeetingCard(
+    meeting: Meeting,
+    onClick: () -> Unit,
+    onRenameClick: () -> Unit,
+    onDeleteClick: () -> Unit,
+) {
     OutlinedCard(
         modifier = Modifier
             .fillMaxWidth()
@@ -170,6 +206,14 @@ private fun MeetingCard(meeting: Meeting, onClick: () -> Unit, onRenameClick: ()
                         contentDescription = "Rename meeting",
                         modifier = Modifier.size(16.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                IconButton(onClick = onDeleteClick) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Delete meeting",
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.error,
                     )
                 }
             }
