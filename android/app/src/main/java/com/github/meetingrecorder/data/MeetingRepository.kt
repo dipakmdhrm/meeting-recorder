@@ -82,4 +82,31 @@ class MeetingRepository(private val rootDir: File) {
         File(dir, "meeting.json").writeText(json.toString())
     }
 
+    /**
+     * Renames a meeting: updates the title in meeting.json and renames the folder
+     * to reflect the new title suffix. Returns the (possibly new) directory.
+     */
+    fun renameMeeting(dir: File, newTitle: String?): File {
+        val cleanTitle = newTitle?.trim()?.ifBlank { null }
+        // Folder name format: "YYYY-MM-DD_HH-MM" (first 16 chars) + optional "_title"
+        val timePart = dir.name.take(16)
+        val sanitized = cleanTitle?.replace(Regex("[^a-zA-Z0-9_\\-]"), "_")?.take(30)
+        val newName = if (sanitized == null) timePart else "${timePart}_${sanitized}"
+
+        val newDir = File(rootDir, newName)
+        if (newDir.absolutePath != dir.absolutePath) {
+            dir.renameTo(newDir)
+        }
+
+        // Update meeting.json — preserve any existing fields (e.g. duration_seconds)
+        val metaFile = File(newDir, "meeting.json")
+        val json = if (metaFile.exists()) {
+            try { JSONObject(metaFile.readText()) } catch (_: Exception) { JSONObject() }
+        } else JSONObject()
+        if (cleanTitle != null) json.put("title", cleanTitle) else json.remove("title")
+        metaFile.writeText(json.toString())
+
+        return newDir
+    }
+
 }

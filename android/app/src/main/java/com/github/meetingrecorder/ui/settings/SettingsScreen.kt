@@ -2,6 +2,7 @@ package com.github.meetingrecorder.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -10,6 +11,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -19,6 +21,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
@@ -31,6 +35,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -86,10 +91,12 @@ private fun GeneralTab(viewModel: SettingsViewModel) {
     val apiKey by viewModel.apiKey.collectAsState()
     val model by viewModel.model.collectAsState()
     val audioQuality by viewModel.audioQuality.collectAsState()
+    val processingCountdownEnabled by viewModel.processingCountdownEnabled.collectAsState()
 
     var apiKeyDraft by rememberSaveable { mutableStateOf(apiKey) }
     var modelDraft by rememberSaveable { mutableStateOf(model) }
     var audioQualityDraft by rememberSaveable { mutableStateOf(audioQuality) }
+    var processingCountdownDraft by rememberSaveable { mutableStateOf(processingCountdownEnabled) }
     var modelMenuExpanded by remember { mutableStateOf(false) }
     var qualityMenuExpanded by remember { mutableStateOf(false) }
 
@@ -173,11 +180,32 @@ private fun GeneralTab(viewModel: SettingsViewModel) {
             }
         }
 
+        HorizontalDivider()
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Processing countdown (5 s)", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "Show a 5-second countdown after stopping — cancel to skip transcription and save audio only.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = processingCountdownDraft,
+                onCheckedChange = { processingCountdownDraft = it },
+            )
+        }
+
         Button(
             onClick = {
                 viewModel.setApiKey(apiKeyDraft)
                 viewModel.setModel(modelDraft)
                 viewModel.setAudioQuality(audioQualityDraft)
+                viewModel.setProcessingCountdownEnabled(processingCountdownDraft)
             },
             modifier = Modifier.fillMaxWidth(),
         ) {

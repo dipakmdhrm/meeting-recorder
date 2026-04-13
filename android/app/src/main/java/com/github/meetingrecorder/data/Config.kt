@@ -35,6 +35,10 @@ class Config(context: Context) {
         get() = prefs.getString("title_prompt", "") ?: ""
         set(value) { prefs.edit().putString("title_prompt", value).apply() }
 
+    var processingCountdownEnabled: Boolean
+        get() = prefs.getBoolean("processing_countdown_enabled", false)
+        set(value) { prefs.edit().putBoolean("processing_countdown_enabled", value).apply() }
+
     companion object {
         const val DEFAULT_MODEL = "gemini-flash-latest"
 

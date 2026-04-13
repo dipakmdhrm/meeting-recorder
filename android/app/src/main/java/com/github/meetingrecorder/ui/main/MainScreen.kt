@@ -183,6 +183,11 @@ fun MainScreen(
                     onStop = { viewModel.stopRecording() },
                 )
 
+                is RecordingState.Countdown -> CountdownContent(
+                    remainingSecs = s.remainingSecs,
+                    onCancel = { viewModel.cancelCountdown() },
+                )
+
                 is RecordingState.Processing -> ProcessingContent(statusMsg = s.statusMsg)
 
                 is RecordingState.Done -> DoneContent(
@@ -255,6 +260,26 @@ private fun RecordingContent(elapsedSecs: Int, onStop: () -> Unit) {
         ) {
             Icon(Icons.Default.Stop, contentDescription = "Stop recording")
         }
+    }
+}
+
+@Composable
+private fun CountdownContent(remainingSecs: Int, onCancel: () -> Unit) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        modifier = Modifier.padding(16.dp),
+    ) {
+        Text(
+            text = "Starting transcription in ${remainingSecs}s…",
+            style = MaterialTheme.typography.headlineSmall,
+        )
+        Text(
+            text = "Cancel to save audio only (no transcription)",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedButton(onClick = onCancel) { Text("Cancel transcription") }
     }
 }
 

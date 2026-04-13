@@ -185,6 +185,27 @@ class SettingsDialog(Gtk.Dialog):
         grid.attach(Gtk.Separator(), 0, row, 2, 1)
         row += 1
 
+        self._countdown_switch = Gtk.Switch()
+        self._countdown_switch.set_active(self._cfg.get("processing_countdown_enabled", False))
+        self._countdown_switch.set_halign(Gtk.Align.START)
+        grid.attach(Gtk.Label(label="Processing countdown:", xalign=0), 0, row, 1, 1)
+        grid.attach(self._countdown_switch, 1, row, 1, 1)
+        row += 1
+
+        countdown_note = Gtk.Label(
+            label=(
+                "Show a 5-second countdown after stopping a recording.\n"
+                "Cancel during the countdown to skip transcription and save the audio only."
+            )
+        )
+        countdown_note.set_line_wrap(True)
+        countdown_note.set_xalign(0)
+        grid.attach(countdown_note, 0, row, 2, 1)
+        row += 1
+
+        grid.attach(Gtk.Separator(), 0, row, 2, 1)
+        row += 1
+
         grid.attach(Gtk.Label(label="Output folder:", xalign=0), 0, row, 1, 1)
         folder_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         self._folder_entry = Gtk.Entry()
@@ -733,9 +754,10 @@ class SettingsDialog(Gtk.Dialog):
         cfg["whisper_model"]    = self._whisper_model_combo.get_active_id() or WHISPER_MODELS[0]
         cfg["output_folder"]    = self._folder_entry.get_text().strip() or "~/meetings"
         cfg["recording_quality"] = self._quality_combo.get_active_id() or "high"
-        cfg["call_detection_enabled"] = self._detection_switch.get_active()
-        cfg["start_at_startup"]       = self._startup_switch.get_active()
-        cfg["auto_title"]             = self._auto_title_switch.get_active()
+        cfg["call_detection_enabled"]       = self._detection_switch.get_active()
+        cfg["start_at_startup"]             = self._startup_switch.get_active()
+        cfg["auto_title"]                   = self._auto_title_switch.get_active()
+        cfg["processing_countdown_enabled"] = self._countdown_switch.get_active()
 
         if self._ollama_inst.is_available():
             cfg["ollama_model"] = self._ollama_model_combo.get_active_id() or OLLAMA_MODELS[0]

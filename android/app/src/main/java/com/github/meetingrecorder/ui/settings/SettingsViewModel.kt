@@ -35,6 +35,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private val _titlePrompt = MutableStateFlow(config.titlePrompt)
     val titlePrompt: StateFlow<String> = _titlePrompt.asStateFlow()
 
+    private val _processingCountdownEnabled = MutableStateFlow(config.processingCountdownEnabled)
+    val processingCountdownEnabled: StateFlow<Boolean> = _processingCountdownEnabled.asStateFlow()
+
     fun setApiKey(key: String) {
         _apiKey.value = key
         config.apiKey = key
@@ -63,5 +66,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setTitlePrompt(value: String) {
         _titlePrompt.value = value
         config.titlePrompt = value
+    }
+
+    fun setProcessingCountdownEnabled(enabled: Boolean) {
+        _processingCountdownEnabled.value = enabled
+        config.processingCountdownEnabled = enabled
     }
 }

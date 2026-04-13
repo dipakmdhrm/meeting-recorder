@@ -543,9 +543,21 @@ class MainWindow(Gtk.ApplicationWindow):
             target=self._stop_recorder_bg, args=(recorder,), daemon=True
         ).start()
 
-        self._countdown_remaining = 5
-        self._transition(State.COUNTDOWN, status="Starting transcription in 5s…")
-        GLib.timeout_add(1000, self._countdown_tick, gen_id)
+        cfg = settings.load()
+        if cfg.get("processing_countdown_enabled", False):
+            self._countdown_remaining = 5
+            self._transition(State.COUNTDOWN, status="Starting transcription in 5s…")
+            GLib.timeout_add(1000, self._countdown_tick, gen_id)
+        else:
+            job = self._pending_job
+            self._pending_job = None
+            if job is not None:
+                self._jobs.append(job)
+                self._add_job_row(job)
+                threading.Thread(
+                    target=self._wait_and_process_job, args=(job,), daemon=True
+                ).start()
+            self._transition(State.IDLE)
 
     def _make_job_label(self) -> str:
         time_part = (

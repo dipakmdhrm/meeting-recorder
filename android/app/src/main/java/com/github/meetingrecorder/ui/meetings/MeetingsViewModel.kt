@@ -33,4 +33,11 @@ class MeetingsViewModel(application: Application) : AndroidViewModel(application
             _isLoading.value = false
         }
     }
+
+    fun renameMeeting(meeting: Meeting, newTitle: String) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { repo.renameMeeting(meeting.path, newTitle) }
+            loadMeetings()
+        }
+    }
 }

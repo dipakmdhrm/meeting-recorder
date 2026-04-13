@@ -88,6 +88,7 @@ DEFAULT_CONFIG: dict = {
     "call_detection_enabled": False,
     "start_at_startup": False,
     "auto_title": True,
+    "processing_countdown_enabled": False,
 
     "llm_request_timeout_minutes": 5,
 

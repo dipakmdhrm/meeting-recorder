@@ -17,6 +17,7 @@ import java.io.File
 sealed class RecordingState {
     data object Ready : RecordingState()
     data class Recording(val elapsedSecs: Int) : RecordingState()
+    data class Countdown(val remainingSecs: Int) : RecordingState()
     data class Processing(val statusMsg: String) : RecordingState()
     data class Done(val transcript: String, val notes: String) : RecordingState()
     data class Error(val msg: String) : RecordingState()
@@ -31,6 +32,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val state: StateFlow<RecordingState> = _state.asStateFlow()
 
     private var timerJob: Job? = null
+    private var countdownJob: Job? = null
+    private var pendingAudioFile: File? = null
     private var currentMeetingDir: File? = null
     private var lockFile: File? = null
     private var currentTitle: String? = null
@@ -96,7 +99,52 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     "Recording is empty (0 bytes). " +
                     "Grant 'All files access' in Settings → Apps → Meeting Recorder → Permissions."
                 )
+            app.config.processingCountdownEnabled -> startCountdown(audioFile)
             else -> processRecording(audioFile)
+        }
+    }
+
+    private fun startCountdown(audioFile: File) {
+        pendingAudioFile = audioFile
+        var remaining = 5
+        _state.value = RecordingState.Countdown(remaining)
+        countdownJob = viewModelScope.launch {
+            while (remaining > 0) {
+                delay(1_000)
+                remaining--
+                if (remaining > 0) {
+                    _state.value = RecordingState.Countdown(remaining)
+                } else {
+                    pendingAudioFile = null
+                    processRecording(audioFile)
+                }
+            }
+        }
+    }
+
+    fun cancelCountdown() {
+        countdownJob?.cancel()
+        countdownJob = null
+        val audioFile = pendingAudioFile
+        pendingAudioFile = null
+        if (audioFile == null) {
+            _state.value = RecordingState.Ready
+            return
+        }
+        // Save audio only — no transcription
+        val meetingDir = currentMeetingDir ?: run {
+            _state.value = RecordingState.Ready
+            return
+        }
+        viewModelScope.launch {
+            try {
+                app.meetingRepository.saveMeetingMeta(meetingDir, currentTitle, durationSeconds)
+                lockFile?.delete()
+                lockFile = null
+                _state.value = RecordingState.Ready
+            } catch (e: Exception) {
+                _state.value = RecordingState.Error("Save failed: ${e.message}")
+            }
         }
     }
 
