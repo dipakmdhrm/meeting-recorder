@@ -109,4 +109,8 @@ class MeetingRepository(private val rootDir: File) {
         return newDir
     }
 
+    fun deleteMeeting(dir: File) {
+        dir.deleteRecursively()
+    }
+
 }

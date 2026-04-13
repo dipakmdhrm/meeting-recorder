@@ -40,4 +40,11 @@ class MeetingsViewModel(application: Application) : AndroidViewModel(application
             loadMeetings()
         }
     }
+
+    fun deleteMeeting(meeting: Meeting) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { repo.deleteMeeting(meeting.path) }
+            loadMeetings()
+        }
+    }
 }
