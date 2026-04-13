@@ -1,19 +1,19 @@
 Origin: Meeting Recorder
 Label: Meeting Recorder
 Codename: stable
-Date: Sat, 11 Apr 2026 11:53:12 UTC
+Date: Mon, 13 Apr 2026 16:57:33 UTC
 Architectures: amd64
 Components: main
 Description: Meeting Recorder APT repository
 MD5Sum:
- 935bb20598379ae5008edd215c781f74 872 main/binary-amd64/Packages
- 66e7b98b2d64b696a497408187d6882a 546 main/binary-amd64/Packages.gz
+ fd26aacb6bb6a444d7ef033117c9fe43 872 main/binary-amd64/Packages
+ d5ca1f41ae203080e95df42187baa854 546 main/binary-amd64/Packages.gz
  17d185771c71cb5d97cc0e53538eb589 130 main/binary-amd64/Release
 SHA1:
- 5ae207d701c4f7fcd1ca707ed446cf7be70aae61 872 main/binary-amd64/Packages
- c0573d228a3247981f77b5990753973d67d0c829 546 main/binary-amd64/Packages.gz
+ 0485fee0ba941f9de6db0074b5eea2a7769fafda 872 main/binary-amd64/Packages
+ 4af3376b7922e701ffc1287abcb3958ade8173af 546 main/binary-amd64/Packages.gz
  6d96455003a8d856ac1ed26320b011ccbb3e3102 130 main/binary-amd64/Release
 SHA256:
- a9be303ea94a2e80dd4f9f83f19820e04066d155ba60215b5c9ae2dbdd3c5cb3 872 main/binary-amd64/Packages
- e375a3aead83c457668a83eab651006cf125a151e8b11e77a08d3a00a8255383 546 main/binary-amd64/Packages.gz
+ 9e547684aad4e486f6f07536456111850ce9e292afce58d43d97950ffca9c11c 872 main/binary-amd64/Packages
+ 767cf3859cb0aa55a75941ca222f01b525866ed81dea35faa720460240ad0125 546 main/binary-amd64/Packages.gz
  cb47744016fef55a364c52a4cbab776a3fcc31238d729cc091ba4aa1ed558c29 130 main/binary-amd64/Release
