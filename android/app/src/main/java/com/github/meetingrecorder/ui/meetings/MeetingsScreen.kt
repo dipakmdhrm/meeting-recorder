@@ -208,7 +208,7 @@ private fun MeetingCard(
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                IconButton(onClick = onDeleteClick, modifier = Modifier.size(32.dp)) {
+                IconButton(onClick = onDeleteClick) {
                     Icon(
                         imageVector = Icons.Default.Delete,
                         contentDescription = "Delete meeting",

@@ -110,7 +110,9 @@ class MeetingRepository(private val rootDir: File) {
     }
 
     fun deleteMeeting(dir: File) {
-        dir.deleteRecursively()
+        if (dir.parentFile == rootDir) {
+            dir.deleteRecursively()
+        }
     }
 
 }
