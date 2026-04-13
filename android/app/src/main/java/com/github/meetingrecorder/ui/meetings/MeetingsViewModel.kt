@@ -22,6 +22,9 @@ class MeetingsViewModel(application: Application) : AndroidViewModel(application
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    private val _errorMessage = MutableStateFlow<String?>(null)
+    val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
+
     init {
         loadMeetings()
     }
@@ -36,8 +39,12 @@ class MeetingsViewModel(application: Application) : AndroidViewModel(application
 
     fun renameMeeting(meeting: Meeting, newTitle: String) {
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { repo.renameMeeting(meeting.path, newTitle) }
-            loadMeetings()
+            try {
+                withContext(Dispatchers.IO) { repo.renameMeeting(meeting.path, newTitle) }
+                loadMeetings()
+            } catch (e: Exception) {
+                _errorMessage.value = "Failed to rename meeting"
+            }
         }
     }
 
@@ -46,5 +53,9 @@ class MeetingsViewModel(application: Application) : AndroidViewModel(application
             withContext(Dispatchers.IO) { repo.deleteMeeting(meeting.path) }
             loadMeetings()
         }
+    }
+
+    fun clearError() {
+        _errorMessage.value = null
     }
 }

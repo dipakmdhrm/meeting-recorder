@@ -26,8 +26,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.github.meetingrecorder.R
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -49,10 +51,10 @@ fun MeetingDetailScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Meeting Detail") },
+                title = { Text(stringResource(R.string.title_meeting_detail)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                     }
                 },
             )
@@ -63,18 +65,18 @@ fun MeetingDetailScreen(
                 Tab(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
-                    text = { Text("Notes") },
+                    text = { Text(stringResource(R.string.label_notes)) },
                 )
                 Tab(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
-                    text = { Text("Transcript") },
+                    text = { Text(stringResource(R.string.label_transcript)) },
                 )
                 if (hasAudio) {
                     Tab(
                         selected = selectedTab == 2,
                         onClick = { selectedTab = 2 },
-                        text = { Text("Audio") },
+                        text = { Text(stringResource(R.string.label_audio)) },
                     )
                 }
             }
@@ -92,7 +94,7 @@ fun MeetingDetailScreen(
                         )
                     } else {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("No notes available")
+                            Text(stringResource(R.string.no_notes))
                         }
                     }
                 }
@@ -108,7 +110,7 @@ fun MeetingDetailScreen(
                         )
                     } else {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("No transcript available")
+                            Text(stringResource(R.string.no_transcript))
                         }
                     }
                 }

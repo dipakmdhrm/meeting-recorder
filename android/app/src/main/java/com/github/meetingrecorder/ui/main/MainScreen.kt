@@ -47,8 +47,10 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.github.meetingrecorder.R
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -105,16 +107,16 @@ fun MainScreen(
     if (showNoApiKeyDialog) {
         AlertDialog(
             onDismissRequest = { showNoApiKeyDialog = false },
-            title = { Text("API key required") },
-            text = { Text("Add your Gemini API key in Settings before recording.") },
+            title = { Text(stringResource(R.string.dialog_no_api_key_title)) },
+            text = { Text(stringResource(R.string.dialog_no_api_key_body)) },
             confirmButton = {
                 TextButton(onClick = {
                     showNoApiKeyDialog = false
                     onNavigateToSettings()
-                }) { Text("Open Settings") }
+                }) { Text(stringResource(R.string.action_open_settings)) }
             },
             dismissButton = {
-                TextButton(onClick = { showNoApiKeyDialog = false }) { Text("Cancel") }
+                TextButton(onClick = { showNoApiKeyDialog = false }) { Text(stringResource(R.string.action_cancel)) }
             },
         )
     }
@@ -122,13 +124,13 @@ fun MainScreen(
     if (showTitleDialog) {
         AlertDialog(
             onDismissRequest = { showTitleDialog = false },
-            title = { Text("Meeting title (optional)") },
+            title = { Text(stringResource(R.string.dialog_meeting_title)) },
             text = {
                 OutlinedTextField(
                     value = pendingTitle,
                     onValueChange = { pendingTitle = it },
-                    label = { Text("Title") },
-                    placeholder = { Text("e.g. Standup, Design Review…") },
+                    label = { Text(stringResource(R.string.label_title)) },
+                    placeholder = { Text(stringResource(R.string.placeholder_meeting_title)) },
                     singleLine = true,
                 )
             },
@@ -137,10 +139,10 @@ fun MainScreen(
                     showTitleDialog = false
                     viewModel.startRecording(pendingTitle.ifBlank { null })
                     pendingTitle = ""
-                }) { Text("Start recording") }
+                }) { Text(stringResource(R.string.cd_start_recording)) }
             },
             dismissButton = {
-                TextButton(onClick = { showTitleDialog = false }) { Text("Cancel") }
+                TextButton(onClick = { showTitleDialog = false }) { Text(stringResource(R.string.action_cancel)) }
             },
         )
     }
@@ -148,13 +150,13 @@ fun MainScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Meeting Recorder") },
+                title = { Text(stringResource(R.string.app_name)) },
                 actions = {
                     IconButton(onClick = onNavigateToMeetings) {
-                        Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Meetings")
+                        Icon(Icons.AutoMirrored.Filled.List, contentDescription = stringResource(R.string.cd_meetings))
                     }
                     IconButton(onClick = onNavigateToSettings) {
-                        Icon(Icons.Default.Settings, contentDescription = "Settings")
+                        Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.cd_settings))
                     }
                 },
             )
@@ -223,21 +225,21 @@ private fun ReadyContent(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Text(
-                        "Storage permission required",
+                        stringResource(R.string.storage_permission_title),
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.error,
                     )
                     Text(
-                        "Grant 'All files access' so recordings can be saved to Documents/Meetings.",
+                        stringResource(R.string.storage_permission_rationale),
                         style = MaterialTheme.typography.bodySmall,
                     )
-                    Button(onClick = onGrantStorage) { Text("Grant permission") }
+                    Button(onClick = onGrantStorage) { Text(stringResource(R.string.action_grant_permission)) }
                 }
             }
         }
-        Text("Ready to record", style = MaterialTheme.typography.bodyLarge)
+        Text(stringResource(R.string.status_ready), style = MaterialTheme.typography.bodyLarge)
         FloatingActionButton(onClick = onRecord) {
-            Icon(Icons.Default.Mic, contentDescription = "Start recording")
+            Icon(Icons.Default.Mic, contentDescription = stringResource(R.string.cd_start_recording))
         }
     }
 }
@@ -251,14 +253,14 @@ private fun RecordingContent(elapsedSecs: Int, onStop: () -> Unit) {
         val mins = elapsedSecs / 60
         val secs = elapsedSecs % 60
         Text(
-            text = "Recording… %02d:%02d".format(mins, secs),
+            text = stringResource(R.string.status_recording, mins, secs),
             style = MaterialTheme.typography.headlineSmall,
         )
         FloatingActionButton(
             onClick = onStop,
             containerColor = MaterialTheme.colorScheme.error,
         ) {
-            Icon(Icons.Default.Stop, contentDescription = "Stop recording")
+            Icon(Icons.Default.Stop, contentDescription = stringResource(R.string.cd_stop_recording))
         }
     }
 }
@@ -271,15 +273,15 @@ private fun CountdownContent(remainingSecs: Int, onCancel: () -> Unit) {
         modifier = Modifier.padding(16.dp),
     ) {
         Text(
-            text = "Starting transcription in ${remainingSecs}s…",
+            text = stringResource(R.string.status_countdown, remainingSecs),
             style = MaterialTheme.typography.headlineSmall,
         )
         Text(
-            text = "Cancel to save audio only (no transcription)",
+            text = stringResource(R.string.countdown_hint),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        OutlinedButton(onClick = onCancel) { Text("Cancel transcription") }
+        OutlinedButton(onClick = onCancel) { Text(stringResource(R.string.action_cancel_transcription)) }
     }
 }
 
@@ -300,10 +302,10 @@ private fun DoneContent(notes: String, onSave: () -> Unit, onDiscard: () -> Unit
         modifier = Modifier.padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("Processing complete!", style = MaterialTheme.typography.titleMedium)
+        Text(stringResource(R.string.status_processing_complete), style = MaterialTheme.typography.titleMedium)
         OutlinedCard {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Notes preview:", style = MaterialTheme.typography.labelMedium)
+                Text(stringResource(R.string.label_notes_preview), style = MaterialTheme.typography.labelMedium)
                 Text(
                     text = if (notes.length > 400) notes.take(400) + "…" else notes,
                     style = MaterialTheme.typography.bodySmall,
@@ -311,8 +313,8 @@ private fun DoneContent(notes: String, onSave: () -> Unit, onDiscard: () -> Unit
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onSave) { Text("Save") }
-            OutlinedButton(onClick = onDiscard) { Text("Discard") }
+            Button(onClick = onSave) { Text(stringResource(R.string.action_save)) }
+            OutlinedButton(onClick = onDiscard) { Text(stringResource(R.string.action_discard)) }
         }
     }
 }
@@ -324,7 +326,7 @@ private fun ErrorContent(msg: String, onDismiss: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
         modifier = Modifier.padding(16.dp),
     ) {
-        Text("Error: $msg", color = MaterialTheme.colorScheme.error)
-        Button(onClick = onDismiss) { Text("OK") }
+        Text(stringResource(R.string.error_with_message, msg), color = MaterialTheme.colorScheme.error)
+        Button(onClick = onDismiss) { Text(stringResource(R.string.action_ok)) }
     }
 }

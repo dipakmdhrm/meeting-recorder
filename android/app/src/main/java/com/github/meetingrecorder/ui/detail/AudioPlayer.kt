@@ -20,7 +20,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.github.meetingrecorder.R
 
 @Composable
 fun AudioPlayer(viewModel: MeetingDetailViewModel) {
@@ -43,14 +45,14 @@ fun AudioPlayer(viewModel: MeetingDetailViewModel) {
             IconButton(onClick = { viewModel.playPause() }) {
                 Icon(
                     imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                    contentDescription = if (isPlaying) "Pause" else "Play",
+                    contentDescription = stringResource(if (isPlaying) R.string.cd_pause else R.string.cd_play),
                     modifier = Modifier.size(48.dp)
                 )
             }
             IconButton(onClick = { viewModel.stop() }) {
                 Icon(
                     imageVector = Icons.Filled.Stop,
-                    contentDescription = "Stop",
+                    contentDescription = stringResource(R.string.cd_stop),
                     modifier = Modifier.size(48.dp)
                 )
             }

@@ -37,9 +37,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.github.meetingrecorder.R
 import com.github.meetingrecorder.data.AudioQuality
 import com.github.meetingrecorder.data.Config
 
@@ -54,10 +56,10 @@ fun SettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Settings") },
+                title = { Text(stringResource(R.string.title_settings)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                     }
                 },
             )
@@ -68,12 +70,12 @@ fun SettingsScreen(
                 Tab(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
-                    text = { Text("General") },
+                    text = { Text(stringResource(R.string.tab_general)) },
                 )
                 Tab(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
-                    text = { Text("Prompts") },
+                    text = { Text(stringResource(R.string.tab_prompts)) },
                 )
             }
 
@@ -110,7 +112,7 @@ private fun GeneralTab(viewModel: SettingsViewModel) {
         OutlinedTextField(
             value = apiKeyDraft,
             onValueChange = { apiKeyDraft = it },
-            label = { Text("Gemini API Key") },
+            label = { Text(stringResource(R.string.label_gemini_api_key)) },
             visualTransformation = PasswordVisualTransformation(),
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
@@ -124,7 +126,7 @@ private fun GeneralTab(viewModel: SettingsViewModel) {
                 value = modelDraft,
                 onValueChange = {},
                 readOnly = true,
-                label = { Text("Model") },
+                label = { Text(stringResource(R.string.label_model)) },
                 trailingIcon = {
                     ExposedDropdownMenuDefaults.TrailingIcon(expanded = modelMenuExpanded)
                 },
@@ -156,7 +158,7 @@ private fun GeneralTab(viewModel: SettingsViewModel) {
                 value = audioQualityDraft.label,
                 onValueChange = {},
                 readOnly = true,
-                label = { Text("Recording Quality") },
+                label = { Text(stringResource(R.string.label_recording_quality)) },
                 trailingIcon = {
                     ExposedDropdownMenuDefaults.TrailingIcon(expanded = qualityMenuExpanded)
                 },
@@ -187,9 +189,9 @@ private fun GeneralTab(viewModel: SettingsViewModel) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("Processing countdown (5 s)", style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.label_processing_countdown), style = MaterialTheme.typography.bodyMedium)
                 Text(
-                    "Show a 5-second countdown after stopping — cancel to skip transcription and save audio only.",
+                    stringResource(R.string.desc_processing_countdown),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -209,7 +211,7 @@ private fun GeneralTab(viewModel: SettingsViewModel) {
             },
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Save")
+            Text(stringResource(R.string.action_save))
         }
     }
 }
@@ -238,19 +240,19 @@ private fun PromptsTab(viewModel: SettingsViewModel) {
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         PromptField(
-            label = "Transcription Prompt",
+            label = stringResource(R.string.label_transcription_prompt),
             value = transcriptionDraft,
             onValueChange = { transcriptionDraft = it },
             isDefault = transcriptionDraft == Config.DEFAULT_TRANSCRIPTION_PROMPT,
         )
         PromptField(
-            label = "Summarization Prompt",
+            label = stringResource(R.string.label_summarization_prompt),
             value = summarizationDraft,
             onValueChange = { summarizationDraft = it },
             isDefault = summarizationDraft == Config.DEFAULT_SUMMARIZATION_PROMPT,
         )
         PromptField(
-            label = "Meeting Title Prompt",
+            label = stringResource(R.string.label_meeting_title_prompt),
             value = titleDraft,
             onValueChange = { titleDraft = it },
             isDefault = titleDraft == Config.DEFAULT_TITLE_PROMPT,
@@ -271,7 +273,7 @@ private fun PromptsTab(viewModel: SettingsViewModel) {
             },
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Save")
+            Text(stringResource(R.string.action_save))
         }
     }
 }
@@ -288,7 +290,7 @@ private fun PromptField(
         onValueChange = onValueChange,
         label = { Text(label) },
         supportingText = if (isDefault) {
-            { Text("Showing default — edit to customize") }
+            { Text(stringResource(R.string.hint_showing_default)) }
         } else null,
         modifier = Modifier.fillMaxWidth(),
         minLines = 5,
