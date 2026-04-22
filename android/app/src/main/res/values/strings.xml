@@ -16,6 +16,8 @@
     <string name="placeholder_meeting_title">e.g. Standup, Design Review…</string>
 
     <!-- Main Screen -->
+    <string name="action_use_existing_recording">Use Existing Recording</string>
+    <string name="status_copying_audio">Copying audio file…</string>
     <string name="cd_meetings">Meetings</string>
     <string name="cd_settings">Settings</string>
     <string name="cd_start_recording">Start recording</string>

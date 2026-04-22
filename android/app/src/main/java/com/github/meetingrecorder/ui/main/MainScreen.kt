@@ -11,11 +11,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
@@ -89,6 +92,12 @@ fun MainScreen(
         ActivityResultContracts.StartActivityForResult()
     ) { /* re-check happens on next tap */ }
 
+    val pickAudioLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let { viewModel.processExistingRecording(it) }
+    }
+
     fun requestPermissionsAndRecord() {
         if (!viewModel.hasApiKey()) {
             showNoApiKeyDialog = true
@@ -102,6 +111,21 @@ fun MainScreen(
             return
         }
         audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
+    fun requestPermissionsAndPickFile() {
+        if (!viewModel.hasApiKey()) {
+            showNoApiKeyDialog = true
+            return
+        }
+        if (!hasStoragePermission) {
+            val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                data = Uri.parse("package:${context.packageName}")
+            }
+            storageSettingsLauncher.launch(intent)
+            return
+        }
+        pickAudioLauncher.launch(arrayOf("audio/*"))
     }
 
     if (showNoApiKeyDialog) {
@@ -171,6 +195,7 @@ fun MainScreen(
             when (val s = state) {
                 is RecordingState.Ready -> ReadyContent(
                     onRecord = { requestPermissionsAndRecord() },
+                    onUseExistingRecording = { requestPermissionsAndPickFile() },
                     storagePermissionMissing = !hasStoragePermission,
                     onGrantStorage = {
                         val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
@@ -210,6 +235,7 @@ fun MainScreen(
 @Composable
 private fun ReadyContent(
     onRecord: () -> Unit,
+    onUseExistingRecording: () -> Unit,
     storagePermissionMissing: Boolean,
     onGrantStorage: () -> Unit,
 ) {
@@ -240,6 +266,11 @@ private fun ReadyContent(
         Text(stringResource(R.string.status_ready), style = MaterialTheme.typography.bodyLarge)
         FloatingActionButton(onClick = onRecord) {
             Icon(Icons.Default.Mic, contentDescription = stringResource(R.string.cd_start_recording))
+        }
+        OutlinedButton(onClick = onUseExistingRecording) {
+            Icon(Icons.Default.FolderOpen, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(R.string.action_use_existing_recording))
         }
     }
 }

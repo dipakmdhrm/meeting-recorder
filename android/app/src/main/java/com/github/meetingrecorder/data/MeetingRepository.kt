@@ -115,4 +115,17 @@ class MeetingRepository(private val rootDir: File) {
         }
     }
 
+    /**
+     * Returns the meeting directory that directly contains [file], or null if the file
+     * is not inside a recognised meeting directory under [rootDir].
+     */
+    fun meetingDirContaining(file: File): File? {
+        val parent = file.parentFile ?: return null
+        val pattern = Regex("""^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})(?:_.*)?$""")
+        if (!pattern.matches(parent.name)) return null
+        return try {
+            if (parent.parentFile?.canonicalPath == rootDir.canonicalPath) parent else null
+        } catch (_: Exception) { null }
+    }
+
 }

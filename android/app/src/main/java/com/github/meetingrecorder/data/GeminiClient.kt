@@ -27,10 +27,11 @@ class GeminiClient(
 
     suspend fun transcribe(
         audioFile: File,
+        mimeType: String = "audio/mp4",
         onStatus: (String) -> Unit = {},
     ): String = withContext(Dispatchers.IO) {
         onStatus("Uploading audio…")
-        val uploadedFileName = uploadFile(audioFile, "audio/mp4")
+        val uploadedFileName = uploadFile(audioFile, mimeType)
 
         onStatus("Processing audio file…")
         waitForFileActive(uploadedFileName, onStatus)
@@ -39,7 +40,7 @@ class GeminiClient(
         generateContent(
             prompt = config.transcriptionPrompt.ifBlank { Config.DEFAULT_TRANSCRIPTION_PROMPT },
             fileUri = "$baseUrl/v1beta/$uploadedFileName",
-            mimeType = "audio/mp4",
+            mimeType = mimeType,
         )
     }
 
