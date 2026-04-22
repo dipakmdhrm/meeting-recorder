@@ -7,6 +7,7 @@ import android.provider.DocumentsContract
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.github.meetingrecorder.MeetingRecorderApp
+import com.github.meetingrecorder.R
 import com.github.meetingrecorder.audio.AudioRecorder
 import com.github.meetingrecorder.data.GeminiClient
 import kotlinx.coroutines.Dispatchers
@@ -109,7 +110,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     "Grant 'All files access' in Settings → Apps → Meeting Recorder → Permissions."
                 )
             app.config.processingCountdownEnabled -> startCountdown(audioFile)
-            else -> processRecording(audioFile)
+            else -> viewModelScope.launch {
+                try {
+                    processRecording(audioFile)
+                } catch (e: Exception) {
+                    _state.value = RecordingState.Error(e.message ?: "Processing failed")
+                }
+            }
         }
     }
 
@@ -125,7 +132,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _state.value = RecordingState.Countdown(remaining)
                 } else {
                     pendingAudioFile = null
-                    processRecording(audioFile)
+                    try {
+                        processRecording(audioFile)
+                    } catch (e: Exception) {
+                        _state.value = RecordingState.Error(e.message ?: "Processing failed")
+                    }
                 }
             }
         }
@@ -197,27 +208,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // No lock file: the meeting remains visible in the list (with audio only) while
         // processing runs. If processing fails the original audio-only meeting is unaffected.
         lockFile = null
-        processRecording(audioFile, extensionToMimeType(audioFile.extension))
+        viewModelScope.launch {
+            try {
+                processRecording(audioFile, extensionToMimeType(audioFile.extension))
+            } catch (e: Exception) {
+                _state.value = RecordingState.Error(e.message ?: "Processing failed")
+            }
+        }
     }
 
     private fun copyAndProcess(uri: Uri) {
-        val meetingDir = try {
-            app.meetingRepository.createMeetingDir(null)
-        } catch (e: Exception) {
-            _state.value = RecordingState.Error("Could not create recording folder: ${e.message}")
-            return
-        }
-        currentMeetingDir = meetingDir
         currentTitle = null
         durationSeconds = 0
         isInPlace = false
-        lockFile = File(meetingDir, ".recording").also { it.createNewFile() }
 
         viewModelScope.launch {
             try {
+                // Directory creation and lock file are blocking I/O — run on IO dispatcher.
+                val (meetingDir, lf) = withContext(Dispatchers.IO) {
+                    val dir = app.meetingRepository.createMeetingDir(null)
+                    val lf = File(dir, ".recording").also { it.createNewFile() }
+                    dir to lf
+                }
+                currentMeetingDir = meetingDir
+                lockFile = lf
+
+                _state.value = RecordingState.Processing(app.getString(R.string.status_copying_audio))
+
+                // Always store as recording.m4a so listMeetings() hasAudio detection works.
+                // The correct MIME type is still passed to Gemini for upload.
                 val mimeType = normalizeMimeType(app.contentResolver.getType(uri) ?: "audio/mp4")
                 val audioFile = withContext(Dispatchers.IO) {
-                    val dest = File(meetingDir, "recording.${mimeTypeToExtension(mimeType)}")
+                    val dest = File(meetingDir, "recording.m4a")
                     app.contentResolver.openInputStream(uri)?.use { input ->
                         dest.outputStream().use { output -> input.copyTo(output) }
                     } ?: throw RuntimeException("Could not open selected file")
@@ -256,15 +278,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         else -> mimeType
     }
 
-    private fun mimeTypeToExtension(mimeType: String): String = when (mimeType) {
-        "audio/mpeg" -> "mp3"
-        "audio/wav" -> "wav"
-        "audio/ogg" -> "ogg"
-        "audio/flac" -> "flac"
-        "audio/webm" -> "webm"
-        else -> "m4a"
-    }
-
     private fun extensionToMimeType(ext: String): String = when (ext.lowercase()) {
         "mp3" -> "audio/mpeg"
         "wav" -> "audio/wav"
@@ -274,31 +287,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         else -> "audio/mp4"
     }
 
-    private fun processRecording(audioFile: File, mimeType: String = "audio/mp4") {
-        viewModelScope.launch {
+    private suspend fun processRecording(audioFile: File, mimeType: String = "audio/mp4") {
+        val gemini = GeminiClient(app.config)
+
+        val transcript = gemini.transcribe(audioFile, mimeType) { status ->
+            _state.value = RecordingState.Processing(status)
+        }
+        val notes = gemini.summarize(transcript) { status ->
+            _state.value = RecordingState.Processing(status)
+        }
+
+        // Auto-generate title when none was provided
+        if (currentTitle == null) {
             try {
-                val gemini = GeminiClient(app.config)
-
-                val transcript = gemini.transcribe(audioFile, mimeType) { status ->
-                    _state.value = RecordingState.Processing(status)
-                }
-                val notes = gemini.summarize(transcript) { status ->
-                    _state.value = RecordingState.Processing(status)
-                }
-
-                // Auto-generate title when none was provided
-                if (currentTitle == null) {
-                    try {
-                        currentTitle = gemini.generateTitle(notes).trim()
-                    } catch (_: Exception) {
-                    }
-                }
-
-                _state.value = RecordingState.Done(transcript, notes)
-            } catch (e: Exception) {
-                _state.value = RecordingState.Error(e.message ?: "Processing failed")
+                currentTitle = gemini.generateTitle(notes).trim()
+            } catch (_: Exception) {
             }
         }
+
+        _state.value = RecordingState.Done(transcript, notes)
     }
 
     fun saveResults() {
