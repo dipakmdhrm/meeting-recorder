@@ -2,6 +2,8 @@ package com.github.meetingrecorder.ui.main
 
 import android.app.Application
 import android.net.Uri
+import android.os.Environment
+import android.provider.DocumentsContract
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.github.meetingrecorder.MeetingRecorderApp
@@ -15,6 +17,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.io.File
 
 sealed class RecordingState {
@@ -41,6 +44,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var lockFile: File? = null
     private var currentTitle: String? = null
     private var durationSeconds: Int = 0
+    // True when processing a file that already lives inside a meeting directory (no copy was made).
+    // discardResults() must not delete the directory in this case.
+    private var isInPlace: Boolean = false
 
     fun hasApiKey(): Boolean = app.config.apiKey.isNotBlank()
 
@@ -157,6 +163,44 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
+        // If the URI resolves to a file that already lives inside a meeting directory,
+        // process it in-place — no copy, no new directory.
+        val resolvedFile = resolveUriToFile(uri)
+        val existingDir = resolvedFile?.let { app.meetingRepository.meetingDirContaining(it) }
+        if (existingDir != null && resolvedFile != null) {
+            processInPlace(existingDir, resolvedFile)
+        } else {
+            copyAndProcess(uri)
+        }
+    }
+
+    private fun processInPlace(meetingDir: File, audioFile: File) {
+        currentMeetingDir = meetingDir
+        isInPlace = true
+
+        // Preserve existing title and duration so saveResults() writes them back correctly.
+        val metaFile = File(meetingDir, "meeting.json")
+        if (metaFile.exists()) {
+            try {
+                val json = JSONObject(metaFile.readText())
+                currentTitle = json.optString("title").ifBlank { null }
+                durationSeconds = if (json.has("duration_seconds")) json.getInt("duration_seconds") else 0
+            } catch (_: Exception) {
+                currentTitle = null
+                durationSeconds = 0
+            }
+        } else {
+            currentTitle = null
+            durationSeconds = 0
+        }
+
+        // No lock file: the meeting remains visible in the list (with audio only) while
+        // processing runs. If processing fails the original audio-only meeting is unaffected.
+        lockFile = null
+        processRecording(audioFile, extensionToMimeType(audioFile.extension))
+    }
+
+    private fun copyAndProcess(uri: Uri) {
         val meetingDir = try {
             app.meetingRepository.createMeetingDir(null)
         } catch (e: Exception) {
@@ -166,6 +210,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         currentMeetingDir = meetingDir
         currentTitle = null
         durationSeconds = 0
+        isInPlace = false
         lockFile = File(meetingDir, ".recording").also { it.createNewFile() }
 
         viewModelScope.launch {
@@ -190,6 +235,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Resolves a content/file URI to a File on primary external storage, or null if not possible. */
+    private fun resolveUriToFile(uri: Uri): File? {
+        if (uri.scheme == "file") return File(uri.path ?: return null)
+        if (uri.scheme == "content" &&
+            uri.authority == "com.android.externalstorage.documents") {
+            val docId = DocumentsContract.getDocumentId(uri)
+            val parts = docId.split(":")
+            if (parts.size == 2 && parts[0] == "primary") {
+                return File(Environment.getExternalStorageDirectory(), parts[1])
+            }
+        }
+        return null
+    }
+
     private fun normalizeMimeType(mimeType: String): String = when (mimeType) {
         "audio/m4a", "audio/x-m4a" -> "audio/mp4"
         "audio/x-wav" -> "audio/wav"
@@ -204,6 +263,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         "audio/flac" -> "flac"
         "audio/webm" -> "webm"
         else -> "m4a"
+    }
+
+    private fun extensionToMimeType(ext: String): String = when (ext.lowercase()) {
+        "mp3" -> "audio/mpeg"
+        "wav" -> "audio/wav"
+        "ogg" -> "audio/ogg"
+        "flac" -> "audio/flac"
+        "webm" -> "audio/webm"
+        else -> "audio/mp4"
     }
 
     private fun processRecording(audioFile: File, mimeType: String = "audio/mp4") {
@@ -244,6 +312,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 app.meetingRepository.saveMeetingMeta(meetingDir, currentTitle, durationSeconds)
                 lockFile?.delete()
                 lockFile = null
+                isInPlace = false
                 _state.value = RecordingState.Ready
             } catch (e: Exception) {
                 _state.value = RecordingState.Error("Save failed: ${e.message}")
@@ -254,12 +323,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun discardResults() {
         lockFile?.delete()
         lockFile = null
-        currentMeetingDir?.deleteRecursively()
+        if (!isInPlace) {
+            // New recording or copied import — remove the directory we created.
+            currentMeetingDir?.deleteRecursively()
+        }
+        // In-place: leave the existing meeting directory untouched (audio is still there).
+        isInPlace = false
         currentMeetingDir = null
         _state.value = RecordingState.Ready
     }
 
     fun dismissError() {
+        isInPlace = false
         _state.value = RecordingState.Ready
     }
 }
