@@ -1,17 +1,20 @@
 package com.github.meetingrecorder.ui.main
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.github.meetingrecorder.MeetingRecorderApp
 import com.github.meetingrecorder.audio.AudioRecorder
 import com.github.meetingrecorder.data.GeminiClient
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 sealed class RecordingState {
@@ -148,12 +151,67 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun processRecording(audioFile: File) {
+    fun processExistingRecording(uri: Uri) {
+        if (!hasApiKey()) {
+            _state.value = RecordingState.Error("No Gemini API key set. Add one in Settings.")
+            return
+        }
+
+        val meetingDir = try {
+            app.meetingRepository.createMeetingDir(null)
+        } catch (e: Exception) {
+            _state.value = RecordingState.Error("Could not create recording folder: ${e.message}")
+            return
+        }
+        currentMeetingDir = meetingDir
+        currentTitle = null
+        durationSeconds = 0
+        lockFile = File(meetingDir, ".recording").also { it.createNewFile() }
+
+        viewModelScope.launch {
+            try {
+                val mimeType = normalizeMimeType(app.contentResolver.getType(uri) ?: "audio/mp4")
+                val audioFile = withContext(Dispatchers.IO) {
+                    val dest = File(meetingDir, "recording.${mimeTypeToExtension(mimeType)}")
+                    app.contentResolver.openInputStream(uri)?.use { input ->
+                        dest.outputStream().use { output -> input.copyTo(output) }
+                    } ?: throw RuntimeException("Could not open selected file")
+                    if (dest.length() == 0L) throw RuntimeException("Selected file is empty")
+                    dest
+                }
+                processRecording(audioFile, mimeType)
+            } catch (e: Exception) {
+                lockFile?.delete()
+                lockFile = null
+                currentMeetingDir?.deleteRecursively()
+                currentMeetingDir = null
+                _state.value = RecordingState.Error(e.message ?: "Failed to import recording")
+            }
+        }
+    }
+
+    private fun normalizeMimeType(mimeType: String): String = when (mimeType) {
+        "audio/m4a", "audio/x-m4a" -> "audio/mp4"
+        "audio/x-wav" -> "audio/wav"
+        "audio/mp3" -> "audio/mpeg"
+        else -> mimeType
+    }
+
+    private fun mimeTypeToExtension(mimeType: String): String = when (mimeType) {
+        "audio/mpeg" -> "mp3"
+        "audio/wav" -> "wav"
+        "audio/ogg" -> "ogg"
+        "audio/flac" -> "flac"
+        "audio/webm" -> "webm"
+        else -> "m4a"
+    }
+
+    private fun processRecording(audioFile: File, mimeType: String = "audio/mp4") {
         viewModelScope.launch {
             try {
                 val gemini = GeminiClient(app.config)
 
-                val transcript = gemini.transcribe(audioFile) { status ->
+                val transcript = gemini.transcribe(audioFile, mimeType) { status ->
                     _state.value = RecordingState.Processing(status)
                 }
                 val notes = gemini.summarize(transcript) { status ->
