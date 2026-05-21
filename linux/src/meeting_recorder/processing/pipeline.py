@@ -104,7 +104,7 @@ class Pipeline:
 
         meeting_dir = self._audio_path.parent
         import re
-        if not re.match(r"^\d{2}-\d{2}$", meeting_dir.name):
+        if not re.match(r"^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}(?:_\d+)?$", meeting_dir.name):
             # User likely provided a title already
             return
 

@@ -31,6 +31,17 @@ class Meeting:
     duration_seconds: int | None  # audio duration in seconds, None if unknown
 
 
+def find_audio_file(meeting_path: Path) -> Path | None:
+    """Return the first audio file in the meeting directory, or None."""
+    try:
+        for f in meeting_path.iterdir():
+            if f.is_file() and f.suffix in _AUDIO_EXTENSIONS:
+                return f
+    except OSError:
+        pass
+    return None
+
+
 def scan_meetings(output_folder: str) -> list[Meeting]:
     """Walk the output folder and return all meetings, newest first.
 

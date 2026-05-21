@@ -31,9 +31,10 @@ logger = logging.getLogger(__name__)
 class MeetingExplorer(Gtk.Box):
     """Scrollable meeting list with AI title generation and multi-select delete."""
 
-    def __init__(self) -> None:
+    def __init__(self, on_summarize=None) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
 
+        self._on_summarize_callback = on_summarize
         self._meeting_rows: list[dict] = []  # [{meeting, check, row, ...}, ...]
 
         # Toolbar
@@ -196,6 +197,24 @@ class MeetingExplorer(Gtk.Box):
 
         row.pack_start(ai_box, False, False, 0)
 
+        # Summarize button — shown when audio exists but no transcript/notes
+        if (
+            self._on_summarize_callback
+            and meeting.has_audio
+            and not meeting.has_transcript
+            and not meeting.has_notes
+        ):
+            summarize_btn = Gtk.Button()
+            summarize_btn.set_image(
+                Gtk.Image.new_from_icon_name("system-run-symbolic", Gtk.IconSize.BUTTON))
+            summarize_btn.set_tooltip_text("Transcribe and summarize this recording")
+            summarize_btn.connect(
+                "clicked",
+                lambda *_, rd=row_data: self._on_summarize_clicked(rd),
+            )
+            row.pack_start(summarize_btn, False, False, 0)
+            row_data["summarize_btn"] = summarize_btn
+
         # Rename button
         rename_btn = Gtk.Button()
         rename_btn.set_image(
@@ -332,6 +351,16 @@ class MeetingExplorer(Gtk.Box):
             return False
         self._start_inline_edit(row_data)
         return True  # stop propagation
+
+    # -- Summarize -------------------------------------------------------------
+
+    def _on_summarize_clicked(self, row_data: dict) -> None:
+        """Disable the button and delegate to the main window callback."""
+        btn = row_data.get("summarize_btn")
+        if btn:
+            btn.set_sensitive(False)
+        if self._on_summarize_callback:
+            self._on_summarize_callback(row_data["meeting"])
 
     # -- Delete ----------------------------------------------------------------
 

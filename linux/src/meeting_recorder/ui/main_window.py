@@ -21,6 +21,7 @@ from gi.repository import Gtk, GLib
 from meeting_recorder.config import settings
 from ..utils.glib_bridge import assert_main_thread, idle_call
 from meeting_recorder.utils.filename import output_paths
+from meeting_recorder.utils.meeting_scanner import Meeting, find_audio_file
 from .meeting_explorer import MeetingExplorer
 
 logger = logging.getLogger(__name__)
@@ -199,7 +200,7 @@ class MainWindow(Gtk.ApplicationWindow):
         # -------------------------------------------------------------
         # View 2: Meeting Explorer
         # -------------------------------------------------------------
-        self._explorer = MeetingExplorer()
+        self._explorer = MeetingExplorer(on_summarize=self._on_summarize_from_explorer)
         self._stack.add_titled(self._explorer, "explorer", "Library")
         self._stack.connect("notify::visible-child-name", self._on_stack_switched)
 
@@ -515,6 +516,49 @@ class MainWindow(Gtk.ApplicationWindow):
         self._jobs.append(job)
         self._add_job_row(job)
         self._notify_tray()
+        threading.Thread(
+            target=self._run_pipeline_for_job, args=(job,), daemon=True
+        ).start()
+
+    def _on_summarize_from_explorer(self, meeting: Meeting) -> None:
+        """Handle a Summarize request from the meeting explorer."""
+        assert_main_thread()
+
+        cfg = settings.load()
+        ts = cfg.get("transcription_service", "gemini")
+        ss = cfg.get("summarization_service", "gemini")
+        key_missing = self._check_api_keys(cfg, ts, ss)
+        if key_missing:
+            self._show_error(key_missing)
+            return
+
+        audio_path = find_audio_file(meeting.path)
+        if not audio_path:
+            self._show_error("No audio file found in meeting folder.")
+            return
+
+        if any(j.audio_path == audio_path and j.status == "processing" for j in self._jobs):
+            self._show_error("This meeting is already being processed.")
+            return
+
+        transcript_path = meeting.path / "transcript.md"
+        notes_path = meeting.path / "notes.md"
+
+        job = _Job(
+            job_id=self._next_job_id,
+            audio_path=audio_path,
+            transcript_path=transcript_path,
+            notes_path=notes_path,
+            label=meeting.time_label,
+        )
+        self._next_job_id += 1
+        self._jobs.append(job)
+        self._add_job_row(job)
+        self._notify_tray()
+
+        # Switch to the Record tab so the user sees job progress
+        self._stack.set_visible_child_name("recorder")
+
         threading.Thread(
             target=self._run_pipeline_for_job, args=(job,), daemon=True
         ).start()
