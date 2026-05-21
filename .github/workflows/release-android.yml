@@ -16,6 +16,12 @@ on:
   push:
     tags:
       - 'android-*'
+  workflow_call:
+    inputs:
+      version:
+        description: 'Release version (without android- prefix, e.g. 0.1.0)'
+        required: true
+        type: string
 
 jobs:
   build-apk:
@@ -39,7 +45,11 @@ jobs:
       - name: Extract version from tag
         id: version
         run: |
-          VERSION="${GITHUB_REF_NAME#android-}"
+          if [ -n "${{ inputs.version || '' }}" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#android-}"
+          fi
           echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
           IFS='.' read -r major minor patch <<< "$VERSION"
           echo "VERSION_CODE=$(( major * 10000 + minor * 100 + patch ))" >> "$GITHUB_OUTPUT"
