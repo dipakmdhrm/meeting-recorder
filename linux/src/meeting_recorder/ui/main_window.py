@@ -537,6 +537,10 @@ class MainWindow(Gtk.ApplicationWindow):
             self._show_error("No audio file found in meeting folder.")
             return
 
+        if any(j.audio_path == audio_path and j.status == "processing" for j in self._jobs):
+            self._show_error("This meeting is already being processed.")
+            return
+
         transcript_path = meeting.path / "transcript.md"
         notes_path = meeting.path / "notes.md"
 

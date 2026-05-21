@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 class MeetingExplorer(Gtk.Box):
     """Scrollable meeting list with AI title generation and multi-select delete."""
 
-    def __init__(self, on_summarize: callable | None = None) -> None:
+    def __init__(self, on_summarize=None) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
 
         self._on_summarize_callback = on_summarize
