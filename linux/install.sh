@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install.sh — Install Meeting Recorder on Debian, Fedora, or Arch-based Linux
+# install.sh — Install Meeting Recorder on Debian, Fedora, or Arch-based Linux.
 set -euo pipefail
 
 APP_NAME="meeting-recorder"
