@@ -1,0 +1,91 @@
+name: Auto Release
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  auto-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Detect changed directories
+        id: changes
+        run: |
+          CHANGED=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }})
+          LINUX=false
+          ANDROID=false
+          echo "$CHANGED" | grep -q '^linux/' && LINUX=true || true
+          echo "$CHANGED" | grep -q '^android/' && ANDROID=true || true
+          echo "linux=$LINUX" >> "$GITHUB_OUTPUT"
+          echo "android=$ANDROID" >> "$GITHUB_OUTPUT"
+
+      - name: Get bump type from PR labels
+        id: bump
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_NUMBER=$(gh api "/repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" \
+            --jq '.[0].number // empty' 2>/dev/null || true)
+
+          BUMP="patch"
+          SKIP=false
+          if [ -n "$PR_NUMBER" ]; then
+            LABELS=$(gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name')
+            echo "$LABELS" | grep -q '^release:skip$' && SKIP=true || true
+            echo "$LABELS" | grep -q '^release:major$' && BUMP="major" || true
+            echo "$LABELS" | grep -q '^release:minor$' && BUMP="minor" || true
+          fi
+
+          echo "type=$BUMP" >> "$GITHUB_OUTPUT"
+          echo "skip=$SKIP" >> "$GITHUB_OUTPUT"
+
+      - name: Create Linux tag
+        if: steps.changes.outputs.linux == 'true' && steps.bump.outputs.skip != 'true'
+        run: |
+          LATEST=$(git tag -l 'v*' --sort=-v:refname | head -1)
+          if [ -z "$LATEST" ]; then
+            NEW_TAG="v1.0.0"
+          else
+            VERSION="${LATEST#v}"
+            IFS='.' read -r major minor patch <<< "$VERSION"
+            case "${{ steps.bump.outputs.type }}" in
+              major) NEW_TAG="v$((major + 1)).0.0" ;;
+              minor) NEW_TAG="v${major}.$((minor + 1)).0" ;;
+              patch) NEW_TAG="v${major}.${minor}.$((patch + 1))" ;;
+            esac
+          fi
+          git tag "$NEW_TAG"
+          git push origin "$NEW_TAG"
+          echo "### Linux release: $NEW_TAG" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create Android tag
+        if: steps.changes.outputs.android == 'true' && steps.bump.outputs.skip != 'true'
+        run: |
+          LATEST=$(git tag -l 'android-*' --sort=-v:refname | head -1)
+          if [ -z "$LATEST" ]; then
+            NEW_TAG="android-0.1.0"
+          else
+            VERSION="${LATEST#android-}"
+            IFS='.' read -r major minor patch <<< "$VERSION"
+            case "${{ steps.bump.outputs.type }}" in
+              major) NEW_TAG="android-$((major + 1)).0.0" ;;
+              minor) NEW_TAG="android-${major}.$((minor + 1)).0" ;;
+              patch) NEW_TAG="android-${major}.${minor}.$((patch + 1))" ;;
+            esac
+          fi
+          git tag "$NEW_TAG"
+          git push origin "$NEW_TAG"
+          echo "### Android release: $NEW_TAG" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: No release needed
+        if: >-
+          (steps.changes.outputs.linux != 'true' && steps.changes.outputs.android != 'true')
+          || steps.bump.outputs.skip == 'true'
+        run: echo "### No release created" >> "$GITHUB_STEP_SUMMARY"
