@@ -477,23 +477,38 @@ class MainWindow(Gtk.ApplicationWindow):
         if response != Gtk.ResponseType.OK or not filename:
             return
 
-        # Create a new session directory for the imported file
-        new_audio_path, new_transcript_path, new_notes_path = output_paths(
-            cfg.get("output_folder", "~/meetings")
-        )
-        
-        # Copy the user-selected audio to the new session directory
-        try:
-            shutil.copy(filename, new_audio_path)
-        except Exception as e:
-            self._show_error(f"Failed to copy audio file: {e}")
-            return
+        # If the selected file is already inside a meeting subdirectory,
+        # process it in-place instead of copying to a new directory.
+        output_folder = Path(
+            os.path.expanduser(cfg.get("output_folder", "~/meetings"))
+        ).resolve()
+        selected = Path(filename).resolve()
+
+        if (
+            selected.parent != output_folder
+            and str(selected).startswith(str(output_folder) + os.sep)
+        ):
+            # File lives inside a meeting subdirectory — reuse it
+            session_dir = selected.parent
+            audio_path = selected
+            transcript_path = session_dir / "transcript.md"
+            notes_path = session_dir / "notes.md"
+        else:
+            # File is from outside the meetings tree — create new directory & copy
+            audio_path, transcript_path, notes_path = output_paths(
+                cfg.get("output_folder", "~/meetings")
+            )
+            try:
+                shutil.copy(filename, audio_path)
+            except Exception as e:
+                self._show_error(f"Failed to copy audio file: {e}")
+                return
 
         job = _Job(
             job_id=self._next_job_id,
-            audio_path=new_audio_path,
-            transcript_path=new_transcript_path,
-            notes_path=new_notes_path,
+            audio_path=audio_path,
+            transcript_path=transcript_path,
+            notes_path=notes_path,
             label=Path(filename).name,
         )
         self._next_job_id += 1
