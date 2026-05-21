@@ -4,35 +4,35 @@ Hash: SHA512
 Origin: Meeting Recorder
 Label: Meeting Recorder
 Codename: stable
-Date: Mon, 13 Apr 2026 16:57:33 UTC
+Date: Thu, 21 May 2026 05:02:07 UTC
 Architectures: amd64
 Components: main
 Description: Meeting Recorder APT repository
 MD5Sum:
- fd26aacb6bb6a444d7ef033117c9fe43 872 main/binary-amd64/Packages
- d5ca1f41ae203080e95df42187baa854 546 main/binary-amd64/Packages.gz
+ b3342cee61693aa2e2b0c793342e660e 872 main/binary-amd64/Packages
+ eec5c6190dedc80f39aef9a244eb35d9 547 main/binary-amd64/Packages.gz
  17d185771c71cb5d97cc0e53538eb589 130 main/binary-amd64/Release
 SHA1:
- 0485fee0ba941f9de6db0074b5eea2a7769fafda 872 main/binary-amd64/Packages
- 4af3376b7922e701ffc1287abcb3958ade8173af 546 main/binary-amd64/Packages.gz
+ c0548e168056a697db61a38ee3edc77da19c27f5 872 main/binary-amd64/Packages
+ b4c58409c19084b720ca99ce2ad3ccc4dd3c18fb 547 main/binary-amd64/Packages.gz
  6d96455003a8d856ac1ed26320b011ccbb3e3102 130 main/binary-amd64/Release
 SHA256:
- 9e547684aad4e486f6f07536456111850ce9e292afce58d43d97950ffca9c11c 872 main/binary-amd64/Packages
- 767cf3859cb0aa55a75941ca222f01b525866ed81dea35faa720460240ad0125 546 main/binary-amd64/Packages.gz
+ a3db4d1ba272544e4adda86b3ed26ac4407a08d15d3599e6eaf1b7332c30c807 872 main/binary-amd64/Packages
+ 5f20a44df15798798419f81402e93b026b9bbe237e90eb7476e7972b9f2a7a51 547 main/binary-amd64/Packages.gz
  cb47744016fef55a364c52a4cbab776a3fcc31238d729cc091ba4aa1ed558c29 130 main/binary-amd64/Release
 -----BEGIN PGP SIGNATURE-----
 
-iQIzBAEBCgAdFiEEHfjTLFriB1Wucq4B6cV3Y7Q498QFAmndIH0ACgkQ6cV3Y7Q4
-98T2dBAAx2hBbfNJ8S/hX8dyaWvfBK9TghJfDkTPZ6h4HH56XmE1T7awT795vIOb
-KiWhUM8RX1m3upLHjCW8+SJHp115/j6eUcmU4JpeuvtTVrOYt24GMuaWmMLISH2P
-N3mz/UARINKYJ3TFzoc2p/51mRwrsZ4ml++uyAx8KIKbFPEB5VOvGrMjgwXiHZ9q
-C+WGZTIc2gwL9Eie2AKRdDasTItxXrLutCnRZFO2JHFvC7iZXYOPO0J2alL06HVU
-h+j6zKbyW0k1i0qnMLyI2ug4Xr61pHeCkNkxLBtgkloT5BO8Be3HXQdRSXCt5vtz
-qcK7Zn4TTtd62gQV8JZN8Z6pGwIqpTHKhVM7/u7D9ZgXr5Z8meSwDY0Qus0T1wwe
-n/vrdTTe1WL5FJb4yX/OCt4s3HJrbad6x30Il4pzUwq13pfWbXyKmdb+j1bAhyFS
-SMUv5sBkUxpGL6hI5ZkGpVRa/ovQtlIz6+TFKuESX4UInsJVHr4G28/Nr1YFtKCx
-1DbEIAhRfvmtBmjUxInGloisCUDRXMiX6HEHiE6urv+mA6dYE8I+r0CKotx1xN6y
-lLcoj9OWDtpF9ybfSIQmFhmg9+RbYfJOD5tfRUr/IS4uhWor5y7n65vmQdjzFJ8k
-pVnfzQ+prMtp/sS25Fj1LqFrmqUmJMo+5Ua9VZM5CAuFiR9srN0=
-=4HSY
+iQIzBAEBCgAdFiEEHfjTLFriB1Wucq4B6cV3Y7Q498QFAmoOkdAACgkQ6cV3Y7Q4
+98QKvg//Rd8aojz/c/+58gKiJGB5CugsUU97Pjmr2ftbwQhlYfjBMbkMTgQyLnge
+Ct4lcfBV53gtp8KtJZzH29GmCxJ4PK6st+N9mVWt4T/G2e2z0y9vlvKOUhHmeTaL
+YNkVSfEJ/hq06dmfn6QJBmGvMP/jQxlJ1Szx9qMpufViYlSYBdkdPar6JBSTKfrW
+RMPHaOle7UCu9Zh6EJe3z4k2XON4p+T610UzEyR8VopHvfX/2mynTjUxhx0QT0/m
+pqHXKmcMXe3k1E0+gHZWTtK7f1hPf8biOo9S7HfoWGFGS3tPk98UuW0/y1YjhRZm
+UitnD0qAQQBVCsZzmq+cjNgr5jPeAohggPUxK5z1nquOy2mUNIkBn30UVn7eNo05
+knjY3Jn15ptk2G9BzAI5irfKTwbvUjoxZ2KTe+/7LEWRiM4hPGFfeWwFT4LcCH5s
+aR30sfPH0EzRQ5Ov1HrNk3HJ0UAooFN/WQoApiVIrRlsZ2pE5ubRbjgmAYkk87qQ
+LHn2EN0AZ80sn7O+ao+Tqm0EVoN/EasO7r2eApDWLFpc+902NS34mWHAPkXB/nw7
+tEzxT/t8KNPSJ4cuLRaiVO9j1wzlPFSL3ASkGV9iYUHNnVXpnQctdV4FAsFx7djU
+P0ksRkQbH/UOEWdjDHh+4kzwcErnfgK4E+W2Exx83wfeLsCLGuo=
+=IZQT
 -----END PGP SIGNATURE-----
