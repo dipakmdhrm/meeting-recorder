@@ -1,5 +1,11 @@
 package com.github.meetingrecorder.ui.settings
 
+import android.app.NotificationManager
+import android.content.Context
+import android.content.Intent
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -37,6 +43,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -94,13 +101,21 @@ private fun GeneralTab(viewModel: SettingsViewModel) {
     val model by viewModel.model.collectAsState()
     val audioQuality by viewModel.audioQuality.collectAsState()
     val processingCountdownEnabled by viewModel.processingCountdownEnabled.collectAsState()
+    val dndDuringRecordingEnabled by viewModel.dndDuringRecordingEnabled.collectAsState()
 
     var apiKeyDraft by rememberSaveable { mutableStateOf(apiKey) }
     var modelDraft by rememberSaveable { mutableStateOf(model) }
     var audioQualityDraft by rememberSaveable { mutableStateOf(audioQuality) }
     var processingCountdownDraft by rememberSaveable { mutableStateOf(processingCountdownEnabled) }
+    var dndDuringRecordingDraft by rememberSaveable { mutableStateOf(dndDuringRecordingEnabled) }
     var modelMenuExpanded by remember { mutableStateOf(false) }
     var qualityMenuExpanded by remember { mutableStateOf(false) }
+
+    val context = LocalContext.current
+    // Opening DND-access settings is a no-op contract — the service re-checks the grant at record time.
+    val dndAccessLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { /* nothing to do on return */ }
 
     Column(
         modifier = Modifier
@@ -202,12 +217,37 @@ private fun GeneralTab(viewModel: SettingsViewModel) {
             )
         }
 
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(stringResource(R.string.label_dnd_recording), style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    stringResource(R.string.desc_dnd_recording),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = dndDuringRecordingDraft,
+                onCheckedChange = { enabled ->
+                    dndDuringRecordingDraft = enabled
+                    // Turning it on requires the one-time "Do Not Disturb access" grant.
+                    if (enabled && !context.hasDndAccess()) {
+                        dndAccessLauncher.launch(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
+                    }
+                },
+            )
+        }
+
         Button(
             onClick = {
                 viewModel.setApiKey(apiKeyDraft)
                 viewModel.setModel(modelDraft)
                 viewModel.setAudioQuality(audioQualityDraft)
                 viewModel.setProcessingCountdownEnabled(processingCountdownDraft)
+                viewModel.setDndDuringRecordingEnabled(dndDuringRecordingDraft)
             },
             modifier = Modifier.fillMaxWidth(),
         ) {
@@ -296,3 +336,6 @@ private fun PromptField(
         minLines = 5,
     )
 }
+
+private fun Context.hasDndAccess(): Boolean =
+    getSystemService(NotificationManager::class.java).isNotificationPolicyAccessGranted

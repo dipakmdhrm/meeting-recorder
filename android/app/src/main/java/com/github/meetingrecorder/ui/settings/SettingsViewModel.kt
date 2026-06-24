@@ -38,6 +38,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private val _processingCountdownEnabled = MutableStateFlow(config.processingCountdownEnabled)
     val processingCountdownEnabled: StateFlow<Boolean> = _processingCountdownEnabled.asStateFlow()
 
+    private val _dndDuringRecordingEnabled = MutableStateFlow(config.dndDuringRecordingEnabled)
+    val dndDuringRecordingEnabled: StateFlow<Boolean> = _dndDuringRecordingEnabled.asStateFlow()
+
     fun setApiKey(key: String) {
         _apiKey.value = key
         config.apiKey = key
@@ -71,5 +74,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setProcessingCountdownEnabled(enabled: Boolean) {
         _processingCountdownEnabled.value = enabled
         config.processingCountdownEnabled = enabled
+    }
+
+    fun setDndDuringRecordingEnabled(enabled: Boolean) {
+        _dndDuringRecordingEnabled.value = enabled
+        config.dndDuringRecordingEnabled = enabled
     }
 }
