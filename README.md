@@ -18,6 +18,7 @@ This repository is a monorepo with two independent apps — a Linux desktop appl
 - **Record** system audio + microphone simultaneously, or microphone only
 - **Transcribe** with Google Gemini or local Whisper (timestamped, speaker-labeled transcript)
 - **Summarize** into structured Markdown notes with Google Gemini or local Ollama
+- **Summarize from the library** — re-run summarization for any past meeting from the meetings browser
 - **Local models** — run fully offline with no API key required
 - **Customizable prompts** — edit transcription and summarization prompts in Settings
 - **System tray** integration (AyatanaAppIndicator3 / pystray fallback)
@@ -274,11 +275,16 @@ error.log  — WARNING and above
 
 ### Features
 
-- **Record** microphone audio (AAC/M4A)
+- **Record** microphone audio (AAC/M4A) at a configurable quality, captured in a foreground service that survives brief interruptions
 - **Transcribe** with Google Gemini
 - **Summarize** into structured Markdown notes with Google Gemini
 - **Auto-title** — generates a meeting title from the notes when none is provided
-- **Meetings browser** — browse, search, and read past transcripts and notes
+- **Generate from the library** — generate the transcript & notes, or regenerate notes, for any meeting from its detail screen
+- **Recover failed recordings** — if processing fails, the raw audio is kept in your library so you can generate the transcript & notes later
+- **Use Existing Recording** — import an external audio file and transcribe/summarize it
+- **Silenced-mic warning** — if the system mutes the mic mid-recording (e.g. an answered call), the audio is kept and you're warned instead of getting a silent transcript
+- **Do Not Disturb while recording** (optional) — silence notifications during capture
+- **Meetings browser** — browse and read past transcripts and notes; rename or delete meetings
 - **Audio playback** — play back recordings directly in the meeting detail view
 - Recordings saved to `Documents/Meetings/` — same structure as the Linux app
 
@@ -317,7 +323,7 @@ Documents/Meetings/
 ### Building from Source
 
 ```bash
-# Requires Android SDK (API 36) and JDK 17
+# Requires Android SDK (API 35) and JDK 17
 cd android
 ./gradlew assembleDebug
 # APK: app/build/outputs/apk/debug/app-debug.apk
@@ -346,7 +352,7 @@ linux/
 android/
 ├── app/src/main/
 │   ├── java/com/github/meetingrecorder/
-│   │   ├── audio/         # MediaRecorder wrapper
+│   │   ├── audio/         # MediaRecorder wrapper + foreground recording service
 │   │   ├── data/          # Config, Meeting, MeetingRepository, GeminiClient
 │   │   └── ui/            # Compose screens + ViewModels
 │   └── res/

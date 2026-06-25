@@ -27,6 +27,17 @@ This applies to all agents (Claude, Gemini, etc.) — no direct pushes to `main`
 
 ---
 
+## Keep documentation in sync — IMPORTANT
+
+Whenever a change affects user-facing behavior, features, architecture, commands, conventions, or test boundaries, update the relevant docs **in the same PR** so they never drift from the code:
+
+- `README.md` — user-facing features, setup, and workflows (Linux and Android sections)
+- `CLAUDE.md` and `GEMINI.md` — architecture, commands, conventions, and test-coverage boundaries
+
+Before opening a PR, re-read these three files and reconcile anything the change made inaccurate (new screens/services, renamed flows, new settings, new tests, changed defaults). Treat doc updates as part of "done," not a follow-up.
+
+---
+
 ## What this repo is
 
 A monorepo with two independent apps that share the same on-disk recording format (`YYYY/MonthName/DD/HH-MM[_title]/recording.m4a|mp3 + transcript.md + notes.md`):
@@ -114,11 +125,15 @@ File system paths are passed as nav arguments with `/` encoded as `%2F`.
 
 **Settings save model:** Each settings tab holds local draft state in the Composable. The ViewModel setters write directly to `Config`/SharedPreferences. The Save button is what calls the setters — nothing is persisted on keystroke. Empty string stored for a prompt = use built-in default (same convention as Linux).
 
-**Gemini API** (`data/GeminiClient.kt`): Manual OkHttp implementation (no Gemini SDK). Flow: resumable upload init → upload bytes → poll `GET /v1beta/files/{id}` until `state == ACTIVE` → `generateContent`. The poll response is a flat JSON object (not wrapped in a `"file"` key).
+**Gemini API** (`data/GeminiClient.kt`): Manual OkHttp implementation (no Gemini SDK). Flow: resumable upload init → upload bytes → poll `GET /v1beta/files/{id}` until `state == ACTIVE` → `generateContent`. The poll response is a flat JSON object (not wrapped in a `"file"` key). Exposes `transcribe()`, `summarize()`, and `generateTitle()`.
 
-**Audio:** `MediaRecorder` → MPEG_4/AAC 128 kbps → `.m4a`. Playback uses `MediaPlayer` in `MeetingDetailViewModel`; the Audio tab is only shown when `hasAudio` is true (i.e. a recording file was found on disk).
+**Audio recording** (`audio/`): Recording runs in a foreground service (`RecordingService`, `foregroundServiceType=microphone`) wrapping `AudioRecorder` (`MediaRecorder` → MPEG_4/AAC → `.m4a`). Bitrate is configurable via `Config.audioQuality` (`AudioQuality` enum; default **Low / 64 kbps**), not fixed. The service keeps capturing through brief interruptions; if the OS silences the mic mid-recording (e.g. an answered call) the audio is kept but flagged so it is **not** transcribed (the user is warned instead). An optional "Do Not Disturb while recording" setting silences notifications during capture. `RecordingStopDecision.decideStopOutcome(...)` is a pure helper that decides what `MainViewModel.stopRecording()` does once the recorder stops (missing/empty/silenced/countdown/process).
 
-**Storage:** `Documents/Meetings/YYYY/MonthName/DD/HH-MM[_title]/` on external storage (`MANAGE_EXTERNAL_STORAGE` permission required).
+**Importing & recovery:** "Use Existing Recording" (`MainViewModel.processExistingRecording`) imports an external audio file, or re-processes one already inside a meeting dir in place (`processInPlace`). When post-recording processing fails, `saveAudioOnlyAfterFailure` keeps the raw audio in the library as an audio-only meeting; `MeetingRepository.recoverOrphanedRecordings()` (run at launch) clears stale `.recording` locks so crashed/failed recordings reappear instead of being lost.
+
+**Detail-screen generation:** `MeetingDetailScreen` / `MeetingDetailViewModel` can generate or regenerate content for a meeting already in the library — *Generate transcript & notes* (when audio exists), *Generate notes* (reusing an existing transcript, no re-upload), and *Regenerate notes* — reusing `GeminiClient` and the same disk-write + `saveMeetingMeta` pattern as the record flow. Playback uses `MediaPlayer` in the same ViewModel; the Audio tab is only shown when `hasAudio` is true. `GenerateActionDecision` is a pure helper for which empty-state button to offer.
+
+**Storage:** `Documents/Meetings/YYYY/MonthName/DD/HH-MM[_title]/` on external storage (`MANAGE_EXTERNAL_STORAGE` permission required). Meetings can be renamed and deleted from `MeetingsScreen`.
 
 ---
 
@@ -132,5 +147,7 @@ JVM-only unit tests (no Robolectric) in `app/src/test/`:
 - `ConfigTest` — validates constants and model list invariants
 - `MeetingRepositoryTest` — full coverage of listing, parsing, creating, and saving meetings using `TemporaryFolder`
 - `GeminiClientTest` — full coverage of the upload→poll→generate flow using `MockWebServer`
+- `RecordingStopDecisionTest` — covers `decideStopOutcome` branch ordering
+- `GenerateActionDecisionTest` — covers the detail-screen empty-state button policy
 
-ViewModels (`MeetingDetailViewModel`, `SettingsViewModel`) and all Compose UI are **not** unit-tested; they require Android platform APIs or the Compose testing framework, neither of which is in the current test setup.
+ViewModels (`MainViewModel`, `MeetingDetailViewModel`, `SettingsViewModel`) and all Compose UI are **not** unit-tested; they require Android platform APIs or the Compose testing framework, neither of which is in the current test setup. The established pattern is to **extract pure decision logic out of a ViewModel into a standalone function** (e.g. `RecordingStopDecision.kt`, `GenerateActionDecision.kt`) so the policy is unit-testable even though the ViewModel is not.

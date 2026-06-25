@@ -25,6 +25,17 @@ This applies to all agents (Claude, Gemini, etc.) — no direct pushes to `main`
 
 ---
 
+## Keep documentation in sync — IMPORTANT
+
+Whenever a change affects user-facing behavior, features, architecture, commands, conventions, or test boundaries, update the relevant docs **in the same PR** so they never drift from the code:
+
+- `README.md` — user-facing features, setup, and workflows (Linux and Android sections)
+- `CLAUDE.md` and `GEMINI.md` — architecture, commands, conventions, and test-coverage boundaries
+
+Before opening a PR, re-read these three files and reconcile anything the change made inaccurate (new screens/services, renamed flows, new settings, new tests, changed defaults). Treat doc updates as part of "done," not a follow-up.
+
+---
+
 ## Project Overview
 
 This repository is a monorepo containing two applications: a Linux desktop applet and a native Android app. Both applications record audio, transcribe it, and generate structured notes using Google Gemini. The apps share the same storage format, allowing recordings to be accessed from both platforms.
@@ -48,6 +59,8 @@ The project is structured as a monorepo with two main directories:
 *   `android/`: Contains the source code, tests, and Gradle build files for the Android app.
 
 Both apps use Google Gemini for transcription and summarization. The Linux app also supports local transcription with Whisper and local summarization with Ollama.
+
+The Android app records in a foreground service so capture survives interruptions, warns (instead of transcribing) when the OS silences the mic mid-call, and keeps failed/crashed recordings in the library so they can be re-processed. Transcript and notes can be generated, or notes regenerated, directly from a meeting's detail screen, and external audio files can be imported via "Use Existing Recording."
 
 ## Building and Running
 
