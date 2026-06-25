@@ -198,16 +198,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * Recording". Mirrors [cancelCountdown]'s audio-only save. No-ops for in-place processing (no
      * lock was taken — the original audio-only meeting is already visible and untouched).
      */
-    private fun saveAudioOnlyAfterFailure() {
-        if (lockFile == null) return
+    private suspend fun saveAudioOnlyAfterFailure() {
+        val lock = lockFile ?: return
         val meetingDir = currentMeetingDir ?: return
-        try {
-            app.meetingRepository.saveMeetingMeta(meetingDir, currentTitle, durationSeconds)
-        } catch (_: Exception) {
-            // Best-effort: even if the meta write fails, removing the lock below keeps the audio visible.
-        }
-        lockFile?.delete()
+        val title = currentTitle
+        val duration = durationSeconds
         lockFile = null
+        withContext(Dispatchers.IO) {
+            try {
+                app.meetingRepository.saveMeetingMeta(meetingDir, title, duration)
+            } catch (_: Exception) {
+                // Best-effort: even if the meta write fails, removing the lock below keeps the audio visible.
+            }
+            lock.delete()
+        }
     }
 
     fun processExistingRecording(uri: Uri) {

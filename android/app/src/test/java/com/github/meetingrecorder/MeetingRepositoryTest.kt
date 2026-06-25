@@ -214,10 +214,17 @@ class MeetingRepositoryTest {
     // recoverOrphanedRecordings
     // -------------------------------------------------------------------------
 
+    /**
+     * Creates a `.recording` lock with an mtime in the past, so it is treated as orphaned by a
+     * *previous* session (recovery skips locks newer than the repository's sessionStartTime).
+     */
+    private fun pastLock(dir: File): File =
+        File(dir, ".recording").apply { createNewFile(); setLastModified(System.currentTimeMillis() - 10_000) }
+
     @Test
     fun `recoverOrphanedRecordings de-orphans locked dir with non-empty audio`() {
         val dir = File(tempDir.root, "2024-04-01_10-00_Standup").also { it.mkdirs() }
-        File(dir, ".recording").createNewFile()
+        pastLock(dir)
         File(dir, "recording.m4a").writeText("audio bytes")
 
         // Hidden while locked…
@@ -236,7 +243,7 @@ class MeetingRepositoryTest {
     @Test
     fun `recoverOrphanedRecordings deletes empty stub with only lock file`() {
         val dir = File(tempDir.root, "2024-04-02_11-00").also { it.mkdirs() }
-        File(dir, ".recording").createNewFile()
+        pastLock(dir)
 
         repo().recoverOrphanedRecordings()
 
@@ -246,7 +253,7 @@ class MeetingRepositoryTest {
     @Test
     fun `recoverOrphanedRecordings deletes locked dir with zero-byte audio`() {
         val dir = File(tempDir.root, "2024-04-03_12-00").also { it.mkdirs() }
-        File(dir, ".recording").createNewFile()
+        pastLock(dir)
         File(dir, "recording.m4a").createNewFile() // 0 bytes — no usable audio
 
         repo().recoverOrphanedRecordings()
@@ -255,15 +262,44 @@ class MeetingRepositoryTest {
     }
 
     @Test
-    fun `recoverOrphanedRecordings leaves locked dir with other content but no audio untouched`() {
+    fun `recoverOrphanedRecordings unlocks dir with notes but no audio so it is not hidden`() {
         val dir = File(tempDir.root, "2024-04-04_13-00").also { it.mkdirs() }
-        File(dir, ".recording").createNewFile()
+        pastLock(dir)
         File(dir, "notes.md").writeText("manual notes")
 
         repo().recoverOrphanedRecordings()
 
-        // Not destroyed (has other data) and not recovered (no audio) — stays as-is.
+        // Real content survives a crash: kept, unlocked, and now visible in the library.
         assertTrue(dir.exists())
+        assertFalse(File(dir, ".recording").exists())
+        val meetings = repo().listMeetings()
+        assertEquals(1, meetings.size)
+        assertTrue(meetings[0].hasNotes)
+    }
+
+    @Test
+    fun `recoverOrphanedRecordings deletes stub with only meeting_json and no audio`() {
+        val dir = File(tempDir.root, "2024-04-04_16-00").also { it.mkdirs() }
+        pastLock(dir)
+        File(dir, "meeting.json").writeText("""{"title":"x"}""") // metadata only — not real content
+
+        repo().recoverOrphanedRecordings()
+
+        assertFalse("meeting.json-only stub should be deleted", dir.exists())
+    }
+
+    @Test
+    fun `recoverOrphanedRecordings does not touch a lock from the current session`() {
+        // Simulates the race: the user starts a recording (dir + lock created this session) while
+        // recovery runs on the startup background thread, before recording.m4a has any bytes.
+        val repo = repo() // captures sessionStartTime now
+        val dir = File(tempDir.root, "2024-04-06_15-00").also { it.mkdirs() }
+        // Lock dated after sessionStartTime — an in-session recording must never be reaped.
+        File(dir, ".recording").apply { createNewFile(); setLastModified(System.currentTimeMillis() + 5_000) }
+
+        repo.recoverOrphanedRecordings()
+
+        assertTrue("Active-session recording must not be deleted", dir.exists())
         assertTrue(File(dir, ".recording").exists())
     }
 
@@ -281,7 +317,7 @@ class MeetingRepositoryTest {
     @Test
     fun `recoverOrphanedRecordings ignores locked dir whose name does not match pattern`() {
         val dir = File(tempDir.root, "scratch").also { it.mkdirs() }
-        File(dir, ".recording").createNewFile()
+        pastLock(dir)
         File(dir, "recording.m4a").writeText("audio")
 
         repo().recoverOrphanedRecordings()
