@@ -42,17 +42,18 @@ Each recording session creates a folder:
 
 ### Requirements
 
-- Linux with a supported package manager: **apt** (Debian/Ubuntu/Mint), **dnf** (Fedora/RHEL), or **pacman** (Arch/Manjaro)
+- Linux with a supported package manager: **apt** (Debian/Ubuntu/Mint), **dnf** (Fedora/RHEL), or **pacman** (Arch/Manjaro). Works on both **x86_64** and **arm64/aarch64**.
 - System packages installed by `linux/install.sh`: `ffmpeg`, `pulseaudio-utils`, `pipewire-pulse`, Python 3 with GTK3 bindings
 - Python packages (installed into a venv): see `linux/requirements.txt`
 
-Depending on which services you use:
+The base install is **Gemini-only and minimal** — no local engines or GPU libraries are installed by default. Each local option below is installed **on demand** from **Settings → Models** when you choose it.
 
 | Service | Requirement |
 |---|---|
-| **Gemini** (transcription or summarization) | Free API key from [aistudio.google.com](https://aistudio.google.com) |
-| **Whisper** (local transcription) | Model downloaded from HuggingFace (~500 MB – 3 GB); NVIDIA GPU optional |
-| **Ollama** (local summarization) | [Ollama](https://ollama.com) installed and running (`ollama serve`) |
+| **Gemini** (transcription or summarization) | Free API key from [aistudio.google.com](https://aistudio.google.com) — no local install |
+| **Whisper** (local transcription) | Engine (`faster-whisper`) installed on opt-in; model downloaded from HuggingFace (~500 MB – 3 GB); **NVIDIA GPU or CPU** |
+| **whisper.cpp** (local transcription, GPU) | Engine built from source on opt-in with the detected backend — **AMD (ROCm/Vulkan), Apple (Metal), NVIDIA (CUDA), or CPU**; GGML model downloaded from HuggingFace |
+| **Ollama** (local summarization) | [Ollama](https://ollama.com) installed and running (`ollama serve`); uses NVIDIA/AMD/Apple GPU automatically |
 
 ### Installation
 
@@ -82,7 +83,7 @@ sudo pacman -U meeting-recorder-*.pkg.tar.zst
 sudo pacman -R meeting-recorder
 ```
 
-All packages set up a Python venv at `/opt/meeting-recorder/venv` on first install. Ollama and CUDA can be installed later from **Settings → Models**.
+All packages set up a Python venv at `/opt/meeting-recorder/venv` on first install with **only the Gemini-ready essentials**. The local transcription engines (Whisper / whisper.cpp), Ollama, and GPU runtimes (CUDA / ROCm) are installed later, on demand, from **Settings → Models**. The `.deb` and apt repository are architecture-independent (`all`) and work on both amd64 and arm64.
 
 #### Option 2: install.sh (from source)
 
@@ -141,7 +142,8 @@ PYTHONPATH=linux/src python3 -m meeting_recorder
 | Service | How it works | Requires |
 |---|---|---|
 | **Google Gemini** | Audio sent to Gemini API | API key |
-| **Whisper** | Runs locally on your machine | Model downloaded in Settings → Models |
+| **Whisper** | Runs locally via `faster-whisper` | Engine installed + model downloaded in Settings → Models; NVIDIA GPU or CPU |
+| **whisper.cpp** | Runs locally via a from-source whisper.cpp build | Engine built + GGML model downloaded in Settings → Models; **GPU on AMD / Apple / NVIDIA / Vulkan**, or CPU |
 
 #### Summarization
 
@@ -159,7 +161,8 @@ Open **Settings** (gear icon or tray menu):
 1. **General tab** — choose your transcription and summarization services; set output folder and recording quality
 2. **Models tab** — configure the selected services:
    - *Gemini*: paste your API key and choose a model
-   - *Whisper*: select a model and click Download
+   - *Whisper*: install the engine (first time), then select a model and click Download
+   - *whisper.cpp*: pick an acceleration backend and build the engine (first time), then download a GGML model
    - *Ollama*: set host and click Download next to your preferred model
 3. **Prompts tab** — optionally customize the transcription or summarization prompt
 
@@ -169,7 +172,7 @@ Open **Settings** (gear icon or tray menu):
 
 | Setting | Description |
 |---|---|
-| Transcription service | Gemini (cloud) or Whisper (local) |
+| Transcription service | Gemini (cloud), Whisper (local), or whisper.cpp (local, GPU) |
 | Summarization service | Gemini (cloud) or Ollama (local) |
 | Start at system startup | Launch automatically on login |
 | Enable call detection | Monitor for active calls and notify you to start recording |
@@ -188,6 +191,8 @@ Open **Settings** (gear icon or tray menu):
 
 **Whisper**
 
+The Whisper engine (`faster-whisper`) is **not in the base install**. When Whisper is selected and the engine is missing, the section shows an **Install Whisper engine** button; once installed, the model controls appear.
+
 | Setting | Description |
 |---|---|
 | Whisper model | Model to use for local transcription |
@@ -203,7 +208,23 @@ Available Whisper models:
 | `medium` | ~1.5 GB | Good balance |
 | `small` | ~500 MB | Fast, lower accuracy |
 
-GPU acceleration is used automatically if CUDA libraries are present. Falls back to CPU otherwise.
+The `faster-whisper` engine accelerates on **NVIDIA (CUDA)** and otherwise runs on CPU. For **AMD or Apple GPU** acceleration, use the whisper.cpp engine below.
+
+**whisper.cpp (GPU-accelerated)**
+
+A local engine that supports a wider range of GPUs. The engine is **built from source on opt-in** (a build toolchain is installed automatically); until then the section shows a **Build whisper.cpp engine** button.
+
+| Setting | Description |
+|---|---|
+| Acceleration backend | `auto` (detect), or force `cuda` / `rocm` / `vulkan` / `metal` / `cpu`. Used for both the build and at runtime. The detected backend is shown next to the selector. |
+| Model | GGML model to use for local transcription |
+| Model list | Download status and one-click download for each available GGML model |
+
+Available whisper.cpp (GGML) models: `large-v3-turbo` (~1.6 GB), `large-v3` (~3 GB), `medium` (~1.5 GB), `small` (~470 MB).
+
+**GPU Acceleration**
+
+This section detects your GPU vendor and offers the matching runtime install: **CUDA** for NVIDIA, **ROCm** for AMD, built-in **Metal** for Apple Silicon, or a note that only CPU is available (in which case Gemini is recommended for speed).
 
 **Ollama**
 
@@ -227,7 +248,7 @@ Available Ollama models:
 
 Customize the transcription and summarization prompts. Each has a **Reset to default** button. The `{transcript}` placeholder in the summarization prompt is replaced with the transcript text.
 
-Note: transcription prompts apply to Gemini only — Whisper does not use a prompt.
+Note: transcription prompts apply to Gemini only — the local Whisper and whisper.cpp engines do not use a prompt.
 
 ### Workflow
 

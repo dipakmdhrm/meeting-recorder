@@ -52,7 +52,7 @@ class Pipeline:
         ollama_host = self._config.get("ollama_host", "http://localhost:11434")
 
         # Before GPU transcription, evict any ollama models that are occupying VRAM.
-        if ts_service == "whisper":
+        if ts_service in ("whisper", "whisper_cpp"):
             loaded = []
             try:
                 from .providers.ollama import get_loaded_models
