@@ -10,7 +10,7 @@ CONFIG_DIR = "~/.config/meeting-recorder"
 CONFIG_FILE = "~/.config/meeting-recorder/config.json"
 DEFAULT_OUTPUT_FOLDER = "~/meetings"
 
-TRANSCRIPTION_SERVICES = ["gemini", "whisper"]
+TRANSCRIPTION_SERVICES = ["gemini", "whisper", "whisper_cpp"]
 SUMMARIZATION_SERVICES = ["gemini", "ollama"]
 
 # Allowed LLM request timeout values (minutes)
@@ -57,6 +57,38 @@ WHISPER_MODEL_INFO = {
     "large-v3":        {"size": "~3 GB",   "note": "Best accuracy, slow on CPU"},
 }
 
+# whisper.cpp STT model list (GGML weights, for local transcription with GPU
+# acceleration on AMD/Apple/Vulkan as well as NVIDIA/CPU).
+WHISPER_CPP_MODELS = [
+    "large-v3-turbo",
+    "large-v3",
+    "medium",
+    "small",
+]
+
+# Maps model name -> ggml-*.bin filename in the HuggingFace ggerganov/whisper.cpp repo.
+WHISPER_CPP_GGML_FILES = {
+    "small":          "ggml-small.bin",
+    "medium":         "ggml-medium.bin",
+    "large-v3":       "ggml-large-v3.bin",
+    "large-v3-turbo": "ggml-large-v3-turbo.bin",
+}
+
+WHISPER_CPP_GGML_BASE_URL = (
+    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/"
+)
+
+WHISPER_CPP_MODEL_INFO = {
+    "small":          {"size": "~470 MB", "note": "Fast, lower accuracy"},
+    "medium":         {"size": "~1.5 GB", "note": "Good balance"},
+    "large-v3-turbo": {"size": "~1.6 GB", "note": "High quality, fast"},
+    "large-v3":       {"size": "~3 GB",   "note": "Best accuracy, slower"},
+}
+
+# Acceleration backends the whisper.cpp engine can be built/run with.
+# "auto" detects the GPU at build/run time (see services.whisper_cpp_service).
+WHISPER_CPP_BACKENDS = ["auto", "cuda", "rocm", "vulkan", "metal", "cpu"]
+
 # Ollama LLM model list (for local summarization)
 OLLAMA_MODELS = [
     "phi4-mini",
@@ -93,6 +125,8 @@ DEFAULT_CONFIG: dict = {
     "llm_request_timeout_minutes": 5,
 
     "whisper_model": "large-v3-turbo",
+    "whisper_cpp_model": "large-v3-turbo",
+    "whisper_cpp_backend": "auto",
     "ollama_model": "phi4-mini",
     "ollama_host": "http://localhost:11434",
 

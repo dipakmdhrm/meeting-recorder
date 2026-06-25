@@ -58,7 +58,8 @@ This repository is a monorepo containing two applications: a Linux desktop apple
 *   **Linux App:**
     *   **Language:** Python
     *   **UI:** GTK3
-    *   **Dependencies:** `google-genai`, `setproctitle`, `pystray`, `Pillow`, `faster-whisper`
+    *   **Base dependencies (`linux/requirements.txt`):** `google-genai`, `setproctitle`, `pystray`, `Pillow` — Gemini-only, minimal.
+    *   **Opt-in local engines (installed on demand from Settings → Models):** `faster-whisper` (NVIDIA/CPU) installed via pip; `whisper.cpp` built from source with the detected GPU backend (AMD ROCm/Vulkan, Apple Metal, NVIDIA CUDA, or CPU).
 *   **Android App:**
     *   **Language:** Kotlin
     *   **UI:** Jetpack Compose
@@ -71,7 +72,7 @@ The project is structured as a monorepo with two main directories:
 *   `linux/`: Contains the source code, tests, and packaging scripts for the Linux desktop app.
 *   `android/`: Contains the source code, tests, and Gradle build files for the Android app.
 
-Both apps use Google Gemini for transcription and summarization. The Linux app also supports local transcription with Whisper and local summarization with Ollama.
+Both apps use Google Gemini for transcription and summarization. The Linux app also supports local transcription with Whisper (`faster-whisper`, NVIDIA/CPU) or whisper.cpp (built from source for AMD/Apple/NVIDIA/CPU GPU acceleration) and local summarization with Ollama. These local engines are not in the base install — they are installed on demand from Settings → Models, keeping a fresh install Gemini-only. The Linux app runs on both x86_64 and arm64.
 
 The Android app records in a foreground service so capture survives interruptions, warns (instead of transcribing) when the OS silences the mic mid-call, and keeps failed/crashed recordings in the library so they can be re-processed. Transcript and notes can be generated, or notes regenerated, directly from a meeting's detail screen, and external audio files can be imported via "Use Existing Recording."
 

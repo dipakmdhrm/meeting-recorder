@@ -38,4 +38,10 @@ def create_transcription_provider(config: dict) -> TranscriptionProvider:
             model=config.get("whisper_model", "large-v3-turbo"),
         )
 
+    if service == "whisper_cpp":
+        from .providers.whisper_cpp import WhisperCppProvider
+        return WhisperCppProvider(
+            model=config.get("whisper_cpp_model", "large-v3-turbo"),
+        )
+
     raise ValueError(f"Unknown transcription service: {service!r}")

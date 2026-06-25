@@ -39,11 +39,26 @@ from meeting_recorder.config.defaults import (
     SUMMARIZATION_SERVICES,
     TITLE_PROMPT,
     TRANSCRIPTION_SERVICES,
+    WHISPER_CPP_BACKENDS,
+    WHISPER_CPP_MODEL_INFO,
+    WHISPER_CPP_MODELS,
     WHISPER_MODEL_INFO,
     WHISPER_MODELS,
 )
 from ..services.ollama_service import OllamaClient
-from ..services.system_installer import CudaInstaller, OllamaInstaller
+from ..services.system_installer import (
+    CudaInstaller,
+    OllamaInstaller,
+    RocmInstaller,
+    WhisperEngineInstaller,
+    detect_gpu_vendor,
+)
+from ..services.whisper_cpp_service import (
+    WhisperCppBuilder,
+    WhisperCppModelDownloader,
+    WhisperCppStatusChecker,
+    detect_gpu_backend,
+)
 from ..services.whisper_service import WhisperDownloader, WhisperStatusChecker
 from ..utils.autostart import is_autostart_enabled, update_autostart
 from .model_row_grid import ModelRowGrid
@@ -51,9 +66,10 @@ from .model_row_grid import ModelRowGrid
 logger = logging.getLogger(__name__)
 
 _SERVICE_LABELS = {
-    "gemini":  "Google Gemini",
-    "whisper": "Whisper (local)",
-    "ollama":  "Ollama (local)",
+    "gemini":      "Google Gemini",
+    "whisper":     "Whisper (local)",
+    "whisper_cpp": "whisper.cpp (local, GPU)",
+    "ollama":      "Ollama (local)",
 }
 
 _PROMPT_DEFAULTS = {
@@ -78,6 +94,12 @@ class SettingsDialog(Gtk.Dialog):
         ollama_client: OllamaClient | None = None,
         ollama_installer: OllamaInstaller | None = None,
         cuda_installer: CudaInstaller | None = None,
+        rocm_installer: RocmInstaller | None = None,
+        whisper_engine_installer: WhisperEngineInstaller | None = None,
+        whisper_cpp_builder: WhisperCppBuilder | None = None,
+        whisper_cpp_checker: WhisperCppStatusChecker | None = None,
+        whisper_cpp_downloader: WhisperCppModelDownloader | None = None,
+        gpu_vendor: str | None = None,
         dispatcher: Callable = GLib.idle_add,
     ) -> None:
         super().__init__(
@@ -101,9 +123,19 @@ class SettingsDialog(Gtk.Dialog):
         self._ollama          = ollama_client      or OllamaClient()
         self._ollama_inst     = ollama_installer   or OllamaInstaller()
         self._cuda_inst       = cuda_installer     or CudaInstaller()
+        self._rocm_inst       = rocm_installer     or RocmInstaller()
+        self._whisper_eng_inst = whisper_engine_installer or WhisperEngineInstaller()
+        self._wcpp_builder    = whisper_cpp_builder    or WhisperCppBuilder()
+        self._wcpp_checker    = whisper_cpp_checker    or WhisperCppStatusChecker()
+        self._wcpp_dl         = whisper_cpp_downloader or WhisperCppModelDownloader()
+        self._gpu_vendor      = gpu_vendor if gpu_vendor is not None else detect_gpu_vendor()
 
         # --- widget references populated during build ---
         self._whisper_grid: ModelRowGrid | None = None
+        self._whisper_model_combo: Gtk.ComboBoxText | None = None
+        self._wcpp_grid: ModelRowGrid | None = None
+        self._wcpp_model_combo: Gtk.ComboBoxText | None = None
+        self._wcpp_backend_combo: Gtk.ComboBoxText | None = None
         self._ollama_grid:  ModelRowGrid | None = None
         self._ollama_status_label: Gtk.Label | None = None
         self._prompt_views: dict[str, Gtk.TextView] = {}
@@ -261,22 +293,27 @@ class SettingsDialog(Gtk.Dialog):
         vbox.pack_start(services_grid, False, False, 0)
         vbox.pack_start(Gtk.Separator(), False, False, 4)
 
-        # --- Model sections (stored for show/hide) ---
+        # --- Model sections (stored for show/hide), each with a trailing separator ---
         self._gemini_section_widget = self._build_gemini_section()
         self._gemini_sep = Gtk.Separator()
         self._whisper_section_widget = self._build_whisper_section()
         self._whisper_sep = Gtk.Separator()
+        self._wcpp_section_widget = self._build_whisper_cpp_section()
+        self._wcpp_sep = Gtk.Separator()
         self._ollama_section_widget = self._build_ollama_section()
         self._ollama_sep = Gtk.Separator()
-        self._cuda_section_widget = self._build_cuda_section()
+        self._gpu_section_widget = self._build_gpu_section()
 
-        vbox.pack_start(self._gemini_section_widget,  False, False, 0)
-        vbox.pack_start(self._gemini_sep,             False, False, 4)
-        vbox.pack_start(self._whisper_section_widget, False, False, 0)
-        vbox.pack_start(self._whisper_sep,            False, False, 4)
-        vbox.pack_start(self._ollama_section_widget,  False, False, 0)
-        vbox.pack_start(self._ollama_sep,             False, False, 4)
-        vbox.pack_start(self._cuda_section_widget,    False, False, 0)
+        for widget, sep in [
+            (self._gemini_section_widget,  self._gemini_sep),
+            (self._whisper_section_widget, self._whisper_sep),
+            (self._wcpp_section_widget,    self._wcpp_sep),
+            (self._ollama_section_widget,  self._ollama_sep),
+            (self._gpu_section_widget,     None),
+        ]:
+            vbox.pack_start(widget, False, False, 0)
+            if sep is not None:
+                vbox.pack_start(sep, False, False, 4)
 
         return outer_scroll
 
@@ -285,27 +322,26 @@ class SettingsDialog(Gtk.Dialog):
         ss = self._ss_combo.get_active_id() or "gemini"
         needs_gemini  = ts == "gemini"  or ss == "gemini"
         needs_whisper = ts == "whisper"
+        needs_wcpp    = ts == "whisper_cpp"
         needs_ollama  = ts == "ollama"  or ss == "ollama"
-        needs_cuda    = needs_whisper
+        # The GPU-acceleration section is relevant to either local STT engine.
+        needs_gpu     = needs_whisper or needs_wcpp
 
-        # Only show a separator when a visible section follows it.
-        show_gemini_sep  = needs_gemini  and (needs_whisper or needs_ollama or needs_cuda)
-        show_whisper_sep = needs_whisper and (needs_ollama or needs_cuda)
-        show_ollama_sep  = needs_ollama  and needs_cuda
-
-        for widget, visible in [
-            (self._gemini_section_widget,  needs_gemini),
-            (self._gemini_sep,             show_gemini_sep),
-            (self._whisper_section_widget, needs_whisper),
-            (self._whisper_sep,            show_whisper_sep),
-            (self._ollama_section_widget,  needs_ollama),
-            (self._ollama_sep,             show_ollama_sep),
-            (self._cuda_section_widget,    needs_cuda),
-        ]:
-            if visible:
-                widget.show_all()
-            else:
-                widget.hide()
+        # Sections in display order, each paired with its trailing separator.
+        # A separator shows only when its section is visible AND some later
+        # section is also visible.
+        ordered = [
+            (self._gemini_section_widget,  self._gemini_sep,  needs_gemini),
+            (self._whisper_section_widget, self._whisper_sep, needs_whisper),
+            (self._wcpp_section_widget,    self._wcpp_sep,    needs_wcpp),
+            (self._ollama_section_widget,  self._ollama_sep,  needs_ollama),
+            (self._gpu_section_widget,     None,              needs_gpu),
+        ]
+        for i, (widget, sep, visible) in enumerate(ordered):
+            widget.show_all() if visible else widget.hide()
+            if sep is not None:
+                later_visible = any(v for _, _, v in ordered[i + 1:])
+                sep.show_all() if (visible and later_visible) else sep.hide()
 
     def _build_gemini_section(self) -> Gtk.Widget:
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
@@ -348,11 +384,43 @@ class SettingsDialog(Gtk.Dialog):
         return vbox
 
     def _build_whisper_section(self) -> Gtk.Widget:
-        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self._whisper_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
 
         title = Gtk.Label(xalign=0)
         title.set_markup("<b>Whisper</b>")
-        vbox.pack_start(title, False, False, 0)
+        self._whisper_vbox.pack_start(title, False, False, 0)
+
+        # The faster-whisper engine is opt-in (not in the base install). Show an
+        # install button until it is present, then the model download UI.
+        if not self._whisper_eng_inst.is_available():
+            self._build_whisper_installer()
+        else:
+            self._build_whisper_ui()
+
+        return self._whisper_vbox
+
+    def _build_whisper_installer(self) -> None:
+        self._whisper_install_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self._whisper_vbox.pack_start(self._whisper_install_box, False, False, 0)
+
+        info = Gtk.Label(
+            xalign=0,
+            label=(
+                "The Whisper engine (faster-whisper) is not installed. It enables local "
+                "transcription on NVIDIA GPUs or CPU. Install it to use this option."
+            ),
+        )
+        info.set_line_wrap(True)
+        self._whisper_install_box.pack_start(info, False, False, 0)
+
+        self._whisper_install_button = Gtk.Button(label="Install Whisper engine")
+        self._whisper_install_button.connect("clicked", self._on_install_whisper_engine)
+        self._whisper_install_box.pack_start(self._whisper_install_button, False, False, 0)
+        self._whisper_install_box.show_all()
+
+    def _build_whisper_ui(self) -> None:
+        self._whisper_config_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self._whisper_vbox.pack_start(self._whisper_config_box, False, False, 0)
 
         model_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         model_box.pack_start(Gtk.Label(label="Whisper model:", xalign=0), False, False, 0)
@@ -360,20 +428,97 @@ class SettingsDialog(Gtk.Dialog):
             WHISPER_MODELS, self._cfg.get("whisper_model", WHISPER_MODELS[0])
         )
         model_box.pack_start(self._whisper_model_combo, False, False, 0)
-        vbox.pack_start(model_box, False, False, 0)
+        self._whisper_config_box.pack_start(model_box, False, False, 0)
 
         note = Gtk.Label(
             label="Models are downloaded from HuggingFace and cached locally.",
             xalign=0,
         )
         note.set_line_wrap(True)
-        vbox.pack_start(note, False, False, 0)
+        self._whisper_config_box.pack_start(note, False, False, 0)
 
         self._whisper_grid = ModelRowGrid(
             WHISPER_MODELS, WHISPER_MODEL_INFO, self._start_whisper_download
         )
-        vbox.pack_start(self._whisper_grid, False, False, 0)
-        return vbox
+        self._whisper_config_box.pack_start(self._whisper_grid, False, False, 0)
+        self._whisper_config_box.show_all()
+
+    def _build_whisper_cpp_section(self) -> Gtk.Widget:
+        self._wcpp_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+
+        title = Gtk.Label(xalign=0)
+        title.set_markup("<b>whisper.cpp (GPU-accelerated)</b>")
+        self._wcpp_vbox.pack_start(title, False, False, 0)
+
+        # Backend selector is always available — it drives both the build and
+        # the runtime acceleration; "auto" detects the GPU.
+        backend_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        detected = detect_gpu_backend()
+        backend_box.pack_start(
+            Gtk.Label(label="Acceleration backend:", xalign=0), False, False, 0
+        )
+        self._wcpp_backend_combo = self._make_combo(
+            WHISPER_CPP_BACKENDS, self._cfg.get("whisper_cpp_backend", "auto")
+        )
+        backend_box.pack_start(self._wcpp_backend_combo, False, False, 0)
+        backend_box.pack_start(
+            Gtk.Label(label=f"(detected: {detected})", xalign=0), False, False, 0
+        )
+        self._wcpp_vbox.pack_start(backend_box, False, False, 0)
+
+        # The engine is built from source on opt-in. Show a build button until
+        # the binary exists, then the model download UI.
+        if not self._wcpp_builder.is_built():
+            self._build_wcpp_installer()
+        else:
+            self._build_wcpp_ui()
+
+        return self._wcpp_vbox
+
+    def _build_wcpp_installer(self) -> None:
+        self._wcpp_install_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self._wcpp_vbox.pack_start(self._wcpp_install_box, False, False, 0)
+
+        info = Gtk.Label(
+            xalign=0,
+            label=(
+                "whisper.cpp is not built yet. Building it compiles a local transcription "
+                "engine that can use AMD (ROCm/Vulkan), Apple (Metal), NVIDIA, or CPU. "
+                "This installs a build toolchain and may take a few minutes."
+            ),
+        )
+        info.set_line_wrap(True)
+        self._wcpp_install_box.pack_start(info, False, False, 0)
+
+        self._wcpp_install_button = Gtk.Button(label="Build whisper.cpp engine")
+        self._wcpp_install_button.connect("clicked", self._on_build_whisper_cpp)
+        self._wcpp_install_box.pack_start(self._wcpp_install_button, False, False, 0)
+        self._wcpp_install_box.show_all()
+
+    def _build_wcpp_ui(self) -> None:
+        self._wcpp_config_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self._wcpp_vbox.pack_start(self._wcpp_config_box, False, False, 0)
+
+        model_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        model_box.pack_start(Gtk.Label(label="Model:", xalign=0), False, False, 0)
+        self._wcpp_model_combo = self._make_combo(
+            WHISPER_CPP_MODELS, self._cfg.get("whisper_cpp_model", WHISPER_CPP_MODELS[0])
+        )
+        model_box.pack_start(self._wcpp_model_combo, False, False, 0)
+        self._wcpp_config_box.pack_start(model_box, False, False, 0)
+
+        note = Gtk.Label(
+            label="GGML models are downloaded from HuggingFace and cached locally.",
+            xalign=0,
+        )
+        note.set_line_wrap(True)
+        self._wcpp_config_box.pack_start(note, False, False, 0)
+
+        self._wcpp_grid = ModelRowGrid(
+            WHISPER_CPP_MODELS, WHISPER_CPP_MODEL_INFO, self._start_wcpp_download
+        )
+        self._wcpp_config_box.pack_start(self._wcpp_grid, False, False, 0)
+        self._wcpp_config_box.show_all()
 
     def _build_ollama_section(self) -> Gtk.Widget:
         self._ollama_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
@@ -442,51 +587,72 @@ class SettingsDialog(Gtk.Dialog):
         self._ollama_config_box.pack_start(self._ollama_grid, False, False, 0)
         self._ollama_config_box.show_all()
 
-    def _build_cuda_section(self) -> Gtk.Widget:
-        self._cuda_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+    def _build_gpu_section(self) -> Gtk.Widget:
+        self._gpu_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
 
         title = Gtk.Label(xalign=0)
-        title.set_markup("<b>CUDA Libraries (GPU Acceleration)</b>")
-        self._cuda_vbox.pack_start(title, False, False, 0)
+        title.set_markup("<b>GPU Acceleration</b>")
+        self._gpu_vbox.pack_start(title, False, False, 0)
 
-        if not self._cuda_inst.is_available():
-            self._build_cuda_installer()
+        # Pick the right accelerator UI for the detected GPU vendor.
+        if self._gpu_vendor == "nvidia":
+            if self._cuda_inst.is_available():
+                self._gpu_installed_label(
+                    "NVIDIA CUDA libraries detected. GPU acceleration is available."
+                )
+            else:
+                self._build_gpu_installer(
+                    "nvidia",
+                    "An NVIDIA GPU was detected but CUDA libraries are not installed. "
+                    "Install them to enable GPU-accelerated transcription.",
+                    "Install CUDA Libraries",
+                )
+        elif self._gpu_vendor == "amd":
+            if self._rocm_inst.is_available():
+                self._gpu_installed_label(
+                    "AMD ROCm detected. GPU acceleration is available "
+                    "(use the whisper.cpp engine)."
+                )
+            else:
+                self._build_gpu_installer(
+                    "amd",
+                    "An AMD GPU was detected but the ROCm runtime is not installed. "
+                    "Install it to enable GPU-accelerated transcription with whisper.cpp.",
+                    "Install ROCm Runtime",
+                )
+        elif self._gpu_vendor == "apple":
+            self._gpu_installed_label(
+                "Apple Silicon detected. Metal GPU acceleration is built in "
+                "(use the whisper.cpp engine) — no install needed."
+            )
         else:
-            self._build_cuda_installed()
+            self._gpu_installed_label(
+                "No supported GPU detected. Local transcription will run on CPU, "
+                "which is slow. For fast transcription, use the Gemini service."
+            )
 
-        return self._cuda_vbox
+        return self._gpu_vbox
 
-    def _build_cuda_installer(self) -> None:
-        self._cuda_install_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        self._cuda_vbox.pack_start(self._cuda_install_box, False, False, 0)
-
-        info = Gtk.Label(
-            xalign=0,
-            label=(
-                "NVIDIA CUDA libraries are not installed. Installing them enables GPU-accelerated "
-                "transcription with Whisper, which is significantly faster. This is optional and "
-                "only beneficial if you have a compatible NVIDIA GPU."
-            ),
-        )
-        info.set_line_wrap(True)
-        self._cuda_install_box.pack_start(info, False, False, 0)
-
-        self._cuda_install_button = Gtk.Button(label="Install CUDA Libraries")
-        self._cuda_install_button.connect("clicked", self._on_install_cuda)
-        self._cuda_install_box.pack_start(self._cuda_install_button, False, False, 0)
-        self._cuda_install_box.show_all()
-
-    def _build_cuda_installed(self) -> None:
+    def _gpu_installed_label(self, text: str) -> None:
         info_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        self._cuda_vbox.pack_start(info_box, False, False, 0)
-
-        info = Gtk.Label(
-            xalign=0,
-            label="NVIDIA CUDA libraries detected. GPU acceleration for Whisper is available.",
-        )
+        self._gpu_vbox.pack_start(info_box, False, False, 0)
+        info = Gtk.Label(xalign=0, label=text)
         info.set_line_wrap(True)
         info_box.pack_start(info, False, False, 0)
         info_box.show_all()
+
+    def _build_gpu_installer(self, vendor: str, info_text: str, button_label: str) -> None:
+        self._gpu_install_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self._gpu_vbox.pack_start(self._gpu_install_box, False, False, 0)
+
+        info = Gtk.Label(xalign=0, label=info_text)
+        info.set_line_wrap(True)
+        self._gpu_install_box.pack_start(info, False, False, 0)
+
+        self._gpu_install_button = Gtk.Button(label=button_label)
+        self._gpu_install_button.connect("clicked", self._on_install_gpu, vendor)
+        self._gpu_install_box.pack_start(self._gpu_install_button, False, False, 0)
+        self._gpu_install_box.show_all()
 
     # ------------------------------------------------------------------
     # Install handlers — Ollama
@@ -511,25 +677,80 @@ class SettingsDialog(Gtk.Dialog):
             self._ollama_install_button.set_label("Retry Install")
 
     # ------------------------------------------------------------------
-    # Install handlers — CUDA
+    # Install handlers — Whisper engine (faster-whisper, opt-in)
     # ------------------------------------------------------------------
 
-    def _on_install_cuda(self, button: Gtk.Button) -> None:
+    def _on_install_whisper_engine(self, button: Gtk.Button) -> None:
         button.set_sensitive(False)
         button.set_label("Installing\u2026")
-        threading.Thread(target=self._do_install_cuda, daemon=True).start()
+        threading.Thread(target=self._do_install_whisper_engine, daemon=True).start()
 
-    def _do_install_cuda(self) -> None:
-        success = self._cuda_inst.install()
-        self._dispatch(self._on_cuda_install_finished, success)
+    def _do_install_whisper_engine(self) -> None:
+        success = self._whisper_eng_inst.install()
+        self._dispatch(self._on_whisper_engine_install_finished, success)
 
-    def _on_cuda_install_finished(self, success: bool) -> None:
-        if success and self._cuda_inst.is_available():
-            self._cuda_install_box.destroy()
-            self._build_cuda_installed()
+    def _on_whisper_engine_install_finished(self, success: bool) -> None:
+        if success and self._whisper_eng_inst.is_available():
+            self._whisper_install_box.destroy()
+            self._build_whisper_ui()
+            self._refresh_local_model_statuses()
         else:
-            self._cuda_install_button.set_sensitive(True)
-            self._cuda_install_button.set_label("Retry Install")
+            self._whisper_install_button.set_sensitive(True)
+            self._whisper_install_button.set_label("Retry Install")
+
+    # ------------------------------------------------------------------
+    # Build handler \u2014 whisper.cpp engine (built from source, opt-in)
+    # ------------------------------------------------------------------
+
+    def _on_build_whisper_cpp(self, button: Gtk.Button) -> None:
+        button.set_sensitive(False)
+        button.set_label("Building\u2026 (may take a few minutes)")
+        backend = self._wcpp_backend_combo.get_active_id() or "auto"
+        if backend == "auto":
+            backend = detect_gpu_backend()
+        threading.Thread(
+            target=self._do_build_whisper_cpp, args=(backend,), daemon=True
+        ).start()
+
+    def _do_build_whisper_cpp(self, backend: str) -> None:
+        success = self._wcpp_builder.build(backend)
+        self._dispatch(self._on_whisper_cpp_build_finished, success)
+
+    def _on_whisper_cpp_build_finished(self, success: bool) -> None:
+        if success and self._wcpp_builder.is_built():
+            self._wcpp_install_box.destroy()
+            self._build_wcpp_ui()
+            self._refresh_local_model_statuses()
+        else:
+            self._wcpp_install_button.set_sensitive(True)
+            self._wcpp_install_button.set_label("Retry Build")
+
+    def _on_install_gpu(self, button: Gtk.Button, vendor: str) -> None:
+        button.set_sensitive(False)
+        button.set_label("Installing\u2026")
+        threading.Thread(
+            target=self._do_install_gpu, args=(vendor,), daemon=True
+        ).start()
+
+    def _do_install_gpu(self, vendor: str) -> None:
+        installer = self._cuda_inst if vendor == "nvidia" else self._rocm_inst
+        success = installer.install()
+        self._dispatch(self._on_gpu_install_finished, success, vendor)
+
+    def _on_gpu_install_finished(self, success: bool, vendor: str) -> None:
+        installer = self._cuda_inst if vendor == "nvidia" else self._rocm_inst
+        if success and installer.is_available():
+            self._gpu_install_box.destroy()
+            label = (
+                "NVIDIA CUDA libraries detected. GPU acceleration is available."
+                if vendor == "nvidia"
+                else "AMD ROCm detected. GPU acceleration is available "
+                "(use the whisper.cpp engine)."
+            )
+            self._gpu_installed_label(label)
+        else:
+            self._gpu_install_button.set_sensitive(True)
+            self._gpu_install_button.set_label("Retry Install")
 
     # ------------------------------------------------------------------
     # Prompts tab — three sections built from a single helper (DRY)
@@ -623,15 +844,27 @@ class SettingsDialog(Gtk.Dialog):
     # ------------------------------------------------------------------
 
     def _refresh_local_model_statuses(self) -> None:
-        threading.Thread(target=self._check_whisper_statuses, daemon=True).start()
-        threading.Thread(target=self._check_ollama_statuses,  daemon=True).start()
+        threading.Thread(target=self._check_whisper_statuses,     daemon=True).start()
+        threading.Thread(target=self._check_whisper_cpp_statuses, daemon=True).start()
+        threading.Thread(target=self._check_ollama_statuses,      daemon=True).start()
 
     def _check_whisper_statuses(self) -> None:
+        if self._whisper_grid is None:  # engine not installed yet
+            return
         for model in WHISPER_MODELS:
             if self._whisper_checker.is_cached(model):
                 self._dispatch(self._whisper_grid.set_ready, model)
             else:
                 self._dispatch(self._whisper_grid.set_not_downloaded, model)
+
+    def _check_whisper_cpp_statuses(self) -> None:
+        if self._wcpp_grid is None:  # engine not built yet
+            return
+        for model in WHISPER_CPP_MODELS:
+            if self._wcpp_checker.is_cached(model):
+                self._dispatch(self._wcpp_grid.set_ready, model)
+            else:
+                self._dispatch(self._wcpp_grid.set_not_downloaded, model)
 
     def _check_ollama_statuses(self) -> None:
         if not self._ollama_inst.is_available():
@@ -677,6 +910,19 @@ class SettingsDialog(Gtk.Dialog):
             self._dispatch(self._whisper_grid.set_ready, model)
         except Exception as exc:
             self._dispatch(self._whisper_grid.set_error, model, str(exc))
+
+    def _start_wcpp_download(self, model: str) -> None:
+        self._wcpp_grid.set_progress(model, "Downloading…")
+        threading.Thread(
+            target=self._do_wcpp_download, args=(model,), daemon=True
+        ).start()
+
+    def _do_wcpp_download(self, model: str) -> None:
+        try:
+            self._wcpp_dl.download(model)
+            self._dispatch(self._wcpp_grid.set_ready, model)
+        except Exception as exc:
+            self._dispatch(self._wcpp_grid.set_error, model, str(exc))
 
     def _start_ollama_download(self, model: str) -> None:
         host = self._ollama_host_entry.get_text().strip()
@@ -751,7 +997,16 @@ class SettingsDialog(Gtk.Dialog):
         cfg["llm_request_timeout_minutes"] = int(
             self._timeout_combo.get_active_id() or "3"
         )
-        cfg["whisper_model"]    = self._whisper_model_combo.get_active_id() or WHISPER_MODELS[0]
+        # These combos only exist once the corresponding opt-in engine is
+        # installed/built; preserve the stored value otherwise.
+        if self._whisper_model_combo is not None:
+            cfg["whisper_model"] = self._whisper_model_combo.get_active_id() or WHISPER_MODELS[0]
+        if self._wcpp_model_combo is not None:
+            cfg["whisper_cpp_model"] = (
+                self._wcpp_model_combo.get_active_id() or WHISPER_CPP_MODELS[0]
+            )
+        if self._wcpp_backend_combo is not None:
+            cfg["whisper_cpp_backend"] = self._wcpp_backend_combo.get_active_id() or "auto"
         cfg["output_folder"]    = self._folder_entry.get_text().strip() or "~/meetings"
         cfg["recording_quality"] = self._quality_combo.get_active_id() or "high"
         cfg["call_detection_enabled"]       = self._detection_switch.get_active()

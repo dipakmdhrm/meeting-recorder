@@ -16,12 +16,13 @@ logger = logging.getLogger(__name__)
 
 def _detect_device() -> tuple[str, str]:
     """Return (device, compute_type) based on what's available."""
+    # faster-whisper's engine (CTranslate2) only supports CUDA or CPU — it has
+    # no AMD/Metal/Vulkan backend. Those GPUs are served by the whisper.cpp
+    # engine instead. So here we only probe for CUDA and otherwise fall to CPU.
     try:
         import ctranslate2
-        if "cuda" in ctranslate2.get_supported_compute_types.__module__ or True:
-            supported = ctranslate2.get_supported_compute_types("cuda")
-            if supported:
-                return "cuda", "float16"
+        if ctranslate2.get_supported_compute_types("cuda"):
+            return "cuda", "float16"
     except Exception:
         pass
     return "cpu", "int8"
