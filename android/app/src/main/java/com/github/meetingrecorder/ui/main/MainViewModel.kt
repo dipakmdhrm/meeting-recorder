@@ -8,7 +8,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.github.meetingrecorder.MeetingRecorderApp
 import com.github.meetingrecorder.R
-import com.github.meetingrecorder.audio.AudioRecorder
+import com.github.meetingrecorder.audio.RecordingPhase
+import com.github.meetingrecorder.audio.RecordingService
 import com.github.meetingrecorder.data.GeminiClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -16,6 +17,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -33,7 +35,6 @@ sealed class RecordingState {
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val app = application as MeetingRecorderApp
-    private val audioRecorder = AudioRecorder(application)
 
     private val _state = MutableStateFlow<RecordingState>(RecordingState.Ready)
     val state: StateFlow<RecordingState> = _state.asStateFlow()
@@ -71,7 +72,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         lockFile = File(meetingDir, ".recording").also { it.createNewFile() }
 
         try {
-            audioRecorder.start(meetingDir, app.config.audioQuality.bitrate)
+            RecordingService.start(app, meetingDir, app.config.audioQuality.bitrate)
         } catch (e: Exception) {
             lockFile?.delete()
             lockFile = null
@@ -94,24 +95,40 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun stopRecording() {
         timerJob?.cancel()
         timerJob = null
-        audioRecorder.stop()
 
         val meetingDir = currentMeetingDir ?: run {
             _state.value = RecordingState.Error("No meeting directory")
             return
         }
-        val audioFile = File(meetingDir, "recording.m4a")
-        when {
-            !audioFile.exists() ->
-                _state.value = RecordingState.Error("Recording file not found. Check storage permission.")
-            audioFile.length() == 0L ->
-                _state.value = RecordingState.Error(
-                    "Recording is empty (0 bytes). " +
-                    "Grant 'All files access' in Settings → Apps → Meeting Recorder → Permissions."
-                )
-            app.config.processingCountdownEnabled -> startCountdown(audioFile)
-            else -> viewModelScope.launch {
-                try {
+
+        viewModelScope.launch {
+            // The recorder lives in the foreground service; stopping is asynchronous, so wait for
+            // the service to finish writing the file and report whether the mic was silenced.
+            RecordingService.stop(app)
+            val status = RecordingService.status.first {
+                it.phase == RecordingPhase.STOPPED || it.phase == RecordingPhase.FAILED
+            }
+
+            val audioFile = File(meetingDir, "recording.m4a")
+            val outcome = decideStopOutcome(
+                phase = status.phase,
+                fileExists = audioFile.exists(),
+                fileLength = audioFile.length(),
+                silenced = status.silenced,
+                countdownEnabled = app.config.processingCountdownEnabled,
+            )
+            when (outcome) {
+                StopOutcome.FILE_NOT_FOUND ->
+                    _state.value = RecordingState.Error("Recording file not found. Check storage permission.")
+                StopOutcome.EMPTY ->
+                    _state.value = RecordingState.Error(
+                        "Recording is empty (0 bytes). " +
+                        "Grant 'All files access' in Settings → Apps → Meeting Recorder → Permissions."
+                    )
+                StopOutcome.SILENCED ->
+                    _state.value = RecordingState.Error(app.getString(R.string.error_recording_silenced))
+                StopOutcome.COUNTDOWN -> startCountdown(audioFile)
+                StopOutcome.PROCESS -> try {
                     processRecording(audioFile)
                 } catch (e: Exception) {
                     _state.value = RecordingState.Error(e.message ?: "Processing failed")

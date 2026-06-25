@@ -37,6 +37,12 @@
     <string name="status_processing_complete">Processing complete!</string>
     <string name="label_notes_preview">Notes preview:</string>
     <string name="error_with_message">Error: %1$s</string>
+    <string name="error_recording_silenced">The microphone was muted by the system during recording (likely an incoming call), so the audio may be silent. The recording was not transcribed. The audio file was kept so you can check it.</string>
+
+    <!-- Recording foreground service notification -->
+    <string name="notif_channel_recording">Recording</string>
+    <string name="notif_recording_title">Recording meeting</string>
+    <string name="notif_recording_text">Tap to return to Meeting Recorder</string>
 
     <!-- Meetings Screen -->
     <string name="title_meetings">Meetings</string>
@@ -57,6 +63,8 @@
     <string name="label_recording_quality">Recording Quality</string>
     <string name="label_processing_countdown">Processing countdown (5 s)</string>
     <string name="desc_processing_countdown">Show a 5-second countdown after stopping — cancel to skip transcription and save audio only.</string>
+    <string name="label_dnd_recording">Do Not Disturb while recording</string>
+    <string name="desc_dnd_recording">Silence notification and call sounds during recording so they don\'t interrupt you or bleed into the audio. Does not block calls — an answered call still stops capture. Requires Do Not Disturb access.</string>
     <string name="label_transcription_prompt">Transcription Prompt</string>
     <string name="label_summarization_prompt">Summarization Prompt</string>
     <string name="label_meeting_title_prompt">Meeting Title Prompt</string>

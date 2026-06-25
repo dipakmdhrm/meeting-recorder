@@ -39,6 +39,10 @@ class Config(context: Context) {
         get() = prefs.getBoolean("processing_countdown_enabled", false)
         set(value) { prefs.edit().putBoolean("processing_countdown_enabled", value).apply() }
 
+    var dndDuringRecordingEnabled: Boolean
+        get() = prefs.getBoolean("dnd_during_recording_enabled", false)
+        set(value) { prefs.edit().putBoolean("dnd_during_recording_enabled", value).apply() }
+
     companion object {
         const val DEFAULT_MODEL = "gemini-flash-latest"
 
