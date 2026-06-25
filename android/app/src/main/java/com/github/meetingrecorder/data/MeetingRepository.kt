@@ -58,6 +58,41 @@ class MeetingRepository(private val rootDir: File) {
         return meetings.sortedByDescending { it.date }
     }
 
+    /**
+     * Recovers meeting directories left in a "recording in progress" state — i.e. still holding a
+     * `.recording` lock file — by a previous process that died before it could finish: the app was
+     * killed mid-recording, or processing failed and the directory was never de-orphaned. Such
+     * directories are hidden from [listMeetings] even though their audio is on disk.
+     *
+     * For each locked directory whose name matches the meeting pattern:
+     *  - if it holds a non-empty `recording.m4a`, the lock is removed so the audio becomes visible
+     *    in the library (the user can re-transcribe later via "Use Existing Recording");
+     *  - otherwise (no usable audio), the dead stub is deleted — unless it still holds some other
+     *    non-empty file (e.g. manually written notes), in which case it is left untouched so real
+     *    data is never destroyed.
+     *
+     * Safe to call when storage isn't readable yet — [listFiles] returns null and this no-ops.
+     */
+    fun recoverOrphanedRecordings() {
+        if (!rootDir.exists()) return
+        val pattern = Regex("""^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})(?:_.*)?$""")
+        rootDir.listFiles()?.forEach { dir ->
+            if (!dir.isDirectory) return@forEach
+            val lock = File(dir, ".recording")
+            if (!lock.exists()) return@forEach
+            if (!pattern.matches(dir.name)) return@forEach
+
+            val audio = File(dir, "recording.m4a")
+            if (audio.exists() && audio.length() > 0L) {
+                lock.delete()
+            } else {
+                // No usable audio. A 0-byte recording.m4a counts as junk, not data.
+                val hasValuableContent = dir.listFiles()?.any { it.name != ".recording" && it.length() > 0L } ?: false
+                if (!hasValuableContent) dir.deleteRecursively()
+            }
+        }
+    }
+
     fun createMeetingDir(title: String?): File {
         val now = LocalDateTime.now()
         val datePart = "${now.year.toString().padStart(4, '0')}-${now.monthValue.toString().padStart(2, '0')}-${now.dayOfMonth.toString().padStart(2, '0')}"

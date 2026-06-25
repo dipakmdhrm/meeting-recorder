@@ -23,5 +23,9 @@ class MeetingRecorderApp : Application() {
                 "Meetings"
             )
         )
+
+        // De-orphan recordings whose previous process died mid-recording or mid-processing, so their
+        // audio reappears in the library. Off the main thread — it touches the filesystem.
+        Thread { meetingRepository.recoverOrphanedRecordings() }.start()
     }
 }

@@ -38,6 +38,7 @@
     <string name="label_notes_preview">Notes preview:</string>
     <string name="error_with_message">Error: %1$s</string>
     <string name="error_recording_silenced">The microphone was muted by the system during recording (likely an incoming call), so the audio may be silent. The recording was not transcribed. The audio file was kept so you can check it.</string>
+    <string name="error_processing_failed_audio_kept">Transcription failed: %1$s\n\nThe audio was saved to your library. Open the recording and choose \'Use Existing Recording\' to try again.</string>
 
     <!-- Recording foreground service notification -->
     <string name="notif_channel_recording">Recording</string>

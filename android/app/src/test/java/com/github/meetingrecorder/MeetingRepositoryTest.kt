@@ -209,4 +209,91 @@ class MeetingRepositoryTest {
             titlePart.matches(Regex("[a-zA-Z0-9_\\-]+"))
         )
     }
+
+    // -------------------------------------------------------------------------
+    // recoverOrphanedRecordings
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun `recoverOrphanedRecordings de-orphans locked dir with non-empty audio`() {
+        val dir = File(tempDir.root, "2024-04-01_10-00_Standup").also { it.mkdirs() }
+        File(dir, ".recording").createNewFile()
+        File(dir, "recording.m4a").writeText("audio bytes")
+
+        // Hidden while locked…
+        assertEquals(0, repo().listMeetings().size)
+
+        repo().recoverOrphanedRecordings()
+
+        // Lock removed, audio kept, now visible in the library.
+        assertFalse(File(dir, ".recording").exists())
+        assertTrue(File(dir, "recording.m4a").exists())
+        val meetings = repo().listMeetings()
+        assertEquals(1, meetings.size)
+        assertTrue(meetings[0].hasAudio)
+    }
+
+    @Test
+    fun `recoverOrphanedRecordings deletes empty stub with only lock file`() {
+        val dir = File(tempDir.root, "2024-04-02_11-00").also { it.mkdirs() }
+        File(dir, ".recording").createNewFile()
+
+        repo().recoverOrphanedRecordings()
+
+        assertFalse("Dead stub should be deleted", dir.exists())
+    }
+
+    @Test
+    fun `recoverOrphanedRecordings deletes locked dir with zero-byte audio`() {
+        val dir = File(tempDir.root, "2024-04-03_12-00").also { it.mkdirs() }
+        File(dir, ".recording").createNewFile()
+        File(dir, "recording.m4a").createNewFile() // 0 bytes — no usable audio
+
+        repo().recoverOrphanedRecordings()
+
+        assertFalse("Stub with empty audio should be deleted", dir.exists())
+    }
+
+    @Test
+    fun `recoverOrphanedRecordings leaves locked dir with other content but no audio untouched`() {
+        val dir = File(tempDir.root, "2024-04-04_13-00").also { it.mkdirs() }
+        File(dir, ".recording").createNewFile()
+        File(dir, "notes.md").writeText("manual notes")
+
+        repo().recoverOrphanedRecordings()
+
+        // Not destroyed (has other data) and not recovered (no audio) — stays as-is.
+        assertTrue(dir.exists())
+        assertTrue(File(dir, ".recording").exists())
+    }
+
+    @Test
+    fun `recoverOrphanedRecordings ignores unlocked meetings`() {
+        val dir = File(tempDir.root, "2024-04-05_14-00").also { it.mkdirs() }
+        File(dir, "recording.m4a").writeText("audio")
+
+        repo().recoverOrphanedRecordings()
+
+        assertTrue(dir.exists())
+        assertEquals(1, repo().listMeetings().size)
+    }
+
+    @Test
+    fun `recoverOrphanedRecordings ignores locked dir whose name does not match pattern`() {
+        val dir = File(tempDir.root, "scratch").also { it.mkdirs() }
+        File(dir, ".recording").createNewFile()
+        File(dir, "recording.m4a").writeText("audio")
+
+        repo().recoverOrphanedRecordings()
+
+        // Non-meeting directory left completely alone.
+        assertTrue(dir.exists())
+        assertTrue(File(dir, ".recording").exists())
+    }
+
+    @Test
+    fun `recoverOrphanedRecordings no-ops when root does not exist`() {
+        val repo = MeetingRepository(File(tempDir.root, "nonexistent"))
+        repo.recoverOrphanedRecordings() // must not throw
+    }
 }

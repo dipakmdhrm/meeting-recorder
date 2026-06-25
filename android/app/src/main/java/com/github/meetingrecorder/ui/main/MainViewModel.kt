@@ -131,7 +131,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 StopOutcome.PROCESS -> try {
                     processRecording(audioFile)
                 } catch (e: Exception) {
-                    _state.value = RecordingState.Error(e.message ?: "Processing failed")
+                    saveAudioOnlyAfterFailure()
+                    _state.value = RecordingState.Error(
+                        app.getString(R.string.error_processing_failed_audio_kept, e.message ?: "unknown error")
+                    )
                 }
             }
         }
@@ -152,7 +155,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     try {
                         processRecording(audioFile)
                     } catch (e: Exception) {
-                        _state.value = RecordingState.Error(e.message ?: "Processing failed")
+                        saveAudioOnlyAfterFailure()
+                        _state.value = RecordingState.Error(
+                            app.getString(R.string.error_processing_failed_audio_kept, e.message ?: "unknown error")
+                        )
                     }
                 }
             }
@@ -183,6 +189,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _state.value = RecordingState.Error("Save failed: ${e.message}")
             }
         }
+    }
+
+    /**
+     * Transcription/summarization of a freshly-recorded meeting failed. Keep the audio discoverable
+     * instead of orphaning it: write an audio-only meeting.json and remove the `.recording` lock so
+     * the recording appears in the library and can be re-transcribed later via "Use Existing
+     * Recording". Mirrors [cancelCountdown]'s audio-only save. No-ops for in-place processing (no
+     * lock was taken — the original audio-only meeting is already visible and untouched).
+     */
+    private fun saveAudioOnlyAfterFailure() {
+        if (lockFile == null) return
+        val meetingDir = currentMeetingDir ?: return
+        try {
+            app.meetingRepository.saveMeetingMeta(meetingDir, currentTitle, durationSeconds)
+        } catch (_: Exception) {
+            // Best-effort: even if the meta write fails, removing the lock below keeps the audio visible.
+        }
+        lockFile?.delete()
+        lockFile = null
     }
 
     fun processExistingRecording(uri: Uri) {
