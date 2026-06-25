@@ -98,8 +98,11 @@ class RecordingService : Service() {
     }
 
     override fun onDestroy() {
-        // Safety net: never leave the user stuck in Do Not Disturb if the service is torn down
-        // without a clean ACTION_STOP.
+        // Safety net for an unclean teardown (e.g. the OS killing the service under memory pressure
+        // without an ACTION_STOP): finalize the recorder so the mic is released and the .m4a is
+        // properly closed rather than left truncated, and never leave the user stuck in Do Not
+        // Disturb. Both calls are idempotent, so a normal ACTION_STOP that already ran is a no-op.
+        audioRecorder.stop()
         restoreDnd()
         super.onDestroy()
     }
@@ -111,7 +114,11 @@ class RecordingService : Service() {
         if (!config.dndDuringRecordingEnabled) return
         val nm = getSystemService(NotificationManager::class.java)
         if (!nm.isNotificationPolicyAccessGranted) return
-        savedInterruptionFilter = nm.currentInterruptionFilter
+        // Capture the user's real filter only once — a re-delivered start intent must not overwrite
+        // it with our own INTERRUPTION_FILTER_ALARMS, or restore would leave DND stuck on.
+        if (savedInterruptionFilter == null) {
+            savedInterruptionFilter = nm.currentInterruptionFilter
+        }
         nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALARMS)
     }
 

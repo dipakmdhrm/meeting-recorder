@@ -55,6 +55,9 @@ class AudioRecorder(private val context: Context) {
     fun stop() {
         recorder?.apply {
             audioManager.unregisterAudioRecordingCallback(recordingCallback)
+            // Detach the error listener before teardown so a late callback can't fire
+            // markInterrupted() during/after release().
+            setOnErrorListener(null)
             try {
                 stop()
             } catch (_: RuntimeException) {
