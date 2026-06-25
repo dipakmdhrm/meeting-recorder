@@ -124,6 +124,8 @@ class SettingsDialog(Gtk.Dialog):
         self._ollama_inst     = ollama_installer   or OllamaInstaller()
         self._cuda_inst       = cuda_installer     or CudaInstaller()
         self._rocm_inst       = rocm_installer     or RocmInstaller()
+        # Maps a detected GPU vendor to the runtime installer that serves it.
+        self._gpu_installers  = {"nvidia": self._cuda_inst, "amd": self._rocm_inst}
         self._whisper_eng_inst = whisper_engine_installer or WhisperEngineInstaller()
         self._wcpp_builder    = whisper_cpp_builder    or WhisperCppBuilder()
         self._wcpp_checker    = whisper_cpp_checker    or WhisperCppStatusChecker()
@@ -733,13 +735,13 @@ class SettingsDialog(Gtk.Dialog):
         ).start()
 
     def _do_install_gpu(self, vendor: str) -> None:
-        installer = self._cuda_inst if vendor == "nvidia" else self._rocm_inst
-        success = installer.install()
+        installer = self._gpu_installers.get(vendor)
+        success = installer.install() if installer else False
         self._dispatch(self._on_gpu_install_finished, success, vendor)
 
     def _on_gpu_install_finished(self, success: bool, vendor: str) -> None:
-        installer = self._cuda_inst if vendor == "nvidia" else self._rocm_inst
-        if success and installer.is_available():
+        installer = self._gpu_installers.get(vendor)
+        if success and installer is not None and installer.is_available():
             self._gpu_install_box.destroy()
             label = (
                 "NVIDIA CUDA libraries detected. GPU acceleration is available."
