@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.github.meetingrecorder.MeetingRecorderApp
 import com.github.meetingrecorder.data.GeminiClient
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -59,8 +60,12 @@ class MeetingDetailViewModel(application: Application) : AndroidViewModel(applic
     private var meetingDir: File? = null
     private var currentTitle: String? = null
     private var durationSeconds: Int = 0
+    private var generationJob: Job? = null
 
     fun load(meetingPath: String) {
+        // Cancel any in-flight generation from a previously loaded meeting so its background
+        // writes can't clobber the meeting we're loading now.
+        generationJob?.cancel()
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 val dir = File(meetingPath)
@@ -114,13 +119,14 @@ class MeetingDetailViewModel(application: Application) : AndroidViewModel(applic
 
     /** Transcribe the audio, then summarize — writes transcript.md and notes.md. Requires audio. */
     fun generateTranscriptAndNotes() {
+        if (_genState.value is GenState.Processing) return
         val dir = meetingDir ?: return
         val audio = audioFile ?: return
         if (app.config.apiKey.isBlank()) {
             _genState.value = GenState.Error("No Gemini API key set. Add one in Settings.")
             return
         }
-        viewModelScope.launch {
+        generationJob = viewModelScope.launch {
             _genState.value = GenState.Processing("Starting…")
             try {
                 withContext(Dispatchers.IO) {
@@ -137,6 +143,8 @@ class MeetingDetailViewModel(application: Application) : AndroidViewModel(applic
                     _notes.value = notes
                 }
                 _genState.value = GenState.Idle
+            } catch (e: CancellationException) {
+                throw e // a cancelled job (e.g. reload) must not surface as an error
             } catch (e: Exception) {
                 _genState.value = GenState.Error(e.message ?: "Generation failed")
             }
@@ -150,13 +158,14 @@ class MeetingDetailViewModel(application: Application) : AndroidViewModel(applic
     fun regenerateNotes() = runNotesGeneration()
 
     private fun runNotesGeneration() {
+        if (_genState.value is GenState.Processing) return
         val dir = meetingDir ?: return
         val transcript = _transcript.value ?: return
         if (app.config.apiKey.isBlank()) {
             _genState.value = GenState.Error("No Gemini API key set. Add one in Settings.")
             return
         }
-        viewModelScope.launch {
+        generationJob = viewModelScope.launch {
             _genState.value = GenState.Processing("Generating meeting notes…")
             try {
                 withContext(Dispatchers.IO) {
@@ -168,6 +177,8 @@ class MeetingDetailViewModel(application: Application) : AndroidViewModel(applic
                     _notes.value = notes
                 }
                 _genState.value = GenState.Idle
+            } catch (e: CancellationException) {
+                throw e // a cancelled job (e.g. reload) must not surface as an error
             } catch (e: Exception) {
                 _genState.value = GenState.Error(e.message ?: "Generation failed")
             }

@@ -171,8 +171,9 @@ private fun TranscriptTabBody(
     onGenerateAll: () -> Unit,
 ) {
     when {
-        genState is GenState.Processing -> ProcessingBody(genState.status)
+        // Keep the transcript readable even while notes are being generated in the background.
         transcript != null -> ContentText(transcript)
+        genState is GenState.Processing -> ProcessingBody(genState.status)
         // Reached only when the transcript is absent, so hasTranscript is false here.
         else -> EmptyState(genState = genState, placeholderRes = R.string.no_transcript) {
             if (transcriptTabAction(hasTranscript = false, hasAudio = hasAudio) ==
