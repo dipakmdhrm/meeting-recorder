@@ -36,6 +36,19 @@ Before opening a PR, re-read these three files and reconcile anything the change
 
 ---
 
+## Keep tests meaningful — IMPORTANT
+
+For every change, add or update tests when doing so is meaningful — treat it as part of "done," not a follow-up. "Meaningful" means the test would actually catch a regression in the behavior you changed:
+
+- New or changed logic with a testable contract (parsing, decisions, data transforms, repository/IO, API request/response handling) → add or update unit tests that cover the new behavior and its edge cases.
+- Fixing a bug → add a test that fails without the fix, so it can't silently regress.
+- When the meaningful logic is tangled with hard-to-test platform code (Android ViewModels/Compose, GTK UI), **extract the pure logic into a standalone function and test that** — this is the established pattern (e.g. `RecordingStopDecision.kt` + `RecordingStopDecisionTest`, `GenerateActionDecision.kt` + `GenerateActionDecisionTest`).
+- Run the relevant suite before opening a PR: `pytest` (Linux) and/or `./gradlew test` (Android).
+
+Skip new tests only when a change genuinely has no testable behavior (docs, comments, pure formatting, trivial constant tweaks) — and say so briefly rather than silently omitting them.
+
+---
+
 ## Project Overview
 
 This repository is a monorepo containing two applications: a Linux desktop applet and a native Android app. Both applications record audio, transcribe it, and generate structured notes using Google Gemini. The apps share the same storage format, allowing recordings to be accessed from both platforms.
