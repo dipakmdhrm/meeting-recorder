@@ -4,35 +4,44 @@ Hash: SHA512
 Origin: Meeting Recorder
 Label: Meeting Recorder
 Codename: stable
-Date: Thu, 21 May 2026 06:12:19 UTC
-Architectures: amd64
+Date: Thu, 25 Jun 2026 09:15:46 UTC
+Architectures: amd64 arm64
 Components: main
 Description: Meeting Recorder APT repository
 MD5Sum:
- 579622f087e87f31adc38052cf17f107 872 main/binary-amd64/Packages
- 9ac7c74543ae3b706b6ef99fb43ce5a4 551 main/binary-amd64/Packages.gz
+ 0299df8eb0e9becb43481f0ab92a7e4a 881 main/binary-amd64/Packages
+ ab86f10a026935edc0e840882bb5749f 555 main/binary-amd64/Packages.gz
  17d185771c71cb5d97cc0e53538eb589 130 main/binary-amd64/Release
+ 0299df8eb0e9becb43481f0ab92a7e4a 881 main/binary-arm64/Packages
+ ab86f10a026935edc0e840882bb5749f 555 main/binary-arm64/Packages.gz
+ f6ec9ac683f5bfd22513003b99ad879d 130 main/binary-arm64/Release
 SHA1:
- 8fac5f1134d649430375fb53b9834b674e177d5e 872 main/binary-amd64/Packages
- 0139bac6ac98d971ae16cc2765b00d30adeadd40 551 main/binary-amd64/Packages.gz
+ 023bd97c9d45dac1007438282da15f476af59c73 881 main/binary-amd64/Packages
+ ac9196e87776657d829e57d380aa171454f664e1 555 main/binary-amd64/Packages.gz
  6d96455003a8d856ac1ed26320b011ccbb3e3102 130 main/binary-amd64/Release
+ 023bd97c9d45dac1007438282da15f476af59c73 881 main/binary-arm64/Packages
+ ac9196e87776657d829e57d380aa171454f664e1 555 main/binary-arm64/Packages.gz
+ b788cfecc5647cc5674ea0be2c092ef7aac9c1f1 130 main/binary-arm64/Release
 SHA256:
- 1cf3d099519852d6083d91aedc004cb0eb4da7654912bc6ade715fe3a21cd9c8 872 main/binary-amd64/Packages
- c5d130788c632baab68570da8da82b927a71a96e921427ca1793d94e81c020b4 551 main/binary-amd64/Packages.gz
+ 3600d36a20d8f6bd5a898b9c8d620adffb18285e5219ef9a220b002f2ac393e3 881 main/binary-amd64/Packages
+ 75ed6cb3268ab8b25a65e1f0efb40fb20220bfe48ab61b5b96402142d91bcf0e 555 main/binary-amd64/Packages.gz
  cb47744016fef55a364c52a4cbab776a3fcc31238d729cc091ba4aa1ed558c29 130 main/binary-amd64/Release
+ 3600d36a20d8f6bd5a898b9c8d620adffb18285e5219ef9a220b002f2ac393e3 881 main/binary-arm64/Packages
+ 75ed6cb3268ab8b25a65e1f0efb40fb20220bfe48ab61b5b96402142d91bcf0e 555 main/binary-arm64/Packages.gz
+ 33bed45baa993b3c53cae5c6913ef5c9eb7f49801ae12922eb4113d3b821169a 130 main/binary-arm64/Release
 -----BEGIN PGP SIGNATURE-----
 
-iQIzBAEBCgAdFiEEHfjTLFriB1Wucq4B6cV3Y7Q498QFAmoOokMACgkQ6cV3Y7Q4
-98RxjRAAxywgfiFwDV3Ksrb8fxm1uDY3MTJE9MNi2Fv+Ndz9NcTGwyAAejtsYVbx
-JKltyqqBKsi+aD3jQddzKzjJc2BDQcMLiRzJoY6t5elbageJquv0g/XQ1E9qMp0K
-d2tkl4t3eudKQN6RO/N8lsIbEi4JhvaXZ/aGdswPJYBtft7UexRp4ESC7pL8jxHU
-uHQ/3Uq9XHoS4tRNFLZgIra7cuP9/SGn6Bw1AXE6IR9W0UYn+Evg38QTlqouQo7h
-EbZzhN4/7Qo47C/1x3RpTMPx94Gh/zaBxvF71nDrGRzNnuvakpsYM/RCh3ruLfJM
-9UcXV3nu+B3qXuQL6Nf4sqp/LLDIsQA/rhk8374DtRCSTbulZUwsj6AvXMob5+T1
-8qQ2ZSgb0bm6Pqr4tcergyJaxeNSEAlo+Oui7uPpg/6Z6p94kANvC9bLJIJzvFrb
-dQ2E7lIUY7au58bfcsSMjLgRO+fpp+tRgQZt5u8x6HTS9ixVdttxyxfE1C1+IKAP
-6hQEX0L9DotctvrnWu8N3+zWavg+vKLHNCfAJjd81Mv0dtCfjfn1uEbP1bfIF7zR
-HxwdDvgmYdPA8sbQCMX8KDY+AQsIcZO7vyh4+li6YQh9sRCGsdGs13lSysxH1NCf
-n2QqsPfe8MunqInDb4QBXQZ26OYwpS12LvBUlLt1lKPb6XTEiWI=
-=8Kb5
+iQIzBAEBCgAdFiEEHfjTLFriB1Wucq4B6cV3Y7Q498QFAmo88cIACgkQ6cV3Y7Q4
+98T4lg/9GIL5DuUAx7+L6CDKNGkYiUwnZ1Yy4TOGicRNJxswGaYPiLSam1plfwhx
+M83cU1m7+sNu2O/XeCceFwmvzTwcrPmf3LRr8vc6oD7Ciacqk+OSDqOV25EtSm3l
+ObSFJyaxNJ3vW2ZN96j6kAiyJsgLhy7bVqUAjhpxXHjRVEPjyqCEhT+pDjSw47HV
+MXqocMGMQ2JyC7IfuknC4b9pUwJVPt7QKsWceOov3zUBUwQBh+tMTiJVMt+3l7Cx
+a3baC+yrL9VIB/doCND0WPGKZxmlLRFLhH+8fBGO2Ij6d2CeA5Ck7ewMBOrOA6qC
+8+iQVthHffpCuqXtY2j7N795CnTQdfFiOEz654VZDiA0tYlpuDobnPM74Fd7eEU2
+A25bvD2crC/BZ+/B9l06eskyhIsHrnpvMwPK3vDp3WLWcwZkRfmsxdLZD7JSzHYA
+EGywCkF6Tm/reBlpvL0lVX0R2c97hu9exAVYkomD5b3gYemb1Yh+YSus1wUHy/Qx
+l2U9oKw1M91325CV0zkmo2/iU6Mw+RbWYcQBBKGdkm93walsyr6AdjSaSmrMCC40
++XQf1sGxvs180hgpEOXIV55c03G8DGBexviLKEgysHGEarYpHd7XCqiZsXTuLjJo
+y96X7vbfURNqR2QZANIeXOzX1OuNJuVcNArIlbd0v33xS8HqKGo=
+=4ujD
 -----END PGP SIGNATURE-----
