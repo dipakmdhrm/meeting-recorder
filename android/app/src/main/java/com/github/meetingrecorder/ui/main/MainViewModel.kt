@@ -224,7 +224,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // process it in-place — no copy, no new directory.
         val resolvedFile = resolveUriToFile(uri)
         val existingDir = resolvedFile?.let { app.meetingRepository.meetingDirContaining(it) }
-        if (existingDir != null && resolvedFile != null) {
+        if (resolvedFile != null && existingDir != null) {
             processInPlace(existingDir, resolvedFile)
         } else {
             copyAndProcess(uri)

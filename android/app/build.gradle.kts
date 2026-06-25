@@ -50,6 +50,14 @@ android {
     buildFeatures {
         compose = true
     }
+
+    packaging {
+        jniLibs {
+            // libandroidx.graphics.path.so ships pre-stripped, so the NDK strip tool emits a noisy
+            // "Unable to strip" warning during release packaging. Skip stripping it to silence that.
+            keepDebugSymbols += "**/libandroidx.graphics.path.so"
+        }
+    }
 }
 
 dependencies {
