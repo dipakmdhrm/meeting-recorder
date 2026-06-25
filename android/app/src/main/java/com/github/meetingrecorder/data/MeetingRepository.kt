@@ -6,6 +6,12 @@ import java.time.LocalDateTime
 
 class MeetingRepository(private val rootDir: File) {
 
+    // Captured when the repository (a per-process singleton) is constructed — effectively app launch.
+    // recoverOrphanedRecordings() only acts on directories locked *before* this moment, so a recording
+    // the user starts during this session (its `.recording` lock is newer) is never mistaken for an
+    // orphan and deleted out from under the active recorder.
+    private val sessionStartTime = System.currentTimeMillis()
+
     fun listMeetings(): List<Meeting> {
         val meetings = mutableListOf<Meeting>()
         if (!rootDir.exists()) return meetings
@@ -56,6 +62,50 @@ class MeetingRepository(private val rootDir: File) {
         }
 
         return meetings.sortedByDescending { it.date }
+    }
+
+    /**
+     * Recovers meeting directories left in a "recording in progress" state — i.e. still holding a
+     * `.recording` lock file — by a previous process that died before it could finish: the app was
+     * killed mid-recording, or processing failed and the directory was never de-orphaned. Such
+     * directories are hidden from [listMeetings] even though their audio is on disk.
+     *
+     * Only directories locked before [sessionStartTime] are considered, so an in-progress recording
+     * from the current session is never touched. For each such locked directory whose name matches
+     * the meeting pattern:
+     *  - if it holds a non-empty `recording.m4a`, the lock is removed so the audio becomes visible
+     *    in the library (the user can re-transcribe later via "Use Existing Recording");
+     *  - otherwise (no usable audio) the lock is still removed if the directory holds other real
+     *    content (e.g. notes/transcript written before a crash), so that content isn't hidden
+     *    forever; if there is nothing worth keeping, the dead stub is deleted.
+     *
+     * Safe to call when storage isn't readable yet — [listFiles] returns null and this no-ops.
+     */
+    fun recoverOrphanedRecordings() {
+        if (!rootDir.exists()) return
+        val pattern = Regex("""^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})(?:_.*)?$""")
+        rootDir.listFiles()?.forEach { dir ->
+            if (!dir.isDirectory) return@forEach
+            val lock = File(dir, ".recording")
+            // Skip dirs with no lock, and any locked during this session — that lock belongs to a
+            // recording the user just started, whose audio may not be on disk yet.
+            if (!lock.exists() || lock.lastModified() >= sessionStartTime) return@forEach
+            if (!pattern.matches(dir.name)) return@forEach
+
+            val audio = File(dir, "recording.m4a")
+            if (audio.exists() && audio.length() > 0L) {
+                lock.delete()
+            } else {
+                // No usable audio (missing or 0 bytes). Unlock if the dir still holds real user
+                // content so it isn't hidden forever; otherwise it's a dead stub — delete it. A
+                // 0-byte recording.m4a and the meeting.json metadata stub don't count as content.
+                val hasValuableContent = dir.listFiles()?.any {
+                    it.name != ".recording" && it.name != "recording.m4a" &&
+                        it.name != "meeting.json" && it.length() > 0L
+                } ?: false
+                if (hasValuableContent) lock.delete() else dir.deleteRecursively()
+            }
+        }
     }
 
     fun createMeetingDir(title: String?): File {
