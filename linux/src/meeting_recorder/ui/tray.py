@@ -280,8 +280,11 @@ class _GtkMenuTray:
         idle_call(self._window.on_cancel_clicked)
 
     def _on_show(self) -> None:
-        from gi.repository import GLib
-        GLib.idle_add(self._window.present_window)
+        # Runs on the GTK main thread within the menu "activate" event — call
+        # present_window() directly. Deferring via idle_add would clear the GDK
+        # event context, zeroing Gtk.get_current_event_time() and defeating the
+        # X11 focus-stealing-prevention timestamp.
+        self._window.present_window()
 
     def _on_quit(self) -> None:
         from gi.repository import GLib
@@ -329,12 +332,19 @@ class _StatusIconTray(_GtkMenuTray):
 
     # Left-click → bring the window up and focus it.
     def _on_activate(self, _status_icon) -> None:
-        from gi.repository import GLib
-        GLib.idle_add(self._window.present_window)
+        # Runs on the GTK main thread within the click event — call directly so
+        # Gtk.get_current_event_time() keeps the real timestamp (idle_add would
+        # zero it and defeat X11 focus-stealing prevention).
+        self._window.present_window()
 
-    # Right-click → context menu.
-    def _on_popup_menu(self, _status_icon, _button, _activate_time) -> None:
-        self._menu.popup_at_pointer(None)
+    # Right-click → context menu, anchored to the tray icon.
+    def _on_popup_menu(self, status_icon, button, activate_time) -> None:
+        # position_menu anchors the menu next to the icon for both mouse and
+        # keyboard triggers, unlike popup_at_pointer (which follows the cursor).
+        self._menu.popup(
+            None, None, self._Gtk.StatusIcon.position_menu,
+            status_icon, button, activate_time,
+        )
 
     def _set_icon(self, icon_name: str, state: str) -> None:
         self._status_icon.set_from_icon_name(icon_name)
@@ -343,8 +353,9 @@ class _StatusIconTray(_GtkMenuTray):
         return bool(self._status_icon.is_embedded())
 
     def destroy(self) -> None:
-        self._status_icon.set_visible(False)
-        self._status_icon = None
+        if self._status_icon is not None:
+            self._status_icon.set_visible(False)
+            self._status_icon = None
 
 
 class _PystrayTray:
