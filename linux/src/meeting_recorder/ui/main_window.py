@@ -1021,6 +1021,14 @@ class MainWindow(Gtk.ApplicationWindow):
         self.set_skip_taskbar_hint(False)
         super().present()
 
+    def present_window(self) -> None:
+        """Show, raise and focus the window — used by the tray (left-click and
+        the "Show Window" menu item). Un-hides if hidden to tray, deiconifies if
+        minimised, and raises if another window has focus. Uses present_with_time
+        so the window reliably grabs focus under X11 focus-stealing prevention."""
+        self.set_skip_taskbar_hint(False)
+        self.present_with_time(Gtk.get_current_event_time())
+
     def hide_to_tray(self) -> None:
         self.set_skip_taskbar_hint(True)
         self.hide()

@@ -21,7 +21,7 @@ This repository is a monorepo with two independent apps — a Linux desktop appl
 - **Summarize from the library** — re-run summarization for any past meeting from the meetings browser
 - **Local models** — run fully offline with no API key required
 - **Customizable prompts** — edit transcription and summarization prompts in Settings
-- **System tray** integration (AyatanaAppIndicator3 / pystray fallback)
+- **System tray** integration — **left-click** focuses the window, **right-click** opens the menu (via `Gtk.StatusIcon` where a system tray is present; falls back to AppIndicator / pystray)
 - **Call detection** — optionally monitor for active calls and get notified to start recording
 - **Start at system startup** — optionally launch automatically on login
 
@@ -118,6 +118,8 @@ meeting-recorder
 > sudo pacman -S gnome-shell-extension-appindicator
 > ```
 > Then enable it in the GNOME Extensions app and log out/in.
+>
+> On GNOME/Wayland there is no legacy XEmbed tray, so the icon uses the AppIndicator extension and **left-click opens the menu** (the desktop, not the app, controls this). Left-click-to-focus is available on desktops with a system tray (XFCE, MATE, Cinnamon, KDE/X11, LXQt, …).
 
 ### Running from Source
 

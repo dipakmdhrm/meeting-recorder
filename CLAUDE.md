@@ -123,7 +123,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 **Config:** `~/.config/meeting-recorder/config.json`, `chmod 600`. Empty string for any prompt key = use built-in default (defined in `config/defaults.py`).
 
-**UI** (`ui/`): `main_window.py` (recording controls), `settings_dialog.py` (tabbed settings), `meeting_explorer.py` (past meetings browser), `tray.py` (AyatanaAppIndicator3 with pystray fallback).
+**UI** (`ui/`): `main_window.py` (recording controls; `present_window()` shows/raises/focuses the window via `present_with_time`), `settings_dialog.py` (tabbed settings), `meeting_explorer.py` (past meetings browser), `tray.py` (system tray icon). The tray prefers `Gtk.StatusIcon` when a legacy XEmbed tray is present — the only backend with separate left/right click, so **left-click focuses the window** (`present_window`) and **right-click opens the menu** — else falls back to `AyatanaAppIndicator3` (menu on any click, e.g. GNOME/Wayland), then pystray. The shared `_GtkMenuTray` base holds menu construction + action handlers for both GTK backends; backend choice is the pure `_choose_tray_backend()`, with an async `is_embedded()` probe deciding whether the status icon actually embedded.
 
 **Import convention:** Provider files use 3-dot relative imports (`from ...config.defaults import …`). Files outside `meeting_recorder/` use absolute imports (`from meeting_recorder.config.defaults import …`).
 
@@ -158,7 +158,7 @@ File system paths are passed as nav arguments with `/` encoded as `%2F`.
 ## Test coverage boundaries
 
 ### Linux
-Tests in `linux/tests/services/` cover `OllamaService`, `WhisperService`, and `SystemInstaller` (now including `RocmInstaller`, `WhisperEngineInstaller`, and `detect_gpu_vendor`) with mocks/temp dirs. `linux/tests/services/test_whisper_cpp_service.py` covers `detect_gpu_backend`, `build_cmake_command`, `WhisperCppBuilder` (with per-backend + cross-distro branch isolation), and the GGML status/downloader. `linux/tests/processing/providers/test_whisper_cpp.py` covers the pure `parse_whisper_cpp_output`, the provider's injected-runner `transcribe` flow, and the `whisper_cpp` factory wiring. GTK UI (`ui/settings_dialog.py`) remains not unit-tested — pure decision logic is extracted into testable helpers/services per the pattern below.
+Tests in `linux/tests/services/` cover `OllamaService`, `WhisperService`, and `SystemInstaller` (now including `RocmInstaller`, `WhisperEngineInstaller`, and `detect_gpu_vendor`) with mocks/temp dirs. `linux/tests/services/test_whisper_cpp_service.py` covers `detect_gpu_backend`, `build_cmake_command`, `WhisperCppBuilder` (with per-backend + cross-distro branch isolation), and the GGML status/downloader. `linux/tests/processing/providers/test_whisper_cpp.py` covers the pure `parse_whisper_cpp_output`, the provider's injected-runner `transcribe` flow, and the `whisper_cpp` factory wiring. `linux/tests/ui/test_tray.py` covers the pure `_choose_tray_backend` backend-selection policy. GTK UI (`ui/settings_dialog.py`, plus the tray's GTK click wiring and `is_embedded` probe) remains not unit-tested — pure decision logic is extracted into testable helpers/services per the pattern below.
 
 ### Android
 JVM-only unit tests (no Robolectric) in `app/src/test/`:
