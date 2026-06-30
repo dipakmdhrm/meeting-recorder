@@ -5,6 +5,7 @@ post_install() {
     mkdir -p /var/log/meeting-recorder
     chmod 1777 /var/log/meeting-recorder
     update-desktop-database /usr/share/applications 2>/dev/null || true
+    gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
 }
 
 post_upgrade() {
@@ -25,4 +26,5 @@ post_remove() {
         rm -f "${home_dir}/.config/autostart/meeting-recorder.desktop" 2>/dev/null || true
     done
     update-desktop-database /usr/share/applications 2>/dev/null || true
+    gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
 }

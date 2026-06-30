@@ -10,17 +10,19 @@ from __future__ import annotations
 
 
 def icon_for_state(recording_state: str, jobs: list) -> str:
-    """Return the themed icon name for the current state.
+    """Return the bundled icon basename for the current state.
 
-    Priority: recording > paused > jobs processing > idle.
+    Priority: recording > paused > jobs processing > idle. The returned name is
+    both the StatusNotifierItem ``IconName`` and the basename ``tray.py`` uses to
+    locate the matching ``assets/tray/<name>-<size>.png`` pixmaps.
     """
     if recording_state == "recording":
-        return "media-record"
+        return "meeting-recorder-recording"
     if recording_state == "paused":
-        return "media-playback-pause"
+        return "meeting-recorder-paused"
     if jobs:
-        return "system-run"
-    return "audio-input-microphone"
+        return "meeting-recorder-processing"
+    return "meeting-recorder"
 
 
 def build_menu_model(recording_state: str, jobs: list) -> list[dict]:

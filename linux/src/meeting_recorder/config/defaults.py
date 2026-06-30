@@ -4,7 +4,7 @@ Defines application-wide constants and default configuration settings. This incl
 
 from __future__ import annotations
 
-APP_ID = "com.github.mint-meeting-recorder"
+APP_ID = "io.github.dipakmdhrm.MeetingRecorder"
 APP_NAME = "Meeting Recorder"
 CONFIG_DIR = "~/.config/meeting-recorder"
 CONFIG_FILE = "~/.config/meeting-recorder/config.json"

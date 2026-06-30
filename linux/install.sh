@@ -3,12 +3,16 @@
 set -euo pipefail
 
 APP_NAME="meeting-recorder"
+# The desktop file is named after the GTK application id so the GNOME/Wayland
+# shell (and Dash to Panel) can map a running window back to it and show the app
+# icon instead of a generic one.
+APP_ID="io.github.dipakmdhrm.MeetingRecorder"
 INSTALL_DIR="$HOME/.local/share/$APP_NAME"
 VENV_DIR="$INSTALL_DIR/venv"
 BIN_DIR="$HOME/.local/bin"
 APPS_DIR="$HOME/.local/share/applications"
 LAUNCHER="$BIN_DIR/$APP_NAME"
-DESKTOP="$APPS_DIR/$APP_NAME.desktop"
+DESKTOP="$APPS_DIR/$APP_ID.desktop"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ── Colors ──────────────────────────────────────────────────────────────────
@@ -102,6 +106,8 @@ info "Launcher created at $LAUNCHER"
 
 # ── 9. Desktop entry ─────────────────────────────────────────────────────────
 mkdir -p "$APPS_DIR"
+# Remove legacy (pre-rename) entries so the app isn't listed twice.
+rm -f "$APPS_DIR/$APP_NAME.desktop" "$APPS_DIR/com.github.mint-meeting-recorder.desktop"
 sed "s|LAUNCHER_PATH|$LAUNCHER|g" "$SCRIPT_DIR/meeting-recorder.desktop.template" \
     > "$DESKTOP"
 chmod +x "$DESKTOP"
@@ -109,6 +115,26 @@ info "Desktop entry created at $DESKTOP"
 
 # Update desktop database if available
 update-desktop-database "$APPS_DIR" 2>/dev/null || true
+
+# ── 9b. Application icon (hicolor theme) ─────────────────────────────────────
+# The desktop file's Icon=meeting-recorder key is what the shell uses to render
+# the window/launcher icon, so we install under that single themed name.
+ICONS_SRC="$SCRIPT_DIR/src/meeting_recorder/assets/icons/hicolor"
+ICON_THEME_DIR="$HOME/.local/share/icons/hicolor"
+info "Installing application icons…"
+for size in 16 24 32 48 64 128 256; do
+    dest_dir="$ICON_THEME_DIR/${size}x${size}/apps"
+    mkdir -p "$dest_dir"
+    install -m 644 "$ICONS_SRC/${size}x${size}/apps/meeting-recorder.png" \
+        "$dest_dir/meeting-recorder.png"
+done
+mkdir -p "$ICON_THEME_DIR/scalable/apps"
+install -m 644 "$ICONS_SRC/scalable/apps/meeting-recorder.svg" \
+    "$ICON_THEME_DIR/scalable/apps/meeting-recorder.svg"
+# Clean up the icon installed under the previous (malformed) app id, if present.
+rm -f "$ICON_THEME_DIR"/*/apps/com.github.mint-meeting-recorder.png \
+      "$ICON_THEME_DIR/scalable/apps/com.github.mint-meeting-recorder.svg"
+gtk-update-icon-cache -f -t "$ICON_THEME_DIR" 2>/dev/null || true
 
 # ── 10. Add ~/.local/bin to PATH hint ────────────────────────────────────────
 if ! echo "$PATH" | grep -q "$BIN_DIR"; then

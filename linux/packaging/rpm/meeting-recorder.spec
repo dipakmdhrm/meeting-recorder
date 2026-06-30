@@ -32,15 +32,26 @@ install -m 644 linux/requirements.txt %{buildroot}/opt/meeting-recorder/requirem
 
 install -Dm 755 linux/packaging/usr/bin/meeting-recorder \
     %{buildroot}%{_bindir}/meeting-recorder
-install -Dm 644 linux/packaging/usr/share/applications/meeting-recorder.desktop \
-    %{buildroot}%{_datadir}/applications/meeting-recorder.desktop
+install -Dm 644 linux/packaging/usr/share/applications/io.github.dipakmdhrm.MeetingRecorder.desktop \
+    %{buildroot}%{_datadir}/applications/io.github.dipakmdhrm.MeetingRecorder.desktop
+
+# Application icon (hicolor theme) under the Icon=meeting-recorder name the
+# desktop file references, so the shell renders it for the matched window.
+ICONS_SRC=linux/src/meeting_recorder/assets/icons/hicolor
+for size in 16 24 32 48 64 128 256; do
+    install -Dm 644 ${ICONS_SRC}/${size}x${size}/apps/meeting-recorder.png \
+        %{buildroot}%{_datadir}/icons/hicolor/${size}x${size}/apps/meeting-recorder.png
+done
+install -Dm 644 ${ICONS_SRC}/scalable/apps/meeting-recorder.svg \
+    %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/meeting-recorder.svg
 
 %files
 %dir /opt/meeting-recorder
 /opt/meeting-recorder/linux/
 /opt/meeting-recorder/requirements.txt
 %{_bindir}/meeting-recorder
-%{_datadir}/applications/meeting-recorder.desktop
+%{_datadir}/applications/io.github.dipakmdhrm.MeetingRecorder.desktop
+%{_datadir}/icons/hicolor/*/apps/meeting-recorder.*
 
 %post
 python3 -m venv /opt/meeting-recorder/venv --system-site-packages
@@ -49,6 +60,7 @@ python3 -m venv /opt/meeting-recorder/venv --system-site-packages
 mkdir -p /var/log/meeting-recorder
 chmod 1777 /var/log/meeting-recorder
 update-desktop-database %{_datadir}/applications 2>/dev/null || true
+gtk-update-icon-cache -f -t %{_datadir}/icons/hicolor 2>/dev/null || true
 
 %preun
 # $1 == 0 means full uninstall (not upgrade)
@@ -68,6 +80,7 @@ if [ "$1" -eq 0 ]; then
         rm -f "$home_dir/.config/autostart/meeting-recorder.desktop" 2>/dev/null || true
     done
     update-desktop-database %{_datadir}/applications 2>/dev/null || true
+    gtk-update-icon-cache -f -t %{_datadir}/icons/hicolor 2>/dev/null || true
 fi
 
 %changelog
