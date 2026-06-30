@@ -15,11 +15,13 @@ from enum import Enum, auto
 from pathlib import Path
 
 import gi
-gi.require_version("Gtk", "3.0")
-from gi.repository import Gtk, GLib
+gi.require_version("Gtk", "4.0")
+from gi.repository import Gtk, GLib, Gio
 
 from meeting_recorder.config import settings
 from ..utils.glib_bridge import assert_main_thread, idle_call
+from ..utils.gtk_compat import remove_all_children
+from ..utils.recording_import import resolve_existing_recording_target
 from meeting_recorder.utils.filename import output_paths
 from meeting_recorder.utils.meeting_scanner import Meeting, find_audio_file
 from .meeting_explorer import MeetingExplorer
@@ -55,6 +57,21 @@ def _format_time(seconds: int) -> str:
     return f"{m:02d}:{s:02d}"
 
 
+def _icon_label_button(icon_name: str, label: str) -> "Gtk.Button":
+    """Build a button showing both an icon and a label.
+
+    GTK4 buttons display either an icon or a label by default (set_image() and
+    set_always_show_image() are gone), so we set an explicit icon+label box as
+    the button's child to reproduce the GTK3 look.
+    """
+    btn = Gtk.Button()
+    box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+    box.append(Gtk.Image.new_from_icon_name(icon_name))
+    box.append(Gtk.Label(label=label))
+    btn.set_child(box)
+    return btn
+
+
 class MainWindow(Gtk.ApplicationWindow):
     def __init__(self, **kwargs) -> None:
         super().__init__(title="Meeting Recorder", **kwargs)
@@ -81,7 +98,9 @@ class MainWindow(Gtk.ApplicationWindow):
 
         self._build_ui()
         self._transition(State.IDLE)
-        self.connect("delete-event", self._on_delete)
+        # GTK4 replaced the "delete-event" signal with "close-request"; the
+        # handler still vetoes the close (returns True) and hides to the tray.
+        self.connect("close-request", self._on_close_request)
 
     # ------------------------------------------------------------------
     # UI construction
@@ -89,23 +108,25 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def _build_ui(self) -> None:
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        self.add(outer)
+        self.set_child(outer)
 
         # Error info bar (recording errors only — pipeline errors go in job rows)
         self._info_bar = Gtk.InfoBar()
         self._info_bar.set_message_type(Gtk.MessageType.ERROR)
         self._info_bar_label = Gtk.Label(label="")
-        self._info_bar_label.set_line_wrap(True)
-        self._info_bar.get_content_area().add(self._info_bar_label)
+        self._info_bar_label.set_wrap(True)
+        self._info_bar.add_child(self._info_bar_label)
         self._info_bar.add_button("Dismiss", Gtk.ResponseType.CLOSE)
         self._info_bar.connect("response", self._on_info_bar_response)
-        self._info_bar.set_no_show_all(True)
-        outer.pack_start(self._info_bar, False, False, 0)
+        # GTK4 InfoBar shows/hides via the "revealed" property, not show_all().
+        self._info_bar.set_revealed(False)
+        outer.append(self._info_bar)
 
         # Stack for views
         self._stack = Gtk.Stack()
         self._stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
-        outer.pack_start(self._stack, True, True, 0)
+        self._stack.set_vexpand(True)
+        outer.append(self._stack)
 
         # -------------------------------------------------------------
         # View 1: Recorder
@@ -117,19 +138,19 @@ class MainWindow(Gtk.ApplicationWindow):
         vbox.set_margin_bottom(24)
         vbox.set_margin_start(24)
         vbox.set_margin_end(24)
-        recorder_box.pack_start(vbox, False, False, 0)
+        recorder_box.append(vbox)
 
         # Timer label
         self._timer_label = Gtk.Label(label="00:00")
-        self._timer_label.get_style_context().add_class("timer-label")
+        self._timer_label.add_css_class("timer-label")
         self._timer_label.set_attributes(self._make_timer_attrs())
-        vbox.pack_start(self._timer_label, False, False, 0)
+        vbox.append(self._timer_label)
 
         # Status label
         self._status_label = Gtk.Label(label="")
-        self._status_label.set_line_wrap(True)
+        self._status_label.set_wrap(True)
         self._status_label.set_xalign(0.5)
-        vbox.pack_start(self._status_label, False, False, 0)
+        vbox.append(self._status_label)
 
         # Meeting title entry
         title_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -138,46 +159,47 @@ class MainWindow(Gtk.ApplicationWindow):
         self._title_entry = Gtk.Entry()
         self._title_entry.set_placeholder_text("e.g. Standup, Sprint Planning…")
         self._title_entry.set_hexpand(True)
-        title_box.pack_start(title_label, False, False, 0)
-        title_box.pack_start(self._title_entry, True, True, 0)
-        vbox.pack_start(title_box, False, False, 0)
+        title_box.append(title_label)
+        title_box.append(self._title_entry)
+        vbox.append(title_box)
 
         # Button row
         self._button_box = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL, spacing=8, homogeneous=False
         )
         self._button_box.set_halign(Gtk.Align.CENTER)
-        vbox.pack_start(self._button_box, False, False, 0)
+        vbox.append(self._button_box)
 
         # Output paths (shown after "cancel and save")
         self._output_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        self._output_box.set_no_show_all(True)
+        self._output_box.set_visible(False)
         self._output_label = Gtk.Label(label="")
-        self._output_label.set_line_wrap(True)
+        self._output_label.set_wrap(True)
         self._output_label.set_xalign(0)
         self._open_folder_btn = Gtk.Button(label="Open Output Folder")
         self._open_folder_btn.connect("clicked", self._on_open_folder)
-        self._output_box.pack_start(self._output_label, False, False, 0)
-        self._output_box.pack_start(self._open_folder_btn, False, False, 0)
-        vbox.pack_start(self._output_box, False, False, 0)
+        self._output_box.append(self._output_label)
+        self._output_box.append(self._open_folder_btn)
+        vbox.append(self._output_box)
 
         # Jobs section (hidden until there are jobs)
         self._jobs_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        self._jobs_section.set_no_show_all(True)
+        self._jobs_section.set_visible(False)
         self._jobs_section.set_margin_start(24)
         self._jobs_section.set_margin_end(24)
         self._jobs_section.set_margin_bottom(12)
 
         sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-        self._jobs_section.pack_start(sep, False, False, 0)
+        self._jobs_section.append(sep)
 
         jobs_hdr = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         jobs_hdr.set_margin_top(8)
         hdr_label = Gtk.Label()
         hdr_label.set_markup("<b>Background Jobs</b>")
         hdr_label.set_xalign(0)
-        jobs_hdr.pack_start(hdr_label, True, True, 0)
-        self._jobs_section.pack_start(jobs_hdr, False, False, 0)
+        hdr_label.set_hexpand(True)
+        jobs_hdr.append(hdr_label)
+        self._jobs_section.append(jobs_hdr)
 
         self._jobs_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self._jobs_list.set_margin_top(4)
@@ -185,15 +207,10 @@ class MainWindow(Gtk.ApplicationWindow):
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scroll.set_max_content_height(180)
         scroll.set_propagate_natural_height(True)
-        scroll.add(self._jobs_list)
-        self._jobs_section.pack_start(scroll, False, False, 0)
+        scroll.set_child(self._jobs_list)
+        self._jobs_section.append(scroll)
 
-        sep.show()
-        jobs_hdr.show_all()
-        scroll.show()
-        self._jobs_list.show()
-
-        recorder_box.pack_start(self._jobs_section, False, False, 0)
+        recorder_box.append(self._jobs_section)
 
         self._stack.add_titled(recorder_box, "recorder", "Record")
 
@@ -206,17 +223,15 @@ class MainWindow(Gtk.ApplicationWindow):
 
         # HeaderBar with settings button and stack switcher
         hb = Gtk.HeaderBar()
-        hb.set_title("Meeting Recorder")
-        hb.set_show_close_button(True)
-        
+        # GTK4 HeaderBar has no title/subtitle of its own — it shows the window
+        # title. Buttons are toggled via set_show_title_buttons().
+        hb.set_show_title_buttons(True)
+
         switcher = Gtk.StackSwitcher()
         switcher.set_stack(self._stack)
-        hb.set_custom_title(switcher)
+        hb.set_title_widget(switcher)
 
-        settings_btn = Gtk.Button()
-        settings_btn.set_image(
-            Gtk.Image.new_from_icon_name("preferences-system", Gtk.IconSize.BUTTON)
-        )
+        settings_btn = Gtk.Button(icon_name="preferences-system")
         settings_btn.set_tooltip_text("Settings")
         settings_btn.connect("clicked", self._on_settings_clicked)
         hb.pack_end(settings_btn)
@@ -245,8 +260,7 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def _update_ui(self, status: str = "", **kwargs) -> None:
         assert_main_thread()
-        for child in self._button_box.get_children():
-            self._button_box.remove(child)
+        remove_all_children(self._button_box)
 
         state = self._state
 
@@ -254,112 +268,91 @@ class MainWindow(Gtk.ApplicationWindow):
             self._timer_label.set_text("00:00")
             self._status_label.set_text(status or "Ready to record")
             self._title_entry.set_sensitive(True)
-            self._output_box.hide()
+            self._output_box.set_visible(False)
 
             idle_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
 
             record_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
             record_row.set_homogeneous(True)
 
-            headphones_btn = Gtk.Button(label="Record (Headphones)")
-            headphones_btn.set_image(
-                Gtk.Image.new_from_icon_name("media-record", Gtk.IconSize.BUTTON)
-            )
+            headphones_btn = _icon_label_button("media-record", "Record (Headphones)")
             headphones_btn.set_tooltip_text(
                 "Record mic + system audio. Use when wearing headphones."
             )
             headphones_btn.connect("clicked", lambda *_: self.on_record_headphones_clicked())
-            headphones_btn.get_style_context().add_class("suggested-action")
-            record_row.pack_start(headphones_btn, True, True, 0)
+            headphones_btn.add_css_class("suggested-action")
+            headphones_btn.set_hexpand(True)
+            record_row.append(headphones_btn)
 
-            speaker_btn = Gtk.Button(label="Record (Speaker)")
-            speaker_btn.set_image(
-                Gtk.Image.new_from_icon_name("audio-volume-high", Gtk.IconSize.BUTTON)
-            )
+            speaker_btn = _icon_label_button("audio-volume-high", "Record (Speaker)")
             speaker_btn.set_tooltip_text(
                 "Record mic only. Use when on speaker to avoid echo."
             )
             speaker_btn.connect("clicked", lambda *_: self.on_record_speaker_clicked())
-            record_row.pack_start(speaker_btn, True, True, 0)
+            speaker_btn.set_hexpand(True)
+            record_row.append(speaker_btn)
 
-            idle_vbox.pack_start(record_row, False, False, 0)
+            idle_vbox.append(record_row)
 
-            existing_btn = Gtk.Button(label=" Use Existing Recording")
-            existing_btn.set_image(
-                Gtk.Image.new_from_icon_name("document-open", Gtk.IconSize.BUTTON)
-            )
+            existing_btn = _icon_label_button("document-open", "Use Existing Recording")
             existing_btn.connect("clicked", lambda *_: self.on_use_existing_clicked())
-            idle_vbox.pack_start(existing_btn, False, False, 0)
+            idle_vbox.append(existing_btn)
 
-            self._button_box.pack_start(idle_vbox, False, False, 0)
+            self._button_box.append(idle_vbox)
 
         elif state == State.RECORDING:
             self._status_label.set_text(status or "Recording…")
             self._title_entry.set_sensitive(False)
-            self._output_box.hide()
-            self._info_bar.hide()
+            self._output_box.set_visible(False)
+            self._info_bar.set_revealed(False)
 
-            pause_btn = Gtk.Button(label=" Pause")
-            pause_btn.set_image(
-                Gtk.Image.new_from_icon_name("media-playback-pause", Gtk.IconSize.BUTTON)
-            )
+            pause_btn = _icon_label_button("media-playback-pause", "Pause")
             pause_btn.connect("clicked", lambda *_: self.on_pause_clicked())
-            self._button_box.pack_start(pause_btn, False, False, 0)
+            self._button_box.append(pause_btn)
 
-            stop_btn = Gtk.Button(label=" Stop")
-            stop_btn.set_image(
-                Gtk.Image.new_from_icon_name("media-playback-stop", Gtk.IconSize.BUTTON)
-            )
+            stop_btn = _icon_label_button("media-playback-stop", "Stop")
             stop_btn.connect("clicked", lambda *_: self.on_stop_clicked())
-            stop_btn.get_style_context().add_class("destructive-action")
-            self._button_box.pack_start(stop_btn, False, False, 0)
+            stop_btn.add_css_class("destructive-action")
+            self._button_box.append(stop_btn)
 
             save_btn = Gtk.Button(label="Cancel (save recording)")
             save_btn.connect("clicked", lambda *_: self.on_cancel_save_clicked())
-            self._button_box.pack_start(save_btn, False, False, 0)
+            self._button_box.append(save_btn)
 
             cancel_btn = Gtk.Button(label="Cancel")
             cancel_btn.connect("clicked", lambda *_: self.on_cancel_clicked())
-            self._button_box.pack_start(cancel_btn, False, False, 0)
+            self._button_box.append(cancel_btn)
 
         elif state == State.PAUSED:
             self._status_label.set_text(status or "Paused")
             self._title_entry.set_sensitive(False)
 
-            resume_btn = Gtk.Button(label=" Resume")
-            resume_btn.set_image(
-                Gtk.Image.new_from_icon_name("media-playback-start", Gtk.IconSize.BUTTON)
-            )
+            resume_btn = _icon_label_button("media-playback-start", "Resume")
             resume_btn.connect("clicked", lambda *_: self.on_resume_clicked())
-            resume_btn.get_style_context().add_class("suggested-action")
-            self._button_box.pack_start(resume_btn, False, False, 0)
+            resume_btn.add_css_class("suggested-action")
+            self._button_box.append(resume_btn)
 
-            stop_btn = Gtk.Button(label=" Stop")
-            stop_btn.set_image(
-                Gtk.Image.new_from_icon_name("media-playback-stop", Gtk.IconSize.BUTTON)
-            )
+            stop_btn = _icon_label_button("media-playback-stop", "Stop")
             stop_btn.connect("clicked", lambda *_: self.on_stop_clicked())
-            stop_btn.get_style_context().add_class("destructive-action")
-            self._button_box.pack_start(stop_btn, False, False, 0)
+            stop_btn.add_css_class("destructive-action")
+            self._button_box.append(stop_btn)
 
             save_btn = Gtk.Button(label="Cancel (save recording)")
             save_btn.connect("clicked", lambda *_: self.on_cancel_save_clicked())
-            self._button_box.pack_start(save_btn, False, False, 0)
+            self._button_box.append(save_btn)
 
             cancel_btn = Gtk.Button(label="Cancel")
             cancel_btn.connect("clicked", lambda *_: self.on_cancel_clicked())
-            self._button_box.pack_start(cancel_btn, False, False, 0)
+            self._button_box.append(cancel_btn)
 
         elif state == State.COUNTDOWN:
             self._title_entry.set_sensitive(False)
-            self._output_box.hide()
+            self._output_box.set_visible(False)
 
             cancel_btn = Gtk.Button(label="Cancel")
             cancel_btn.connect("clicked", lambda *_: self.on_cancel_countdown_clicked())
-            cancel_btn.get_style_context().add_class("destructive-action")
-            self._button_box.pack_start(cancel_btn, False, False, 0)
-
-        self._button_box.show_all()
+            cancel_btn.add_css_class("destructive-action")
+            self._button_box.append(cancel_btn)
 
     def _notify_tray(self) -> None:
         app = self.get_application()
@@ -456,44 +449,41 @@ class MainWindow(Gtk.ApplicationWindow):
             self._show_error(key_missing)
             return
 
-        dialog = Gtk.FileChooserDialog(
-            title="Select Audio Recording",
-            parent=self,
-            action=Gtk.FileChooserAction.OPEN,
-        )
-        dialog.add_buttons(
-            Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
-            Gtk.STOCK_OPEN, Gtk.ResponseType.OK,
-        )
+        # GTK4 has no blocking FileChooserDialog.run(); Gtk.FileDialog.open()
+        # is async, so everything that used to follow run() now happens in the
+        # _opened callback below.
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Select Audio Recording")
         audio_filter = Gtk.FileFilter()
         audio_filter.set_name("Audio files")
         for pat in ("*.mp3", "*.wav", "*.m4a", "*.ogg", "*.flac", "*.webm"):
             audio_filter.add_pattern(pat)
-        dialog.add_filter(audio_filter)
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(audio_filter)
+        dialog.set_filters(filters)
+        dialog.set_default_filter(audio_filter)
+        dialog.open(self, None, lambda dlg, res: self._on_existing_chosen(dlg, res, cfg))
 
-        response = dialog.run()
-        filename = dialog.get_filename()
-        dialog.destroy()
-
-        if response != Gtk.ResponseType.OK or not filename:
+    def _on_existing_chosen(self, dialog, result, cfg) -> None:
+        assert_main_thread()
+        try:
+            gfile = dialog.open_finish(result)
+        except GLib.Error:
+            return  # cancelled or dismissed
+        if not gfile:
+            return
+        filename = gfile.get_path()
+        if not filename:
             return
 
         # If the selected file is already inside a meeting subdirectory,
         # process it in-place instead of copying to a new directory.
-        output_folder = Path(
-            os.path.expanduser(cfg.get("output_folder", "~/meetings"))
-        ).resolve()
-        selected = Path(filename).resolve()
-
-        if (
-            selected.parent != output_folder
-            and str(selected).startswith(str(output_folder) + os.sep)
-        ):
-            # File lives inside a meeting subdirectory — reuse it
-            session_dir = selected.parent
-            audio_path = selected
-            transcript_path = session_dir / "transcript.md"
-            notes_path = session_dir / "notes.md"
+        output_folder = Path(os.path.expanduser(cfg.get("output_folder", "~/meetings")))
+        reuse_in_place, paths = resolve_existing_recording_target(
+            Path(filename), output_folder
+        )
+        if reuse_in_place:
+            audio_path, transcript_path, notes_path = paths
         else:
             # File is from outside the meetings tree — create new directory & copy
             audio_path, transcript_path, notes_path = output_paths(
@@ -705,7 +695,7 @@ class MainWindow(Gtk.ApplicationWindow):
                 paths.append(f"Audio: {audio_path}")
             if paths:
                 self._output_label.set_text("\n".join(paths))
-                self._output_box.show_all()
+                self._output_box.set_visible(True)
 
         threading.Thread(target=_bg, daemon=True).start()
 
@@ -817,12 +807,12 @@ class MainWindow(Gtk.ApplicationWindow):
         widgets = self._job_widgets.pop(job.job_id, None)
         if widgets:
             row = widgets.get("row")
-            if row and row in self._jobs_list.get_children():
+            if row and row.get_parent() is self._jobs_list:
                 self._jobs_list.remove(row)
         if job in self._jobs:
             self._jobs.remove(job)
         if not self._jobs:
-            self._jobs_section.hide()
+            self._jobs_section.set_visible(False)
         self._notify_tray()
 
     # ------------------------------------------------------------------
@@ -839,23 +829,26 @@ class MainWindow(Gtk.ApplicationWindow):
 
         spinner = Gtk.Spinner()
         spinner.start()
-        row.pack_start(spinner, False, False, 0)
+        row.append(spinner)
 
-        status_icon = Gtk.Image.new_from_icon_name("system-run", Gtk.IconSize.BUTTON)
-        status_icon.set_no_show_all(True)
-        row.pack_start(status_icon, False, False, 0)
+        status_icon = Gtk.Image.new_from_icon_name("system-run")
+        status_icon.set_visible(False)
+        row.append(status_icon)
 
         label_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        label_box.set_hexpand(True)
         job_name_label = Gtk.Label(label=job.label)
         job_name_label.set_xalign(0)
         status_label = Gtk.Label(label="Processing…")
         status_label.set_xalign(0)
-        label_box.pack_start(job_name_label, False, False, 0)
-        label_box.pack_start(status_label, False, False, 0)
-        row.pack_start(label_box, True, True, 0)
+        label_box.append(job_name_label)
+        label_box.append(status_label)
+        row.append(label_box)
 
+        # The expanding label_box above pushes action_box to the right edge,
+        # reproducing the GTK3 row.pack_end(action_box) layout.
         action_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        row.pack_end(action_box, False, False, 0)
+        row.append(action_box)
 
         self._job_widgets[job.job_id] = {
             "row": row,
@@ -866,10 +859,8 @@ class MainWindow(Gtk.ApplicationWindow):
         }
         self._rebuild_action_box(job)
 
-        self._jobs_list.pack_start(row, False, False, 0)
-        self._jobs_section.show()
-        row.show_all()
-        status_icon.hide()
+        self._jobs_list.append(row)
+        self._jobs_section.set_visible(True)
 
     def _update_job_row(self, job: _Job) -> None:
         """Refresh icon, status text, and action buttons for a status change."""
@@ -883,14 +874,14 @@ class MainWindow(Gtk.ApplicationWindow):
         status_label: Gtk.Label = widgets["status_label"]
 
         spinner.stop()
-        spinner.hide()
-        status_icon.show()
+        spinner.set_visible(False)
+        status_icon.set_visible(True)
 
         if job.status == "done":
-            status_icon.set_from_icon_name("emblem-ok-symbolic", Gtk.IconSize.BUTTON)
+            status_icon.set_from_icon_name("emblem-ok-symbolic")
             status_label.set_text("Done")
         elif job.status == "error":
-            status_icon.set_from_icon_name("dialog-error", Gtk.IconSize.BUTTON)
+            status_icon.set_from_icon_name("dialog-error")
             err = (job.error_msg or "Error")[:60]
             status_label.set_text(f"Error: {err}")
 
@@ -902,31 +893,25 @@ class MainWindow(Gtk.ApplicationWindow):
         if not widgets:
             return
         action_box: Gtk.Box = widgets["action_box"]
-        for child in action_box.get_children():
-            action_box.remove(child)
+        remove_all_children(action_box)
 
         if job.status == "processing":
             btn = Gtk.Button(label="Cancel")
             btn.connect("clicked", lambda *_, j=job: self._on_cancel_job(j))
-            action_box.pack_start(btn, False, False, 0)
+            action_box.append(btn)
         elif job.status == "done":
             btn = Gtk.Button(label="Open Folder")
             btn.connect("clicked", lambda *_, j=job: self._on_open_job_folder(j))
-            action_box.pack_start(btn, False, False, 0)
-            action_box.pack_start(self._make_dismiss_btn(job), False, False, 0)
+            action_box.append(btn)
+            action_box.append(self._make_dismiss_btn(job))
         elif job.status == "error":
             btn = Gtk.Button(label="Retry")
             btn.connect("clicked", lambda *_, j=job: self._on_retry_job(j))
-            action_box.pack_start(btn, False, False, 0)
-            action_box.pack_start(self._make_dismiss_btn(job), False, False, 0)
-
-        action_box.show_all()
+            action_box.append(btn)
+            action_box.append(self._make_dismiss_btn(job))
 
     def _make_dismiss_btn(self, job: _Job) -> Gtk.Button:
-        btn = Gtk.Button()
-        btn.set_image(
-            Gtk.Image.new_from_icon_name("window-close", Gtk.IconSize.BUTTON)
-        )
+        btn = Gtk.Button(icon_name="window-close")
         btn.set_tooltip_text("Dismiss")
         btn.connect("clicked", lambda *_, j=job: self._dismiss_job(j))
         return btn
@@ -974,29 +959,32 @@ class MainWindow(Gtk.ApplicationWindow):
         logger.error("UI error shown: %s", msg)
         self._info_bar_label.set_text(msg)
         self._info_bar_label.set_selectable(True)
-        self._info_bar.show()
-        self._info_bar_label.show()
+        self._info_bar.set_revealed(True)
 
     def _on_info_bar_response(self, bar: Gtk.InfoBar, response_id: int) -> None:
-        bar.hide()
+        bar.set_revealed(False)
 
     # ------------------------------------------------------------------
     # Settings
     # ------------------------------------------------------------------
 
     def _on_settings_clicked(self, *_) -> None:
+        # GTK4 has no blocking Gtk.Dialog.run(); the dialog is shown modeless and
+        # the post-save reconfiguration happens in the on_saved callback.
         from .settings_dialog import SettingsDialog
-        dialog = SettingsDialog(parent=self)
-        dialog.run()
-        dialog.destroy()
+        dialog = SettingsDialog(parent=self, on_saved=self._after_settings_saved)
+        dialog.present()
+
+    def _after_settings_saved(self) -> None:
         app = self.get_application()
-        if app:
-            cfg = settings.load()
-            if cfg.get("call_detection_enabled") and not app._call_detector:
-                app._start_call_detector()
-            elif not cfg.get("call_detection_enabled") and app._call_detector:
-                app._call_detector.stop()
-                app._call_detector = None
+        if not app:
+            return
+        cfg = settings.load()
+        if cfg.get("call_detection_enabled") and not app._call_detector:
+            app._start_call_detector()
+        elif not cfg.get("call_detection_enabled") and app._call_detector:
+            app._call_detector.stop()
+            app._call_detector = None
 
     # ------------------------------------------------------------------
     # Helpers
@@ -1017,24 +1005,22 @@ class MainWindow(Gtk.ApplicationWindow):
         except Exception:
             pass
 
-    def present(self) -> None:
-        self.set_skip_taskbar_hint(False)
-        super().present()
-
     def present_window(self) -> None:
         """Show, raise and focus the window — used by the tray (left-click and
-        the "Show Window" menu item). Un-hides if hidden to tray, deiconifies if
-        minimised, and raises if another window has focus. deiconify() restores
-        a minimised window (some WMs won't on present alone); present_with_time
-        lets it reliably grab focus under X11 focus-stealing prevention."""
-        self.set_skip_taskbar_hint(False)
-        self.deiconify()
-        self.present_with_time(Gtk.get_current_event_time())
+        the "Show Window" menu item). Re-shows the window if it was hidden to
+        the tray and un-minimises it before presenting.
+
+        GTK4 removed set_skip_taskbar_hint(), present_with_time() and
+        Gtk.get_current_event_time(); focus is now mediated by the compositor,
+        so present() is the supported path (left-click-to-focus is best-effort
+        on Wayland/GNOME)."""
+        self.set_visible(True)
+        self.unminimize()
+        self.present()
 
     def hide_to_tray(self) -> None:
-        self.set_skip_taskbar_hint(True)
-        self.hide()
+        self.set_visible(False)
 
-    def _on_delete(self, *_) -> bool:
+    def _on_close_request(self, *_) -> bool:
         self.hide_to_tray()
         return True

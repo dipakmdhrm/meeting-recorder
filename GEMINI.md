@@ -57,10 +57,10 @@ This repository is a monorepo containing two applications: a Linux desktop apple
 
 *   **Linux App:**
     *   **Language:** Python
-    *   **UI:** GTK3
-    *   **Base dependencies (`linux/requirements.txt`):** `google-genai`, `setproctitle`, `pystray`, `Pillow` — Gemini-only, minimal.
+    *   **UI:** GTK4 (plain GTK4, no libadwaita; async `Gtk.AlertDialog`/`Gtk.FileDialog` instead of blocking `run()`).
+    *   **Base dependencies (`linux/requirements.txt`):** `google-genai`, `setproctitle` — Gemini-only, minimal.
     *   **Opt-in local engines (installed on demand from Settings → Models):** `faster-whisper` (NVIDIA/CPU) installed via pip; `whisper.cpp` built from source with the detected GPU backend (AMD ROCm/Vulkan, Apple Metal, NVIDIA CUDA, or CPU).
-    *   **System tray:** left-click focuses the window, right-click opens the menu — uses `Gtk.StatusIcon` where a legacy system tray is present (XFCE/MATE/Cinnamon/KDE-X11/…), else falls back to AppIndicator (menu on any click, e.g. GNOME/Wayland), then pystray. No extra dependency (`Gtk.StatusIcon` ships with GTK3).
+    *   **System tray:** a pure-DBus StatusNotifierItem (`org.kde.StatusNotifierItem` + `com.canonical.dbusmenu`) built on `Gio.DBusConnection` — no GTK widgets and no extra dependency (Gio ships with PyGObject). Left-click focuses the window where the SNI host delivers `Activate`, otherwise opens the menu. GNOME needs the AppIndicator/KStatusNotifierItem extension to provide the SNI host.
 *   **Android App:**
     *   **Language:** Kotlin
     *   **UI:** Jetpack Compose

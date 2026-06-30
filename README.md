@@ -6,7 +6,7 @@ This repository is a monorepo with two independent apps — a Linux desktop appl
 
 | Path | Contents |
 |---|---|
-| `linux/` | GTK3 desktop applet (Debian / Ubuntu / Fedora / Arch) |
+| `linux/` | GTK4 desktop applet (Debian / Ubuntu / Fedora / Arch) |
 | `android/` | Native Android app (Kotlin + Jetpack Compose) |
 
 ---
@@ -21,7 +21,7 @@ This repository is a monorepo with two independent apps — a Linux desktop appl
 - **Summarize from the library** — re-run summarization for any past meeting from the meetings browser
 - **Local models** — run fully offline with no API key required
 - **Customizable prompts** — edit transcription and summarization prompts in Settings
-- **System tray** integration — **left-click** focuses the window, **right-click** opens the menu (via `Gtk.StatusIcon` where a system tray is present; falls back to AppIndicator / pystray)
+- **System tray** integration — a StatusNotifierItem (SNI) exposed over D-Bus; left-click focuses the window where the host supports it, otherwise opens the menu
 - **Call detection** — optionally monitor for active calls and get notified to start recording
 - **Start at system startup** — optionally launch automatically on login
 
@@ -43,7 +43,7 @@ Each recording session creates a folder:
 ### Requirements
 
 - Linux with a supported package manager: **apt** (Debian/Ubuntu/Mint), **dnf** (Fedora/RHEL), or **pacman** (Arch/Manjaro). Works on both **x86_64** and **arm64/aarch64**.
-- System packages installed by `linux/install.sh`: `ffmpeg`, `pulseaudio-utils`, `pipewire-pulse`, Python 3 with GTK3 bindings
+- System packages installed by `linux/install.sh`: `ffmpeg`, `pulseaudio-utils`, `pipewire-pulse`, Python 3 with GTK4 bindings
 - Python packages (installed into a venv): see `linux/requirements.txt`
 
 The base install is **Gemini-only and minimal** — no local engines or GPU libraries are installed by default. Each local option below is installed **on demand** from **Settings → Models** when you choose it.
@@ -108,7 +108,7 @@ meeting-recorder
 # or from your application menu: "Meeting Recorder"
 ```
 
-> **GNOME users:** System tray requires the AppIndicator extension. `install.sh` installs it automatically; if you installed via a native package, install it manually:
+> **GNOME users:** The tray is a StatusNotifierItem (SNI), and GNOME has no built-in SNI host, so the icon needs the AppIndicator/KStatusNotifierItem extension to appear. `install.sh` installs it automatically; if you installed via a native package, install it manually:
 > ```bash
 > # Debian/Ubuntu
 > sudo apt install gnome-shell-extension-appindicator
@@ -119,7 +119,7 @@ meeting-recorder
 > ```
 > Then enable it in the GNOME Extensions app and log out/in.
 >
-> On GNOME/Wayland there is no legacy XEmbed tray, so the icon uses the AppIndicator extension and **left-click opens the menu** (the desktop, not the app, controls this). Left-click-to-focus is available on desktops with a system tray (XFCE, MATE, Cinnamon, KDE/X11, LXQt, …).
+> Whether **left-click focuses the window** or **opens the menu** is decided by the SNI host: hosts that deliver the `Activate` action (e.g. KDE Plasma) focus the window, while the GNOME extension typically opens the menu on any click. KStatusNotifierItem-capable panels on XFCE, MATE, Cinnamon, KDE, LXQt, … show the icon natively without an extension.
 
 ### Running from Source
 
@@ -367,7 +367,7 @@ set -x KEY_PASSWORD your_key_pass
 
 ```
 linux/
-├── src/meeting_recorder/  # GTK3 desktop app (Python)
+├── src/meeting_recorder/  # GTK4 desktop app (Python)
 ├── tests/                 # Unit tests
 ├── packaging/             # .deb / .rpm / PKGBUILD / launcher scripts
 ├── install.sh / uninstall.sh

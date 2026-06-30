@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 import gi
-gi.require_version("Gtk", "3.0")
+gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, GLib, Gio
 
 from meeting_recorder.config.defaults import APP_ID, APP_NAME
@@ -117,7 +117,8 @@ class MeetingRecorderApp(Gtk.Application):
         if cfg.get("call_detection_enabled"):
             self._start_call_detector()
 
-        self.window.show_all()
+        # GTK4 widgets are visible by default; the window is shown via
+        # do_activate() -> window.present(), so no explicit show_all() is needed.
 
         # Validate system deps after window shown so errors display nicely
         GLib.idle_add(self._validate_system_deps)
@@ -129,16 +130,15 @@ class MeetingRecorderApp(Gtk.Application):
                 f"Missing system tools: {', '.join(missing)}\n\n"
                 "Please run install.sh to install dependencies."
             )
-            dialog = Gtk.MessageDialog(
-                transient_for=self.window,
-                modal=True,
-                message_type=Gtk.MessageType.ERROR,
-                buttons=Gtk.ButtonsType.OK,
-                text="Missing Dependencies",
-            )
-            dialog.format_secondary_text(msg)
-            dialog.run()
-            dialog.destroy()
+            # GTK4 has no blocking Gtk.Dialog.run(); Gtk.AlertDialog shows
+            # asynchronously. This is purely informational, so no callback is
+            # needed — show() is fire-and-forget.
+            alert = Gtk.AlertDialog()
+            alert.set_modal(True)
+            alert.set_message("Missing Dependencies")
+            alert.set_detail(msg)
+            alert.set_buttons(["OK"])
+            alert.show(self.window)
         return GLib.SOURCE_REMOVE
 
     def _start_call_detector(self) -> None:
