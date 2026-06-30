@@ -1,9 +1,11 @@
 """
-Reusable GTK grid widget for displaying downloadable models with status
+Reusable libadwaita widget for displaying downloadable models with status
 labels and action buttons.
 
-Used by the Settings dialog for both Whisper and Ollama model sections,
-eliminating the previously duplicated grid-building and row-state code.
+Used by the Settings dialog for the Whisper, whisper.cpp, and Ollama model
+sections. Rendered as an ``Adw.PreferencesGroup`` of ``Adw.ActionRow``s — one
+row per model (title = model name, subtitle = size · note), each with a status
+label and a download/retry button in the row suffix.
 """
 
 from __future__ import annotations
@@ -11,16 +13,15 @@ from __future__ import annotations
 from typing import Callable
 
 import gi
-gi.require_version("Gtk", "3.0")
-from gi.repository import Gtk
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+from gi.repository import Adw, Gtk
 
 
-class ModelRowGrid(Gtk.Grid):
+class ModelRowGrid(Adw.PreferencesGroup):
     """
-    Renders a table of models:  Model | Size | Note | Status | (button)
-
-    Row state is updated via the public setters below, which are safe to
-    call directly from ``GLib.idle_add``.
+    A group of model rows. Row state is updated via the public setters below,
+    which are safe to call directly from ``GLib.idle_add``.
     """
 
     def __init__(
@@ -28,27 +29,32 @@ class ModelRowGrid(Gtk.Grid):
         models: list[str],
         model_info: dict[str, dict],
         on_download: Callable[[str], None],
+        title: str | None = None,
     ) -> None:
-        super().__init__(column_spacing=12, row_spacing=8)
+        super().__init__()
+        if title:
+            self.set_title(title)
         self._rows: dict[str, dict] = {}
 
-        for col, text in enumerate(["Model", "Size", "Note", "Status", ""]):
-            lbl = Gtk.Label(xalign=0)
-            lbl.set_markup(f"<b>{text}</b>")
-            self.attach(lbl, col, 0, 1, 1)
-
-        for r, model in enumerate(models, start=1):
+        for model in models:
             info = model_info.get(model, {})
-            self.attach(Gtk.Label(label=model, xalign=0), 0, r, 1, 1)
-            self.attach(Gtk.Label(label=info.get("size", ""), xalign=0), 1, r, 1, 1)
-            self.attach(Gtk.Label(label=info.get("note", ""), xalign=0), 2, r, 1, 1)
+            subtitle_parts = [p for p in (info.get("size", ""), info.get("note", "")) if p]
+            row = Adw.ActionRow(title=model, subtitle="  ·  ".join(subtitle_parts))
 
-            status_lbl = Gtk.Label(label="Checking\u2026", xalign=0)
-            self.attach(status_lbl, 3, r, 1, 1)
+            suffix = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            suffix.set_valign(Gtk.Align.CENTER)
+
+            status_lbl = Gtk.Label(label="Checking…")
+            status_lbl.add_css_class("dim-label")
+            suffix.append(status_lbl)
 
             btn = Gtk.Button(label="Download")
+            btn.add_css_class("flat")
             btn.connect("clicked", lambda _b, m=model: on_download(m))
-            self.attach(btn, 4, r, 1, 1)
+            suffix.append(btn)
+
+            row.add_suffix(suffix)
+            self.add(row)
 
             self._rows[model] = {"status": status_lbl, "btn": btn}
 

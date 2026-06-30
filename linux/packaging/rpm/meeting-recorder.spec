@@ -9,8 +9,8 @@ Source0:        %{name}-%{version}.tar.gz
 Requires:       python3 >= 3.10
 Requires:       python3-pip
 Requires:       python3-gobject
-Requires:       gtk3
-Requires:       libayatana-appindicator-gtk3
+Requires:       gtk4
+Requires:       libadwaita
 Requires:       libnotify
 Requires:       ffmpeg
 Requires:       pulseaudio-utils

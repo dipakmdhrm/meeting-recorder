@@ -1,5 +1,6 @@
 """
-Tabbed settings dialog (General / Models / Prompts).
+Tabbed settings window (General / Models / Prompts), built with libadwaita
+preference rows.
 
 All I/O is injected so the dialog can be exercised in tests without a real
 filesystem, network, or GTK main loop:
@@ -23,8 +24,9 @@ import threading
 from typing import Callable
 
 import gi
-gi.require_version("Gtk", "3.0")
-from gi.repository import GLib, Gtk
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+from gi.repository import GLib, Gio, Gtk, Adw
 
 from meeting_recorder.config import settings
 from meeting_recorder.config.defaults import (
@@ -61,7 +63,9 @@ from ..services.whisper_cpp_service import (
 )
 from ..services.whisper_service import WhisperDownloader, WhisperStatusChecker
 from ..utils.autostart import is_autostart_enabled, update_autostart
+from ..utils.gtk_compat import remove_all_children
 from .model_row_grid import ModelRowGrid
+from .settings_visibility import compute_section_visibility
 
 logger = logging.getLogger(__name__)
 
@@ -79,11 +83,35 @@ _PROMPT_DEFAULTS = {
 }
 
 
+class IdComboRow(Adw.ComboRow):
+    """An ``Adw.ComboRow`` backed by a list of display labels but addressed by a
+    parallel list of stable ids — exposing ``get_active_id()`` / ``set_active_id()``
+    so the save logic stays id-based (as it was with ``Gtk.ComboBoxText``)."""
+
+    def __init__(self, title: str, ids: list[str], labels: list[str], active_id: str):
+        super().__init__(title=title)
+        self._ids = list(ids)
+        self.set_model(Gtk.StringList.new(labels))
+        self.set_active_id(active_id)
+
+    def get_active_id(self) -> str | None:
+        i = self.get_selected()
+        if 0 <= i < len(self._ids):
+            return self._ids[i]
+        return None
+
+    def set_active_id(self, id_: str | None) -> None:
+        if id_ in self._ids:
+            self.set_selected(self._ids.index(id_))
+        elif self._ids:
+            self.set_selected(0)
+
+
 # ---------------------------------------------------------------------------
 # Dialog
 # ---------------------------------------------------------------------------
 
-class SettingsDialog(Gtk.Dialog):
+class SettingsDialog(Adw.Window):
     def __init__(
         self,
         parent: Gtk.Window,
@@ -101,18 +129,15 @@ class SettingsDialog(Gtk.Dialog):
         whisper_cpp_downloader: WhisperCppModelDownloader | None = None,
         gpu_vendor: str | None = None,
         dispatcher: Callable = GLib.idle_add,
+        on_saved: Callable | None = None,
     ) -> None:
-        super().__init__(
-            title="Settings",
-            transient_for=parent,
-            modal=True,
-            use_header_bar=True,
-        )
-        self.add_buttons(
-            Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
-            Gtk.STOCK_OK,     Gtk.ResponseType.OK,
-        )
-        self.set_default_size(580, 620)
+        super().__init__(title="Settings", transient_for=parent, modal=True)
+        self.set_default_size(620, 680)
+
+        # Called after a successful save. The window is modeless (Adw.Window has
+        # no blocking run()), so the caller acts on the result via this callback
+        # — see MainWindow._on_settings_clicked.
+        self._on_saved = on_saved
 
         # --- injected dependencies (real defaults for production) ---
         self._store           = store
@@ -134,472 +159,381 @@ class SettingsDialog(Gtk.Dialog):
 
         # --- widget references populated during build ---
         self._whisper_grid: ModelRowGrid | None = None
-        self._whisper_model_combo: Gtk.ComboBoxText | None = None
+        self._whisper_model_combo: IdComboRow | None = None
         self._wcpp_grid: ModelRowGrid | None = None
-        self._wcpp_model_combo: Gtk.ComboBoxText | None = None
-        self._wcpp_backend_combo: Gtk.ComboBoxText | None = None
+        self._wcpp_model_combo: IdComboRow | None = None
+        self._wcpp_backend_combo: IdComboRow | None = None
         self._ollama_grid:  ModelRowGrid | None = None
-        self._ollama_status_label: Gtk.Label | None = None
+        self._ollama_status_row: Adw.ActionRow | None = None
         self._prompt_views: dict[str, Gtk.TextView] = {}
 
         self._build_ui()
-        self.connect("response", self._on_response)
 
     # ------------------------------------------------------------------
     # Top-level layout
     # ------------------------------------------------------------------
 
     def _build_ui(self) -> None:
-        notebook = Gtk.Notebook()
-        self.get_content_area().add(notebook)
-        notebook.append_page(self._build_general_tab(), Gtk.Label(label="General"))
-        notebook.append_page(self._build_models_tab(),  Gtk.Label(label="Models"))
-        notebook.append_page(self._build_prompts_tab(), Gtk.Label(label="Prompts"))
-        self.show_all()
+        toolbar_view = Adw.ToolbarView()
+        self.set_content(toolbar_view)
+
+        self._stack = Adw.ViewStack()
+        self._stack.set_vexpand(True)
+
+        switcher = Adw.ViewSwitcher()
+        switcher.set_stack(self._stack)
+        switcher.set_policy(Adw.ViewSwitcherPolicy.WIDE)
+
+        header = Adw.HeaderBar()
+        header.set_show_end_title_buttons(False)
+        header.set_show_start_title_buttons(False)
+        header.set_title_widget(switcher)
+
+        cancel_btn = Gtk.Button(label="Cancel")
+        cancel_btn.connect("clicked", lambda *_: self.close())
+        header.pack_start(cancel_btn)
+
+        save_btn = Gtk.Button(label="Save")
+        save_btn.add_css_class("suggested-action")
+        save_btn.connect("clicked", self._on_save_clicked)
+        header.pack_end(save_btn)
+
+        toolbar_view.add_top_bar(header)
+        toolbar_view.set_content(self._stack)
+
+        self._stack.add_titled_with_icon(
+            self._build_general_tab(), "general", "General", "preferences-system-symbolic"
+        )
+        self._stack.add_titled_with_icon(
+            self._build_models_tab(), "models", "Models", "folder-download-symbolic"
+        )
+        self._stack.add_titled_with_icon(
+            self._build_prompts_tab(), "prompts", "Prompts", "document-edit-symbolic"
+        )
+
         # Apply initial visibility based on selected services.
         self._update_models_visibility()
-        # Kick off background status checks after show_all so widgets are realized.
+        # Kick off background status checks.
         self._refresh_local_model_statuses()
+
+    @staticmethod
+    def _make_scroll_page() -> tuple[Gtk.ScrolledWindow, Gtk.Box]:
+        """Return (scrolled_window, content_box) for one tab — a clamped,
+        vertically-scrolling column of preference groups."""
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_vexpand(True)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
+        box.set_margin_top(24)
+        box.set_margin_bottom(24)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+        clamp = Adw.Clamp(maximum_size=620)
+        clamp.set_child(box)
+        scroll.set_child(clamp)
+        return scroll, box
 
     # ------------------------------------------------------------------
     # General tab
     # ------------------------------------------------------------------
 
     def _build_general_tab(self) -> Gtk.Widget:
-        grid = Gtk.Grid(column_spacing=12, row_spacing=12)
-        grid.set_margin_top(16)
-        grid.set_margin_bottom(16)
-        grid.set_margin_start(16)
-        grid.set_margin_end(16)
+        scroll, box = self._make_scroll_page()
 
-        row = 0
+        general = Adw.PreferencesGroup(title="General")
 
-        self._startup_switch = Gtk.Switch()
+        self._startup_switch = Adw.SwitchRow(title="Start at system startup")
         self._startup_switch.set_active(is_autostart_enabled())
-        self._startup_switch.set_halign(Gtk.Align.START)
-        grid.attach(Gtk.Label(label="Start at system startup:", xalign=0), 0, row, 1, 1)
-        grid.attach(self._startup_switch, 1, row, 1, 1)
-        row += 1
+        general.add(self._startup_switch)
 
-        self._detection_switch = Gtk.Switch()
+        self._detection_switch = Adw.SwitchRow(
+            title="Enable call detection",
+            subtitle=(
+                "Monitor running processes and audio streams to detect active "
+                "calls and notify you to start recording. May produce false "
+                "positives for other apps that use the microphone."
+            ),
+        )
         self._detection_switch.set_active(self._cfg.get("call_detection_enabled", False))
-        self._detection_switch.set_halign(Gtk.Align.START)
-        grid.attach(Gtk.Label(label="Enable call detection:", xalign=0), 0, row, 1, 1)
-        grid.attach(self._detection_switch, 1, row, 1, 1)
-        row += 1
+        general.add(self._detection_switch)
+        box.append(general)
 
-        note = Gtk.Label(
-            label=(
-                "When enabled, the app monitors running processes and audio streams\n"
-                "to detect active calls and notify you to start recording.\n\n"
-                "Note: May produce false positives for other apps that use the microphone."
-            )
+        recording = Adw.PreferencesGroup(title="Recording")
+
+        self._auto_title_switch = Adw.SwitchRow(
+            title="Auto-title recordings",
+            subtitle="Automatically generate a short title based on meeting notes.",
         )
-        note.set_line_wrap(True)
-        note.set_xalign(0)
-        grid.attach(note, 0, row, 2, 1)
-        row += 1
-
-        grid.attach(Gtk.Separator(), 0, row, 2, 1)
-        row += 1
-
-        self._auto_title_switch = Gtk.Switch()
         self._auto_title_switch.set_active(self._cfg.get("auto_title", True))
-        self._auto_title_switch.set_halign(Gtk.Align.START)
-        grid.attach(Gtk.Label(label="Auto-title recordings:", xalign=0), 0, row, 1, 1)
-        grid.attach(self._auto_title_switch, 1, row, 1, 1)
-        row += 1
+        recording.add(self._auto_title_switch)
 
-        auto_note = Gtk.Label(label="Automatically generate a short title based on meeting notes.")
-        auto_note.set_line_wrap(True)
-        auto_note.set_xalign(0)
-        grid.attach(auto_note, 0, row, 2, 1)
-        row += 1
-
-        grid.attach(Gtk.Separator(), 0, row, 2, 1)
-        row += 1
-
-        self._countdown_switch = Gtk.Switch()
-        self._countdown_switch.set_active(self._cfg.get("processing_countdown_enabled", False))
-        self._countdown_switch.set_halign(Gtk.Align.START)
-        grid.attach(Gtk.Label(label="Processing countdown:", xalign=0), 0, row, 1, 1)
-        grid.attach(self._countdown_switch, 1, row, 1, 1)
-        row += 1
-
-        countdown_note = Gtk.Label(
-            label=(
-                "Show a 5-second countdown after stopping a recording.\n"
-                "Cancel during the countdown to skip transcription and save the audio only."
-            )
+        self._countdown_switch = Adw.SwitchRow(
+            title="Processing countdown",
+            subtitle=(
+                "Show a 5-second countdown after stopping a recording. Cancel "
+                "during it to skip transcription and save the audio only."
+            ),
         )
-        countdown_note.set_line_wrap(True)
-        countdown_note.set_xalign(0)
-        grid.attach(countdown_note, 0, row, 2, 1)
-        row += 1
+        self._countdown_switch.set_active(self._cfg.get("processing_countdown_enabled", False))
+        recording.add(self._countdown_switch)
 
-        grid.attach(Gtk.Separator(), 0, row, 2, 1)
-        row += 1
+        q_ids = list(RECORDING_QUALITIES.keys())
+        q_labels = [label for label, _ in RECORDING_QUALITIES.values()]
+        self._quality_combo = IdComboRow(
+            "Recording quality", q_ids, q_labels,
+            self._cfg.get("recording_quality", "high"),
+        )
+        recording.add(self._quality_combo)
 
-        grid.attach(Gtk.Label(label="Output folder:", xalign=0), 0, row, 1, 1)
-        folder_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        self._folder_entry = Gtk.Entry()
+        self._folder_entry = Adw.EntryRow(title="Output folder")
         self._folder_entry.set_text(self._cfg.get("output_folder", "~/meetings"))
-        self._folder_entry.set_hexpand(True)
-        browse_btn = Gtk.Button(label="Browse\u2026")
+        browse_btn = Gtk.Button(icon_name="folder-open-symbolic")
+        browse_btn.add_css_class("flat")
+        browse_btn.set_valign(Gtk.Align.CENTER)
+        browse_btn.set_tooltip_text("Browse…")
         browse_btn.connect("clicked", self._on_browse_folder)
-        folder_box.pack_start(self._folder_entry, True, True, 0)
-        folder_box.pack_start(browse_btn, False, False, 0)
-        grid.attach(folder_box, 1, row, 1, 1)
-        row += 1
+        self._folder_entry.add_suffix(browse_btn)
+        recording.add(self._folder_entry)
+        box.append(recording)
 
-        grid.attach(Gtk.Label(label="Recording quality:", xalign=0), 0, row, 1, 1)
-        self._quality_combo = Gtk.ComboBoxText()
-        for key, (label, _) in RECORDING_QUALITIES.items():
-            self._quality_combo.append(key, label)
-        self._quality_combo.set_active_id(self._cfg.get("recording_quality", "high"))
-        grid.attach(self._quality_combo, 1, row, 1, 1)
-
-        return grid
+        return scroll
 
     # ------------------------------------------------------------------
-    # Models tab — composed from four independent section builders
+    # Models tab — composed from independent section builders
     # ------------------------------------------------------------------
 
     def _build_models_tab(self) -> Gtk.Widget:
-        outer_scroll = Gtk.ScrolledWindow()
-        outer_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll, box = self._make_scroll_page()
 
-        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
-        vbox.set_margin_top(16)
-        vbox.set_margin_bottom(16)
-        vbox.set_margin_start(16)
-        vbox.set_margin_end(16)
-        outer_scroll.add(vbox)
-
-        # --- Services selectors ---
-        services_grid = Gtk.Grid(column_spacing=12, row_spacing=8)
-        services_grid.attach(Gtk.Label(label="Transcription service:", xalign=0), 0, 0, 1, 1)
-        self._ts_combo = self._make_combo(
-            TRANSCRIPTION_SERVICES, self._cfg.get("transcription_service", "gemini")
+        services = Adw.PreferencesGroup(title="Services")
+        self._ts_combo = self._make_service_combo(
+            "Transcription service", TRANSCRIPTION_SERVICES,
+            self._cfg.get("transcription_service", "gemini"),
         )
-        self._ts_combo.connect("changed", lambda *_: self._update_models_visibility())
-        services_grid.attach(self._ts_combo, 1, 0, 1, 1)
+        self._ts_combo.connect("notify::selected", lambda *_: self._update_models_visibility())
+        services.add(self._ts_combo)
 
-        services_grid.attach(Gtk.Label(label="Summarization service:", xalign=0), 0, 1, 1, 1)
-        self._ss_combo = self._make_combo(
-            SUMMARIZATION_SERVICES, self._cfg.get("summarization_service", "gemini")
+        self._ss_combo = self._make_service_combo(
+            "Summarization service", SUMMARIZATION_SERVICES,
+            self._cfg.get("summarization_service", "gemini"),
         )
-        self._ss_combo.connect("changed", lambda *_: self._update_models_visibility())
-        services_grid.attach(self._ss_combo, 1, 1, 1, 1)
+        self._ss_combo.connect("notify::selected", lambda *_: self._update_models_visibility())
+        services.add(self._ss_combo)
+        box.append(services)
 
-        vbox.pack_start(services_grid, False, False, 0)
-        vbox.pack_start(Gtk.Separator(), False, False, 4)
-
-        # --- Model sections (stored for show/hide), each with a trailing separator ---
+        # Each section is a Box that holds one or more preference groups, shown
+        # or hidden as a unit based on the selected services.
         self._gemini_section_widget = self._build_gemini_section()
-        self._gemini_sep = Gtk.Separator()
         self._whisper_section_widget = self._build_whisper_section()
-        self._whisper_sep = Gtk.Separator()
         self._wcpp_section_widget = self._build_whisper_cpp_section()
-        self._wcpp_sep = Gtk.Separator()
         self._ollama_section_widget = self._build_ollama_section()
-        self._ollama_sep = Gtk.Separator()
         self._gpu_section_widget = self._build_gpu_section()
+        for widget in (
+            self._gemini_section_widget,
+            self._whisper_section_widget,
+            self._wcpp_section_widget,
+            self._ollama_section_widget,
+            self._gpu_section_widget,
+        ):
+            box.append(widget)
 
-        for widget, sep in [
-            (self._gemini_section_widget,  self._gemini_sep),
-            (self._whisper_section_widget, self._whisper_sep),
-            (self._wcpp_section_widget,    self._wcpp_sep),
-            (self._ollama_section_widget,  self._ollama_sep),
-            (self._gpu_section_widget,     None),
-        ]:
-            vbox.pack_start(widget, False, False, 0)
-            if sep is not None:
-                vbox.pack_start(sep, False, False, 4)
+        return scroll
 
-        return outer_scroll
+    def _make_service_combo(self, title: str, items: list[str], active: str) -> IdComboRow:
+        return IdComboRow(
+            title, items, [_SERVICE_LABELS.get(i, i) for i in items], active
+        )
 
     def _update_models_visibility(self) -> None:
         ts = self._ts_combo.get_active_id() or "gemini"
         ss = self._ss_combo.get_active_id() or "gemini"
-        needs_gemini  = ts == "gemini"  or ss == "gemini"
-        needs_whisper = ts == "whisper"
-        needs_wcpp    = ts == "whisper_cpp"
-        needs_ollama  = ts == "ollama"  or ss == "ollama"
-        # The GPU-acceleration section is relevant to either local STT engine.
-        needs_gpu     = needs_whisper or needs_wcpp
+        vis = compute_section_visibility(ts, ss)
+        self._gemini_section_widget.set_visible(vis["gemini"])
+        self._whisper_section_widget.set_visible(vis["whisper"])
+        self._wcpp_section_widget.set_visible(vis["wcpp"])
+        self._ollama_section_widget.set_visible(vis["ollama"])
+        self._gpu_section_widget.set_visible(vis["gpu"])
 
-        # Sections in display order, each paired with its trailing separator.
-        # A separator shows only when its section is visible AND some later
-        # section is also visible.
-        ordered = [
-            (self._gemini_section_widget,  self._gemini_sep,  needs_gemini),
-            (self._whisper_section_widget, self._whisper_sep, needs_whisper),
-            (self._wcpp_section_widget,    self._wcpp_sep,    needs_wcpp),
-            (self._ollama_section_widget,  self._ollama_sep,  needs_ollama),
-            (self._gpu_section_widget,     None,              needs_gpu),
-        ]
-        for i, (widget, sep, visible) in enumerate(ordered):
-            widget.show_all() if visible else widget.hide()
-            if sep is not None:
-                later_visible = any(v for _, _, v in ordered[i + 1:])
-                sep.show_all() if (visible and later_visible) else sep.hide()
+    # -- Gemini ---------------------------------------------------------
 
     def _build_gemini_section(self) -> Gtk.Widget:
-        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        group = Adw.PreferencesGroup(title="Gemini")
 
-        title = Gtk.Label(xalign=0)
-        title.set_markup("<b>Gemini</b>")
-        vbox.pack_start(title, False, False, 0)
-
-        grid = Gtk.Grid(column_spacing=12, row_spacing=8)
-
-        grid.attach(Gtk.Label(label="API key:", xalign=0), 0, 0, 1, 1)
-        self._gemini_key_entry = Gtk.Entry()
+        self._gemini_key_entry = Adw.PasswordEntryRow(title="API key")
         self._gemini_key_entry.set_text(self._cfg.get("gemini_api_key", ""))
-        self._gemini_key_entry.set_hexpand(True)
-        grid.attach(self._gemini_key_entry, 1, 0, 1, 1)
+        group.add(self._gemini_key_entry)
 
-        grid.attach(Gtk.Label(label="Transcription model:", xalign=0), 0, 1, 1, 1)
-        self._gemini_ts_model_combo = self._make_combo(
-            GEMINI_MODELS, self._cfg.get("gemini_transcription_model", GEMINI_MODELS[0])
+        self._gemini_ts_model_combo = IdComboRow(
+            "Transcription model", GEMINI_MODELS, GEMINI_MODELS,
+            self._cfg.get("gemini_transcription_model", GEMINI_MODELS[0]),
         )
-        grid.attach(self._gemini_ts_model_combo, 1, 1, 1, 1)
+        group.add(self._gemini_ts_model_combo)
 
-        grid.attach(Gtk.Label(label="Summarization model:", xalign=0), 0, 2, 1, 1)
-        self._gemini_ss_model_combo = self._make_combo(
-            GEMINI_MODELS, self._cfg.get("gemini_summarization_model", GEMINI_MODELS[0])
+        self._gemini_ss_model_combo = IdComboRow(
+            "Summarization model", GEMINI_MODELS, GEMINI_MODELS,
+            self._cfg.get("gemini_summarization_model", GEMINI_MODELS[0]),
         )
-        grid.attach(self._gemini_ss_model_combo, 1, 2, 1, 1)
+        group.add(self._gemini_ss_model_combo)
 
-        grid.attach(Gtk.Label(label="Processing timeout:", xalign=0), 0, 3, 1, 1)
-        self._timeout_combo = Gtk.ComboBoxText()
-        current_timeout = self._cfg.get("llm_request_timeout_minutes", 3)
-        for minutes in LLM_TIMEOUT_OPTIONS:
-            self._timeout_combo.append(str(minutes), f"{minutes} min")
-        self._timeout_combo.set_active_id(str(current_timeout))
-        if self._timeout_combo.get_active_id() is None:
-            self._timeout_combo.set_active_id("3")
-        grid.attach(self._timeout_combo, 1, 3, 1, 1)
+        t_ids = [str(m) for m in LLM_TIMEOUT_OPTIONS]
+        self._timeout_combo = IdComboRow(
+            "Processing timeout", t_ids, [f"{m} min" for m in LLM_TIMEOUT_OPTIONS],
+            str(self._cfg.get("llm_request_timeout_minutes", 3)),
+        )
+        group.add(self._timeout_combo)
 
-        vbox.pack_start(grid, False, False, 0)
-        return vbox
+        box.append(group)
+        return box
+
+    # -- Whisper --------------------------------------------------------
 
     def _build_whisper_section(self) -> Gtk.Widget:
-        self._whisper_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self._whisper_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        self._build_whisper_inner()
+        return self._whisper_box
 
-        title = Gtk.Label(xalign=0)
-        title.set_markup("<b>Whisper</b>")
-        self._whisper_vbox.pack_start(title, False, False, 0)
-
-        # The faster-whisper engine is opt-in (not in the base install). Show an
-        # install button until it is present, then the model download UI.
+    def _build_whisper_inner(self) -> None:
+        # The faster-whisper engine is opt-in (not in the base install): show an
+        # install row until it is present, then the model download UI.
         if not self._whisper_eng_inst.is_available():
-            self._build_whisper_installer()
+            group = Adw.PreferencesGroup(
+                title="Whisper",
+                description=(
+                    "The Whisper engine (faster-whisper) is not installed. It enables "
+                    "local transcription on NVIDIA GPUs or CPU."
+                ),
+            )
+            self._whisper_install_button = self._install_button("Install")
+            self._whisper_install_button.connect("clicked", self._on_install_whisper_engine)
+            group.add(self._action_row("faster-whisper engine", "Not installed",
+                                       self._whisper_install_button))
+            self._whisper_box.append(group)
         else:
-            self._build_whisper_ui()
+            group = Adw.PreferencesGroup(
+                title="Whisper",
+                description="Models are downloaded from HuggingFace and cached locally.",
+            )
+            self._whisper_model_combo = IdComboRow(
+                "Whisper model", WHISPER_MODELS, WHISPER_MODELS,
+                self._cfg.get("whisper_model", WHISPER_MODELS[0]),
+            )
+            group.add(self._whisper_model_combo)
+            self._whisper_box.append(group)
 
-        return self._whisper_vbox
+            self._whisper_grid = ModelRowGrid(
+                WHISPER_MODELS, WHISPER_MODEL_INFO, self._start_whisper_download,
+                title="Whisper models",
+            )
+            self._whisper_box.append(self._whisper_grid)
 
-    def _build_whisper_installer(self) -> None:
-        self._whisper_install_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        self._whisper_vbox.pack_start(self._whisper_install_box, False, False, 0)
-
-        info = Gtk.Label(
-            xalign=0,
-            label=(
-                "The Whisper engine (faster-whisper) is not installed. It enables local "
-                "transcription on NVIDIA GPUs or CPU. Install it to use this option."
-            ),
-        )
-        info.set_line_wrap(True)
-        self._whisper_install_box.pack_start(info, False, False, 0)
-
-        self._whisper_install_button = Gtk.Button(label="Install Whisper engine")
-        self._whisper_install_button.connect("clicked", self._on_install_whisper_engine)
-        self._whisper_install_box.pack_start(self._whisper_install_button, False, False, 0)
-        self._whisper_install_box.show_all()
-
-    def _build_whisper_ui(self) -> None:
-        self._whisper_config_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        self._whisper_vbox.pack_start(self._whisper_config_box, False, False, 0)
-
-        model_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        model_box.pack_start(Gtk.Label(label="Whisper model:", xalign=0), False, False, 0)
-        self._whisper_model_combo = self._make_combo(
-            WHISPER_MODELS, self._cfg.get("whisper_model", WHISPER_MODELS[0])
-        )
-        model_box.pack_start(self._whisper_model_combo, False, False, 0)
-        self._whisper_config_box.pack_start(model_box, False, False, 0)
-
-        note = Gtk.Label(
-            label="Models are downloaded from HuggingFace and cached locally.",
-            xalign=0,
-        )
-        note.set_line_wrap(True)
-        self._whisper_config_box.pack_start(note, False, False, 0)
-
-        self._whisper_grid = ModelRowGrid(
-            WHISPER_MODELS, WHISPER_MODEL_INFO, self._start_whisper_download
-        )
-        self._whisper_config_box.pack_start(self._whisper_grid, False, False, 0)
-        self._whisper_config_box.show_all()
+    # -- whisper.cpp ----------------------------------------------------
 
     def _build_whisper_cpp_section(self) -> Gtk.Widget:
-        self._wcpp_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self._wcpp_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        self._build_wcpp_inner()
+        return self._wcpp_box
 
-        title = Gtk.Label(xalign=0)
-        title.set_markup("<b>whisper.cpp (GPU-accelerated)</b>")
-        self._wcpp_vbox.pack_start(title, False, False, 0)
-
+    def _build_wcpp_inner(self) -> None:
+        detected = detect_gpu_backend()
+        group = Adw.PreferencesGroup(title="whisper.cpp (GPU-accelerated)")
         # Backend selector is always available — it drives both the build and
         # the runtime acceleration; "auto" detects the GPU.
-        backend_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        detected = detect_gpu_backend()
-        backend_box.pack_start(
-            Gtk.Label(label="Acceleration backend:", xalign=0), False, False, 0
+        self._wcpp_backend_combo = IdComboRow(
+            "Acceleration backend", WHISPER_CPP_BACKENDS, WHISPER_CPP_BACKENDS,
+            self._cfg.get("whisper_cpp_backend", "auto"),
         )
-        self._wcpp_backend_combo = self._make_combo(
-            WHISPER_CPP_BACKENDS, self._cfg.get("whisper_cpp_backend", "auto")
-        )
-        backend_box.pack_start(self._wcpp_backend_combo, False, False, 0)
-        backend_box.pack_start(
-            Gtk.Label(label=f"(detected: {detected})", xalign=0), False, False, 0
-        )
-        self._wcpp_vbox.pack_start(backend_box, False, False, 0)
+        self._wcpp_backend_combo.set_subtitle(f"Detected: {detected}")
+        group.add(self._wcpp_backend_combo)
+        self._wcpp_box.append(group)
 
-        # The engine is built from source on opt-in. Show a build button until
-        # the binary exists, then the model download UI.
         if not self._wcpp_builder.is_built():
-            self._build_wcpp_installer()
+            install_group = Adw.PreferencesGroup(
+                description=(
+                    "whisper.cpp is not built yet. Building it compiles a local "
+                    "transcription engine that can use AMD (ROCm/Vulkan), Apple "
+                    "(Metal), NVIDIA, or CPU. This installs a build toolchain and "
+                    "may take a few minutes."
+                ),
+            )
+            self._wcpp_install_button = self._install_button("Build")
+            self._wcpp_install_button.connect("clicked", self._on_build_whisper_cpp)
+            install_group.add(self._action_row("whisper.cpp engine", "Not built",
+                                                self._wcpp_install_button))
+            self._wcpp_box.append(install_group)
         else:
-            self._build_wcpp_ui()
+            cfg_group = Adw.PreferencesGroup(
+                description="GGML models are downloaded from HuggingFace and cached locally.",
+            )
+            self._wcpp_model_combo = IdComboRow(
+                "Model", WHISPER_CPP_MODELS, WHISPER_CPP_MODELS,
+                self._cfg.get("whisper_cpp_model", WHISPER_CPP_MODELS[0]),
+            )
+            cfg_group.add(self._wcpp_model_combo)
+            self._wcpp_box.append(cfg_group)
 
-        return self._wcpp_vbox
+            self._wcpp_grid = ModelRowGrid(
+                WHISPER_CPP_MODELS, WHISPER_CPP_MODEL_INFO, self._start_wcpp_download,
+                title="whisper.cpp models",
+            )
+            self._wcpp_box.append(self._wcpp_grid)
 
-    def _build_wcpp_installer(self) -> None:
-        self._wcpp_install_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        self._wcpp_vbox.pack_start(self._wcpp_install_box, False, False, 0)
-
-        info = Gtk.Label(
-            xalign=0,
-            label=(
-                "whisper.cpp is not built yet. Building it compiles a local transcription "
-                "engine that can use AMD (ROCm/Vulkan), Apple (Metal), NVIDIA, or CPU. "
-                "This installs a build toolchain and may take a few minutes."
-            ),
-        )
-        info.set_line_wrap(True)
-        self._wcpp_install_box.pack_start(info, False, False, 0)
-
-        self._wcpp_install_button = Gtk.Button(label="Build whisper.cpp engine")
-        self._wcpp_install_button.connect("clicked", self._on_build_whisper_cpp)
-        self._wcpp_install_box.pack_start(self._wcpp_install_button, False, False, 0)
-        self._wcpp_install_box.show_all()
-
-    def _build_wcpp_ui(self) -> None:
-        self._wcpp_config_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        self._wcpp_vbox.pack_start(self._wcpp_config_box, False, False, 0)
-
-        model_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        model_box.pack_start(Gtk.Label(label="Model:", xalign=0), False, False, 0)
-        self._wcpp_model_combo = self._make_combo(
-            WHISPER_CPP_MODELS, self._cfg.get("whisper_cpp_model", WHISPER_CPP_MODELS[0])
-        )
-        model_box.pack_start(self._wcpp_model_combo, False, False, 0)
-        self._wcpp_config_box.pack_start(model_box, False, False, 0)
-
-        note = Gtk.Label(
-            label="GGML models are downloaded from HuggingFace and cached locally.",
-            xalign=0,
-        )
-        note.set_line_wrap(True)
-        self._wcpp_config_box.pack_start(note, False, False, 0)
-
-        self._wcpp_grid = ModelRowGrid(
-            WHISPER_CPP_MODELS, WHISPER_CPP_MODEL_INFO, self._start_wcpp_download
-        )
-        self._wcpp_config_box.pack_start(self._wcpp_grid, False, False, 0)
-        self._wcpp_config_box.show_all()
+    # -- Ollama ---------------------------------------------------------
 
     def _build_ollama_section(self) -> Gtk.Widget:
-        self._ollama_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self._ollama_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        self._build_ollama_inner()
+        return self._ollama_box
 
-        title = Gtk.Label(xalign=0)
-        title.set_markup("<b>Ollama</b>")
-        self._ollama_vbox.pack_start(title, False, False, 0)
-
+    def _build_ollama_inner(self) -> None:
         if not self._ollama_inst.is_available():
-            self._build_ollama_installer()
+            group = Adw.PreferencesGroup(
+                title="Ollama",
+                description="Ollama is not installed. It is required for local summarization.",
+            )
+            self._ollama_install_button = self._install_button("Install")
+            self._ollama_install_button.connect("clicked", self._on_install_ollama)
+            group.add(self._action_row("Ollama", "Not installed",
+                                       self._ollama_install_button))
+            self._ollama_box.append(group)
         else:
-            self._build_ollama_ui()
+            group = Adw.PreferencesGroup(
+                title="Ollama",
+                description="Requires Ollama to be installed and running (ollama serve).",
+            )
+            self._ollama_model_combo = IdComboRow(
+                "Ollama model", OLLAMA_MODELS, OLLAMA_MODELS,
+                self._cfg.get("ollama_model", OLLAMA_MODELS[0]),
+            )
+            group.add(self._ollama_model_combo)
 
-        return self._ollama_vbox
+            self._ollama_host_entry = Adw.EntryRow(title="Ollama host")
+            self._ollama_host_entry.set_text(self._cfg.get("ollama_host", OLLAMA_DEFAULT_HOST))
+            group.add(self._ollama_host_entry)
 
-    def _build_ollama_installer(self) -> None:
-        self._ollama_install_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        self._ollama_vbox.pack_start(self._ollama_install_box, False, False, 0)
+            self._ollama_status_row = Adw.ActionRow(
+                title="Connection", subtitle="Checking Ollama connection…"
+            )
+            group.add(self._ollama_status_row)
+            self._ollama_box.append(group)
 
-        info = Gtk.Label(
-            xalign=0,
-            label="Ollama is not installed. It is required for local summarization.",
-        )
-        self._ollama_install_box.pack_start(info, False, False, 0)
+            self._ollama_grid = ModelRowGrid(
+                OLLAMA_MODELS, OLLAMA_MODEL_INFO, self._start_ollama_download,
+                title="Ollama models",
+            )
+            self._ollama_box.append(self._ollama_grid)
 
-        self._ollama_install_button = Gtk.Button(label="Install Ollama")
-        self._ollama_install_button.connect("clicked", self._on_install_ollama)
-        self._ollama_install_box.pack_start(self._ollama_install_button, False, False, 0)
-        self._ollama_install_box.show_all()
-
-    def _build_ollama_ui(self) -> None:
-        self._ollama_config_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        self._ollama_vbox.pack_start(self._ollama_config_box, False, False, 0)
-
-        config_grid = Gtk.Grid(column_spacing=12, row_spacing=8)
-
-        config_grid.attach(Gtk.Label(label="Ollama model:", xalign=0), 0, 0, 1, 1)
-        self._ollama_model_combo = self._make_combo(
-            OLLAMA_MODELS, self._cfg.get("ollama_model", OLLAMA_MODELS[0])
-        )
-        config_grid.attach(self._ollama_model_combo, 1, 0, 1, 1)
-
-        config_grid.attach(Gtk.Label(label="Ollama host:", xalign=0), 0, 1, 1, 1)
-        self._ollama_host_entry = Gtk.Entry()
-        self._ollama_host_entry.set_text(self._cfg.get("ollama_host", OLLAMA_DEFAULT_HOST))
-        self._ollama_host_entry.set_hexpand(True)
-        config_grid.attach(self._ollama_host_entry, 1, 1, 1, 1)
-
-        self._ollama_config_box.pack_start(config_grid, False, False, 0)
-
-        self._ollama_status_label = Gtk.Label(
-            label="Checking Ollama connection\u2026", xalign=0
-        )
-        self._ollama_config_box.pack_start(self._ollama_status_label, False, False, 0)
-
-        note = Gtk.Label(
-            label="Requires Ollama to be installed and running (ollama serve).",
-            xalign=0,
-        )
-        note.set_line_wrap(True)
-        self._ollama_config_box.pack_start(note, False, False, 0)
-
-        self._ollama_grid = ModelRowGrid(
-            OLLAMA_MODELS, OLLAMA_MODEL_INFO, self._start_ollama_download
-        )
-        self._ollama_config_box.pack_start(self._ollama_grid, False, False, 0)
-        self._ollama_config_box.show_all()
+    # -- GPU ------------------------------------------------------------
 
     def _build_gpu_section(self) -> Gtk.Widget:
-        self._gpu_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self._gpu_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        self._build_gpu_inner()
+        return self._gpu_box
 
-        title = Gtk.Label(xalign=0)
-        title.set_markup("<b>GPU Acceleration</b>")
-        self._gpu_vbox.pack_start(title, False, False, 0)
-
-        # Pick the right accelerator UI for the detected GPU vendor.
+    def _build_gpu_inner(self) -> None:
         if self._gpu_vendor == "nvidia":
             if self._cuda_inst.is_available():
-                self._gpu_installed_label(
+                self._gpu_installed_group(
                     "NVIDIA CUDA libraries detected. GPU acceleration is available."
                 )
             else:
@@ -611,7 +545,7 @@ class SettingsDialog(Gtk.Dialog):
                 )
         elif self._gpu_vendor == "amd":
             if self._rocm_inst.is_available():
-                self._gpu_installed_label(
+                self._gpu_installed_group(
                     "AMD ROCm detected. GPU acceleration is available "
                     "(use the whisper.cpp engine)."
                 )
@@ -623,38 +557,43 @@ class SettingsDialog(Gtk.Dialog):
                     "Install ROCm Runtime",
                 )
         elif self._gpu_vendor == "apple":
-            self._gpu_installed_label(
+            self._gpu_installed_group(
                 "Apple Silicon detected. Metal GPU acceleration is built in "
                 "(use the whisper.cpp engine) — no install needed."
             )
         else:
-            self._gpu_installed_label(
+            self._gpu_installed_group(
                 "No supported GPU detected. Local transcription will run on CPU, "
                 "which is slow. For fast transcription, use the Gemini service."
             )
 
-        return self._gpu_vbox
-
-    def _gpu_installed_label(self, text: str) -> None:
-        info_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        self._gpu_vbox.pack_start(info_box, False, False, 0)
-        info = Gtk.Label(xalign=0, label=text)
-        info.set_line_wrap(True)
-        info_box.pack_start(info, False, False, 0)
-        info_box.show_all()
+    def _gpu_installed_group(self, text: str) -> None:
+        self._gpu_box.append(
+            Adw.PreferencesGroup(title="GPU Acceleration", description=text)
+        )
 
     def _build_gpu_installer(self, vendor: str, info_text: str, button_label: str) -> None:
-        self._gpu_install_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        self._gpu_vbox.pack_start(self._gpu_install_box, False, False, 0)
-
-        info = Gtk.Label(xalign=0, label=info_text)
-        info.set_line_wrap(True)
-        self._gpu_install_box.pack_start(info, False, False, 0)
-
-        self._gpu_install_button = Gtk.Button(label=button_label)
+        group = Adw.PreferencesGroup(title="GPU Acceleration", description=info_text)
+        self._gpu_install_button = self._install_button(button_label)
         self._gpu_install_button.connect("clicked", self._on_install_gpu, vendor)
-        self._gpu_install_box.pack_start(self._gpu_install_button, False, False, 0)
-        self._gpu_install_box.show_all()
+        group.add(self._action_row("GPU runtime", "Not installed", self._gpu_install_button))
+        self._gpu_box.append(group)
+
+    # -- small row helpers ----------------------------------------------
+
+    @staticmethod
+    def _install_button(label: str) -> Gtk.Button:
+        btn = Gtk.Button(label=label)
+        btn.add_css_class("flat")
+        btn.set_valign(Gtk.Align.CENTER)
+        return btn
+
+    @staticmethod
+    def _action_row(title: str, subtitle: str, suffix: Gtk.Widget) -> Adw.ActionRow:
+        row = Adw.ActionRow(title=title, subtitle=subtitle)
+        row.add_suffix(suffix)
+        row.set_activatable_widget(suffix)
+        return row
 
     # ------------------------------------------------------------------
     # Install handlers — Ollama
@@ -662,7 +601,7 @@ class SettingsDialog(Gtk.Dialog):
 
     def _on_install_ollama(self, button: Gtk.Button) -> None:
         button.set_sensitive(False)
-        button.set_label("Installing\u2026")
+        button.set_label("Installing…")
         threading.Thread(target=self._do_install_ollama, daemon=True).start()
 
     def _do_install_ollama(self) -> None:
@@ -671,8 +610,8 @@ class SettingsDialog(Gtk.Dialog):
 
     def _on_ollama_install_finished(self, success: bool) -> None:
         if success and self._ollama_inst.is_available():
-            self._ollama_install_box.destroy()
-            self._build_ollama_ui()
+            remove_all_children(self._ollama_box)
+            self._build_ollama_inner()
             self._refresh_local_model_statuses()
         else:
             self._ollama_install_button.set_sensitive(True)
@@ -684,7 +623,7 @@ class SettingsDialog(Gtk.Dialog):
 
     def _on_install_whisper_engine(self, button: Gtk.Button) -> None:
         button.set_sensitive(False)
-        button.set_label("Installing\u2026")
+        button.set_label("Installing…")
         threading.Thread(target=self._do_install_whisper_engine, daemon=True).start()
 
     def _do_install_whisper_engine(self) -> None:
@@ -693,20 +632,20 @@ class SettingsDialog(Gtk.Dialog):
 
     def _on_whisper_engine_install_finished(self, success: bool) -> None:
         if success and self._whisper_eng_inst.is_available():
-            self._whisper_install_box.destroy()
-            self._build_whisper_ui()
+            remove_all_children(self._whisper_box)
+            self._build_whisper_inner()
             self._refresh_local_model_statuses()
         else:
             self._whisper_install_button.set_sensitive(True)
             self._whisper_install_button.set_label("Retry Install")
 
     # ------------------------------------------------------------------
-    # Build handler \u2014 whisper.cpp engine (built from source, opt-in)
+    # Build handler — whisper.cpp engine (built from source, opt-in)
     # ------------------------------------------------------------------
 
     def _on_build_whisper_cpp(self, button: Gtk.Button) -> None:
         button.set_sensitive(False)
-        button.set_label("Building\u2026 (may take a few minutes)")
+        button.set_label("Building…")
         backend = self._wcpp_backend_combo.get_active_id() or "auto"
         if backend == "auto":
             backend = detect_gpu_backend()
@@ -720,8 +659,8 @@ class SettingsDialog(Gtk.Dialog):
 
     def _on_whisper_cpp_build_finished(self, success: bool) -> None:
         if success and self._wcpp_builder.is_built():
-            self._wcpp_install_box.destroy()
-            self._build_wcpp_ui()
+            remove_all_children(self._wcpp_box)
+            self._build_wcpp_inner()
             self._refresh_local_model_statuses()
         else:
             self._wcpp_install_button.set_sensitive(True)
@@ -729,7 +668,7 @@ class SettingsDialog(Gtk.Dialog):
 
     def _on_install_gpu(self, button: Gtk.Button, vendor: str) -> None:
         button.set_sensitive(False)
-        button.set_label("Installing\u2026")
+        button.set_label("Installing…")
         threading.Thread(
             target=self._do_install_gpu, args=(vendor,), daemon=True
         ).start()
@@ -742,14 +681,14 @@ class SettingsDialog(Gtk.Dialog):
     def _on_gpu_install_finished(self, success: bool, vendor: str) -> None:
         installer = self._gpu_installers.get(vendor)
         if success and installer is not None and installer.is_available():
-            self._gpu_install_box.destroy()
+            remove_all_children(self._gpu_box)
             label = (
                 "NVIDIA CUDA libraries detected. GPU acceleration is available."
                 if vendor == "nvidia"
                 else "AMD ROCm detected. GPU acceleration is available "
                 "(use the whisper.cpp engine)."
             )
-            self._gpu_installed_label(label)
+            self._gpu_installed_group(label)
         else:
             self._gpu_install_button.set_sensitive(True)
             self._gpu_install_button.set_label("Retry Install")
@@ -759,82 +698,63 @@ class SettingsDialog(Gtk.Dialog):
     # ------------------------------------------------------------------
 
     def _build_prompts_tab(self) -> Gtk.Widget:
-        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        vbox.set_margin_top(16)
-        vbox.set_margin_bottom(16)
-        vbox.set_margin_start(16)
-        vbox.set_margin_end(16)
-
-        vbox.pack_start(
-            self._build_prompt_section(
-                key="transcription",
-                label="Transcription prompt:",
-                note="Note: Transcription prompts apply to Gemini only. Whisper does not use prompts.",
-                height=180,
+        scroll, box = self._make_scroll_page()
+        box.append(self._build_prompt_section(
+            key="transcription",
+            label="Transcription prompt",
+            note="Transcription prompts apply to Gemini only. Whisper does not use prompts.",
+            height=160,
+        ))
+        box.append(self._build_prompt_section(
+            key="summarization",
+            label="Summarization prompt",
+            height=160,
+        ))
+        box.append(self._build_prompt_section(
+            key="title",
+            label="Title prompt",
+            note=(
+                "Used for auto-titling recordings and the AI title button in the "
+                "Library. Must contain {transcript}."
             ),
-            True, True, 0,
-        )
-        vbox.pack_start(Gtk.Separator(), False, False, 4)
-        vbox.pack_start(
-            self._build_prompt_section(
-                key="summarization",
-                label="Summarization prompt:",
-                height=180,
-            ),
-            True, True, 0,
-        )
-        vbox.pack_start(Gtk.Separator(), False, False, 4)
-        vbox.pack_start(
-            self._build_prompt_section(
-                key="title",
-                label="Title prompt:",
-                note=(
-                    "Used for auto-titling recordings and the AI title button in the Library. "
-                    "Must contain {transcript}."
-                ),
-                height=120,
-            ),
-            True, True, 0,
-        )
-        return vbox
+            height=120,
+        ))
+        return scroll
 
     def _build_prompt_section(
         self,
         key: str,
         label: str,
         note: str | None = None,
-        height: int = 180,
+        height: int = 160,
     ) -> Gtk.Widget:
-        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-
-        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        lbl = Gtk.Label(label=label, xalign=0)
-        lbl.set_hexpand(True)
-        reset_btn = Gtk.Button(label="Reset to default")
-        reset_btn.connect("clicked", lambda *_: self._reset_prompt(key))
-        header.pack_start(lbl, True, True, 0)
-        header.pack_start(reset_btn, False, False, 0)
-        vbox.pack_start(header, False, False, 0)
-
+        group = Adw.PreferencesGroup(title=label)
         if note:
-            note_lbl = Gtk.Label(label=note, xalign=0)
-            note_lbl.set_line_wrap(True)
-            vbox.pack_start(note_lbl, False, False, 0)
+            group.set_description(note)
+
+        reset_btn = Gtk.Button(label="Reset to default")
+        reset_btn.add_css_class("flat")
+        reset_btn.connect("clicked", lambda *_: self._reset_prompt(key))
+        group.set_header_suffix(reset_btn)
 
         view = Gtk.TextView()
         view.set_wrap_mode(Gtk.WrapMode.WORD)
         view.set_monospace(True)
+        view.set_top_margin(8)
+        view.set_bottom_margin(8)
+        view.set_left_margin(8)
+        view.set_right_margin(8)
         stored = self._cfg.get(f"{key}_prompt") or _PROMPT_DEFAULTS[key]
         view.get_buffer().set_text(stored)
 
         scroll = Gtk.ScrolledWindow()
         scroll.set_min_content_height(height)
-        scroll.set_vexpand(True)
-        scroll.add(view)
-        vbox.pack_start(scroll, True, True, 0)
+        scroll.set_child(view)
+        scroll.add_css_class("card")
+        group.add(scroll)
 
         self._prompt_views[key] = view
-        return vbox
+        return group
 
     def _reset_prompt(self, key: str) -> None:
         view = self._prompt_views.get(key)
@@ -884,24 +804,24 @@ class SettingsDialog(Gtk.Dialog):
                 self._dispatch(self._ollama_grid.set_not_downloaded, model)
 
     def _set_ollama_unreachable(self) -> None:
-        if self._ollama_status_label:
-            self._ollama_status_label.set_text(
-                "Ollama not reachable. Start it with: ollama serve"
+        if self._ollama_status_row:
+            self._ollama_status_row.set_subtitle(
+                "Not reachable. Start it with: ollama serve"
             )
         if self._ollama_grid:
             for model in OLLAMA_MODELS:
                 self._ollama_grid.set_status_text(model, "Ollama offline")
 
     def _set_ollama_reachable(self) -> None:
-        if self._ollama_status_label:
-            self._ollama_status_label.set_text("Ollama is running.")
+        if self._ollama_status_row:
+            self._ollama_status_row.set_subtitle("Ollama is running.")
 
     # ------------------------------------------------------------------
     # Download handlers
     # ------------------------------------------------------------------
 
     def _start_whisper_download(self, model: str) -> None:
-        self._whisper_grid.set_progress(model, "Downloading\u2026")
+        self._whisper_grid.set_progress(model, "Downloading…")
         threading.Thread(
             target=self._do_whisper_download, args=(model,), daemon=True
         ).start()
@@ -928,7 +848,7 @@ class SettingsDialog(Gtk.Dialog):
 
     def _start_ollama_download(self, model: str) -> None:
         host = self._ollama_host_entry.get_text().strip()
-        self._ollama_grid.set_progress(model, "Starting\u2026")
+        self._ollama_grid.set_progress(model, "Starting…")
         threading.Thread(
             target=self._do_ollama_download, args=(model, host), daemon=True
         ).start()
@@ -947,42 +867,33 @@ class SettingsDialog(Gtk.Dialog):
             self._dispatch(self._ollama_grid.set_error, model, str(exc))
 
     # ------------------------------------------------------------------
-    # Helpers
+    # Folder picker / save
     # ------------------------------------------------------------------
-
-    def _make_combo(self, items: list[str], active: str) -> Gtk.ComboBoxText:
-        combo = Gtk.ComboBoxText()
-        for item in items:
-            combo.append(item, _SERVICE_LABELS.get(item, item))
-        combo.set_active_id(active)
-        if combo.get_active_id() is None and items:
-            combo.set_active(0)
-        return combo
 
     def _on_browse_folder(self, *_) -> None:
-        dialog = Gtk.FileChooserDialog(
-            title="Select Output Folder",
-            transient_for=self,
-            action=Gtk.FileChooserAction.SELECT_FOLDER,
-        )
-        dialog.add_buttons(
-            Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
-            Gtk.STOCK_OPEN,   Gtk.ResponseType.OK,
-        )
+        # GTK4 has no blocking FileChooserDialog.run(); Gtk.FileDialog.select_folder()
+        # is async — the entry is updated in the _done callback.
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Select Output Folder")
         current = os.path.expanduser(self._folder_entry.get_text())
         if os.path.isdir(current):
-            dialog.set_current_folder(current)
-        if dialog.run() == Gtk.ResponseType.OK:
-            self._folder_entry.set_text(dialog.get_filename())
-        dialog.destroy()
+            dialog.set_initial_folder(Gio.File.new_for_path(current))
 
-    def _on_response(self, _dialog: Gtk.Dialog, response_id: int) -> None:
-        if response_id == Gtk.ResponseType.OK:
-            self._save()
+        def _done(dlg, result):
+            try:
+                folder = dlg.select_folder_finish(result)
+            except GLib.Error:
+                return  # cancelled or dismissed
+            if folder:
+                self._folder_entry.set_text(folder.get_path())
 
-    # ------------------------------------------------------------------
-    # Save
-    # ------------------------------------------------------------------
+        dialog.select_folder(self, None, _done)
+
+    def _on_save_clicked(self, *_) -> None:
+        self._save()
+        if self._on_saved is not None:
+            self._on_saved()
+        self.close()
 
     def _save(self) -> None:
         cfg = self._store.load()

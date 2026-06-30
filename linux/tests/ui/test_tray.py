@@ -1,47 +1,81 @@
 """
-Tests for the pure tray backend-selection policy.
+Tests for the pure tray helpers.
 
-``_choose_tray_backend`` decides which tray backend the app uses, in priority
-order: an *embedded* Gtk.StatusIcon (the only backend that gives a separate
-left-click action) wins, else AppIndicator, else pystray, else nothing. The GTK
-click wiring and the embed probe itself are GTK-bound and stay outside unit
-scope (see the test-coverage boundaries in CLAUDE.md); this guards the policy.
+The tray is a D-Bus StatusNotifierItem; the D-Bus wiring is integration-level and
+stays outside unit scope (see the test-coverage boundaries in CLAUDE.md). The
+icon-selection and menu-construction *policy* is pure and is guarded here.
 
-Importing ``tray`` is CI-safe: its module-level gi/AppIndicator import is wrapped
-in try/except and no GTK widgets are constructed at import time.
+The helpers live in ``tray_model`` (gi-free) so this test runs without PyGObject
+— the CI test environment installs only pytest.
 """
 
-import pytest
-
-from meeting_recorder.ui.tray import _choose_tray_backend
+from meeting_recorder.ui.tray_model import build_menu_model, icon_for_state
 
 
-class TestChooseTrayBackend:
-    def test_embedded_statusicon_wins(self):
-        # Even when every backend is available, an embedded Gtk.StatusIcon is
-        # preferred because it is the only one with a custom left-click action.
-        assert _choose_tray_backend(True, True, True) == "statusicon"
-        assert _choose_tray_backend(True, False, False) == "statusicon"
+def _labels(items):
+    return [i.get("label") for i in items if i["type"] != "separator"]
 
-    def test_falls_back_to_indicator_when_not_embedded(self):
-        assert _choose_tray_backend(False, True, True) == "indicator"
-        assert _choose_tray_backend(False, True, False) == "indicator"
 
-    def test_falls_back_to_pystray_when_no_indicator(self):
-        assert _choose_tray_backend(False, False, True) == "pystray"
+def _actions(items):
+    return [i["action"] for i in items if i["type"] == "action"]
 
-    def test_none_when_nothing_available(self):
-        assert _choose_tray_backend(False, False, False) is None
 
-    @pytest.mark.parametrize(
-        "embedded,indicator,pystray,expected",
-        [
-            (True, True, True, "statusicon"),
-            (True, False, True, "statusicon"),
-            (False, True, True, "indicator"),
-            (False, False, True, "pystray"),
-            (False, False, False, None),
-        ],
-    )
-    def test_priority_matrix(self, embedded, indicator, pystray, expected):
-        assert _choose_tray_backend(embedded, indicator, pystray) == expected
+class TestIconForState:
+    def test_recording_wins(self):
+        # Recording takes priority even when jobs are active.
+        assert icon_for_state("recording", [("j", lambda: None)]) == "media-record"
+
+    def test_paused(self):
+        assert icon_for_state("paused", []) == "media-playback-pause"
+
+    def test_jobs_when_idle(self):
+        assert icon_for_state("idle", [("j", lambda: None)]) == "system-run"
+
+    def test_idle_no_jobs(self):
+        assert icon_for_state("idle", []) == "audio-input-microphone"
+
+
+class TestBuildMenuModel:
+    def test_idle_controls(self):
+        items = build_menu_model("idle", [])
+        assert _actions(items)[:3] == [
+            "record_headphones", "record_speaker", "use_existing"
+        ]
+        # Footer is always present.
+        assert "show" in _actions(items)
+        assert "quit" in _actions(items)
+
+    def test_recording_controls(self):
+        items = build_menu_model("recording", [])
+        assert _actions(items)[:4] == ["pause", "stop", "cancel_save", "cancel"]
+
+    def test_paused_controls(self):
+        items = build_menu_model("paused", [])
+        assert _actions(items)[:4] == ["resume", "stop", "cancel_save", "cancel"]
+
+    def test_no_jobs_section_when_empty(self):
+        items = build_menu_model("idle", [])
+        assert not any("Processing" in (i.get("label") or "") for i in items)
+        assert not any(i.get("action") == "cancel_job" for i in items)
+
+    def test_jobs_section(self):
+        jobs = [("Standup", lambda: None), ("Sync", lambda: None)]
+        items = build_menu_model("recording", jobs)
+
+        header = [i for i in items if i["type"] == "label"]
+        assert header and header[0]["label"] == "Processing (2 active)"
+        assert header[0]["enabled"] is False
+
+        cancel_items = [i for i in items if i.get("action") == "cancel_job"]
+        assert [i["label"] for i in cancel_items] == ["  Cancel: Standup", "  Cancel: Sync"]
+        assert [i["job_index"] for i in cancel_items] == [0, 1]
+
+    def test_separators_between_sections(self):
+        jobs = [("Standup", lambda: None)]
+        items = build_menu_model("recording", jobs)
+        # One separator before the jobs section, one before the footer.
+        assert sum(1 for i in items if i["type"] == "separator") == 2
+
+    def test_idle_has_only_footer_separator(self):
+        items = build_menu_model("idle", [])
+        assert sum(1 for i in items if i["type"] == "separator") == 1

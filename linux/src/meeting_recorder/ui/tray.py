@@ -1,453 +1,414 @@
 """
-Implements a system tray icon for the application. It provides quick-access controls for recording and displays the status of active background processing jobs.
+System tray icon implemented as a pure-DBus StatusNotifierItem (SNI).
 
-Three backends, tried in priority order (see ``_choose_tray_backend``):
-1. ``Gtk.StatusIcon`` — the legacy XEmbed tray. The only backend that exposes
-   *separate* left-click (``activate``) and right-click (``popup-menu``) signals,
-   so left-click focuses the window while right-click opens the menu. Used only
-   when it actually embeds in a system tray (traditional desktops: XFCE, MATE,
-   Cinnamon, KDE/X11, LXQt, i3+trayer, …).
-2. ``AyatanaAppIndicator3`` — used on GNOME/Wayland where no XEmbed tray exists.
-   AppIndicator cannot deliver a left-click action (menu opens on any click).
-3. pystray — last-resort fallback.
+GTK4 removed ``Gtk.StatusIcon`` entirely, and the AppIndicator / pystray menu
+backends are GTK3-linked (GTK3 and GTK4 cannot coexist in one process). The
+modern, toolkit-independent tray protocol is the KDE/freedesktop
+StatusNotifierItem spec plus ``com.canonical.dbusmenu`` for the menu — both
+spoken over D-Bus. We implement them directly on ``Gio.DBusConnection``, which
+ships with GLib/PyGObject (already a dependency) and is independent of the GTK
+version, so it runs cleanly inside the GTK4 app.
+
+Hosts: GNOME via the AppIndicator/KStatusNotifier extension, KDE Plasma, and the
+SNI plugins of XFCE/MATE/Cinnamon/etc. Left-click delivers ``Activate`` (focus
+the window) where the host supports it; otherwise the host opens the menu.
 """
 
 from __future__ import annotations
 
 import logging
+import os
+
+from gi.repository import Gio, GLib
+
+from .tray_model import build_menu_model, icon_for_state
 
 logger = logging.getLogger(__name__)
 
-_INDICATOR_AVAILABLE = False
-try:
-    import gi
-    gi.require_version("AyatanaAppIndicator3", "0.1")
-    from gi.repository import AyatanaAppIndicator3
-    _INDICATOR_AVAILABLE = True
-except (ImportError, ValueError):
-    pass
 
-if not _INDICATOR_AVAILABLE:
-    try:
-        import gi
-        gi.require_version("AppIndicator3", "0.1")
-        from gi.repository import AppIndicator3 as AyatanaAppIndicator3
-        _INDICATOR_AVAILABLE = True
-    except (ImportError, ValueError):
-        pass
+# ---------------------------------------------------------------------------
+# D-Bus interface definitions
+# ---------------------------------------------------------------------------
 
+_SNI_XML = """
+<node>
+  <interface name="org.kde.StatusNotifierItem">
+    <property name="Category" type="s" access="read"/>
+    <property name="Id" type="s" access="read"/>
+    <property name="Title" type="s" access="read"/>
+    <property name="Status" type="s" access="read"/>
+    <property name="WindowId" type="u" access="read"/>
+    <property name="IconName" type="s" access="read"/>
+    <property name="IconThemePath" type="s" access="read"/>
+    <property name="ItemIsMenu" type="b" access="read"/>
+    <property name="Menu" type="o" access="read"/>
+    <property name="ToolTip" type="(sa(iiay)ss)" access="read"/>
+    <method name="ContextMenu">
+      <arg name="x" type="i" direction="in"/>
+      <arg name="y" type="i" direction="in"/>
+    </method>
+    <method name="Activate">
+      <arg name="x" type="i" direction="in"/>
+      <arg name="y" type="i" direction="in"/>
+    </method>
+    <method name="SecondaryActivate">
+      <arg name="x" type="i" direction="in"/>
+      <arg name="y" type="i" direction="in"/>
+    </method>
+    <method name="Scroll">
+      <arg name="delta" type="i" direction="in"/>
+      <arg name="orientation" type="s" direction="in"/>
+    </method>
+    <signal name="NewTitle"/>
+    <signal name="NewIcon"/>
+    <signal name="NewAttentionIcon"/>
+    <signal name="NewOverlayIcon"/>
+    <signal name="NewToolTip"/>
+    <signal name="NewStatus">
+      <arg name="status" type="s"/>
+    </signal>
+  </interface>
+</node>
+"""
 
-def _pystray_available() -> bool:
-    """Whether the pystray fallback can be constructed."""
-    try:
-        import pystray  # noqa: F401
-        from PIL import Image  # noqa: F401
-        return True
-    except Exception:
-        return False
+_MENU_XML = """
+<node>
+  <interface name="com.canonical.dbusmenu">
+    <property name="Version" type="u" access="read"/>
+    <property name="TextDirection" type="s" access="read"/>
+    <property name="Status" type="s" access="read"/>
+    <property name="IconThemePath" type="as" access="read"/>
+    <method name="GetLayout">
+      <arg name="parentId" type="i" direction="in"/>
+      <arg name="recursionDepth" type="i" direction="in"/>
+      <arg name="propertyNames" type="as" direction="in"/>
+      <arg name="revision" type="u" direction="out"/>
+      <arg name="layout" type="(ia{sv}av)" direction="out"/>
+    </method>
+    <method name="GetGroupProperties">
+      <arg name="ids" type="ai" direction="in"/>
+      <arg name="propertyNames" type="as" direction="in"/>
+      <arg name="properties" type="a(ia{sv})" direction="out"/>
+    </method>
+    <method name="GetProperty">
+      <arg name="id" type="i" direction="in"/>
+      <arg name="name" type="s" direction="in"/>
+      <arg name="value" type="v" direction="out"/>
+    </method>
+    <method name="Event">
+      <arg name="id" type="i" direction="in"/>
+      <arg name="eventId" type="s" direction="in"/>
+      <arg name="data" type="v" direction="in"/>
+      <arg name="timestamp" type="u" direction="in"/>
+    </method>
+    <method name="EventGroup">
+      <arg name="events" type="a(isvu)" direction="in"/>
+      <arg name="idErrors" type="ai" direction="out"/>
+    </method>
+    <method name="AboutToShow">
+      <arg name="id" type="i" direction="in"/>
+      <arg name="needUpdate" type="b" direction="out"/>
+    </method>
+    <method name="AboutToShowGroup">
+      <arg name="ids" type="ai" direction="in"/>
+      <arg name="updatesNeeded" type="ai" direction="out"/>
+      <arg name="idErrors" type="ai" direction="out"/>
+    </method>
+    <signal name="ItemsPropertiesUpdated">
+      <arg name="updatedProps" type="a(ia{sv})"/>
+      <arg name="removedProps" type="a(ias)"/>
+    </signal>
+    <signal name="LayoutUpdated">
+      <arg name="revision" type="u"/>
+      <arg name="parent" type="i"/>
+    </signal>
+    <signal name="ItemActivationRequested">
+      <arg name="id" type="i"/>
+      <arg name="timestamp" type="u"/>
+    </signal>
+  </interface>
+</node>
+"""
 
-
-def _choose_tray_backend(
-    statusicon_embedded: bool,
-    indicator_available: bool,
-    pystray_available: bool,
-) -> str | None:
-    """Pure backend-selection policy, in priority order.
-
-    Returns one of ``"statusicon"`` | ``"indicator"`` | ``"pystray"`` | ``None``.
-
-    Gtk.StatusIcon is preferred only when it actually embedded in a system tray
-    (that is the only path that gives a custom left-click); otherwise we fall
-    back to the AppIndicator backend, then pystray.
-    """
-    if statusicon_embedded:
-        return "statusicon"
-    if indicator_available:
-        return "indicator"
-    if pystray_available:
-        return "pystray"
-    return None
-
-
-# How long to wait for a freshly-created Gtk.StatusIcon to embed in the tray
-# before deciding it won't and falling back. is_embedded() is only reliable
-# after the tray manager has had a main-loop round-trip to respond.
-_EMBED_PROBE_MS = 600
+_WATCHER_NAME = "org.kde.StatusNotifierWatcher"
+_WATCHER_PATH = "/StatusNotifierWatcher"
+_ITEM_IFACE = "org.kde.StatusNotifierItem"
+_ITEM_PATH = "/StatusNotifierItem"
+_MENU_IFACE = "com.canonical.dbusmenu"
+_MENU_PATH = "/MenuBar"
 
 
 class TrayIcon:
-    """
-    System tray icon that reflects recording state and lists background jobs.
+    """StatusNotifierItem tray icon driven over D-Bus.
 
-    Prefers a Gtk.StatusIcon (separate left/right click) when a legacy system
-    tray is present, falling back to AppIndicator, then pystray.
+    Public API (unchanged from the GTK3 version): construct with the main
+    window, then call ``update(recording_state, jobs)`` whenever state changes.
+    ``jobs`` is a list of ``(label, cancel_fn)`` tuples.
     """
 
     def __init__(self, window) -> None:
         self._window = window
-        self._impl: _IndicatorTray | _StatusIconTray | _PystrayTray | None = None
         self._recording_state = "idle"
         self._jobs: list = []
-        self._init_backend()
+        self._icon_name = icon_for_state("idle", [])
 
-    def update(self, recording_state: str, jobs: list) -> None:
-        """
-        Update tray icon and menu.
+        # Menu state: materialised item list + a monotonically increasing
+        # revision the host watches via LayoutUpdated.
+        self._menu_items: list[dict] = self._materialize_menu()
+        self._revision = 1
 
-        recording_state: "idle" | "recording" | "paused"
-        jobs: list of (label: str, cancel_fn: callable) for active processing jobs
-        """
-        self._recording_state = recording_state
-        self._jobs = jobs
-        if self._impl:
-            self._impl.update(recording_state, jobs)
+        self._conn: Gio.DBusConnection | None = None
+        self._bus_name = f"org.kde.StatusNotifierItem-{os.getpid()}-1"
+        self._owner_id = 0
+        self._watch_id = 0
+        self._item_reg_id = 0
+        self._menu_reg_id = 0
+        # We must own self._bus_name before telling the watcher to register it,
+        # otherwise the watcher can't reach the item. Both name-ownership and the
+        # watcher-appeared signal are async, so we register only once the name is
+        # acquired (from whichever callback fires last).
+        self._name_acquired = False
+
+        self._setup_dbus()
 
     # ------------------------------------------------------------------
-    def _init_backend(self) -> None:
-        # Try Gtk.StatusIcon first and show it provisionally; if it doesn't
-        # embed within the probe window (e.g. GNOME/Wayland) it's invisible
-        # anyway, so swapping it for the AppIndicator backend causes no flicker.
-        try:
-            provisional = _StatusIconTray(self._window)
-        except Exception as exc:
-            logger.debug("Gtk.StatusIcon backend unavailable: %s", exc)
-            self._build(_choose_tray_backend(False, _INDICATOR_AVAILABLE, _pystray_available()))
-            return
-
-        self._impl = provisional
-        from ..utils.glib_bridge import timeout_call
-        timeout_call(_EMBED_PROBE_MS, self._confirm_or_fallback, provisional)
-
-    def _confirm_or_fallback(self, provisional: "_StatusIconTray") -> None:
-        try:
-            embedded = provisional.is_embedded()
-        except Exception:
-            embedded = False
-
-        backend = _choose_tray_backend(
-            embedded, _INDICATOR_AVAILABLE, _pystray_available()
-        )
-        if backend == "statusicon":
-            logger.info("Tray: using Gtk.StatusIcon backend (left-click focuses window)")
-            return
-
-        # Did not embed — discard the invisible status icon and fall back.
-        logger.info("Tray: Gtk.StatusIcon did not embed — falling back to %s", backend)
-        provisional.destroy()
-        if self._impl is provisional:
-            self._impl = None
-        self._build(backend)
-
-    def _build(self, backend: str | None) -> None:
-        if backend == "indicator":
-            self._impl = _IndicatorTray(self._window)
-        elif backend == "pystray":
-            try:
-                self._impl = _PystrayTray(self._window)
-            except Exception as exc:
-                logger.warning("pystray unavailable: %s", exc)
-                self._impl = None
-        else:
-            logger.warning("No system tray backend available")
-            self._impl = None
-
-        if self._impl is not None:
-            self._impl.update(self._recording_state, self._jobs)
-
-
-class _GtkMenuTray:
-    """
-    Shared GTK menu construction, state handling, and action handlers for the
-    indicator and Gtk.StatusIcon backends. Subclasses differ only in how the
-    icon is set (``_set_icon``), how the menu is attached after a rebuild
-    (``_on_menu_built``), and how clicks are wired.
-    """
-
-    def __init__(self, window) -> None:
-        import gi
-        gi.require_version("Gtk", "3.0")
-        from gi.repository import Gtk
-
-        self._window = window
-        self._Gtk = Gtk
-        self._recording_state = "idle"
-        self._jobs: list = []
-        self._menu = Gtk.Menu()
-        self._build_menu()
-
-    # -- menu ----------------------------------------------------------
-    def _build_menu(self) -> None:
-        from gi.repository import Gtk
-        for child in self._menu.get_children():
-            self._menu.remove(child)
-
-        state = self._recording_state
-        jobs = self._jobs
-
-        # Recording controls — always reflect current recording state
-        if state == "idle":
-            self._add_item("Record (Headphones)", self._on_start_headphones)
-            self._add_item("Record (Speaker)", self._on_start_speaker)
-            self._add_item("Use Existing Recording", self._on_use_existing)
-        elif state == "recording":
-            self._add_item("Pause Recording", self._on_pause)
-            self._add_item("Stop Recording", self._on_stop)
-            self._add_item("Cancel (save recording)", self._on_cancel_save)
-            self._add_item("Cancel", self._on_cancel)
-        elif state == "paused":
-            self._add_item("Resume Recording", self._on_resume)
-            self._add_item("Stop Recording", self._on_stop)
-            self._add_item("Cancel (save recording)", self._on_cancel_save)
-            self._add_item("Cancel", self._on_cancel)
-
-        # Background jobs section (only shown when jobs are active)
-        if jobs:
-            self._menu.append(Gtk.SeparatorMenuItem())
-            header = Gtk.MenuItem(label=f"Processing ({len(jobs)} active)")
-            header.set_sensitive(False)
-            self._menu.append(header)
-            for label, cancel_fn in jobs:
-                self._add_item(f"  Cancel: {label}", cancel_fn)
-
-        # Footer
-        self._menu.append(Gtk.SeparatorMenuItem())
-        self._add_item("Show Window", self._on_show)
-        self._add_item("Quit", self._on_quit)
-
-        self._menu.show_all()
-        self._on_menu_built()
-
-    def _on_menu_built(self) -> None:
-        """Hook: re-attach the menu after a rebuild. Default is a no-op."""
-
-    def _add_item(self, label: str, callback) -> None:
-        from gi.repository import Gtk
-        item = Gtk.MenuItem(label=label)
-        item.connect("activate", lambda *_: callback())
-        self._menu.append(item)
+    # Public API
+    # ------------------------------------------------------------------
 
     def update(self, recording_state: str, jobs: list) -> None:
         self._recording_state = recording_state
         self._jobs = jobs
-        self._build_menu()
+        self._icon_name = icon_for_state(recording_state, jobs)
+        self._menu_items = self._materialize_menu()
+        self._revision += 1
+        self._emit_signal(_ITEM_PATH, _ITEM_IFACE, "NewIcon", None)
+        self._emit_signal(
+            _MENU_PATH, _MENU_IFACE, "LayoutUpdated",
+            GLib.Variant("(ui)", (self._revision, 0)),
+        )
 
-        # Icon priority: recording > paused > jobs processing > idle
-        if recording_state == "recording":
-            icon = "media-record"
-        elif recording_state == "paused":
-            icon = "media-playback-pause"
-        elif jobs:
-            icon = "system-run"
+    # ------------------------------------------------------------------
+    # D-Bus setup
+    # ------------------------------------------------------------------
+
+    def _setup_dbus(self) -> None:
+        self._conn = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+
+        item_node = Gio.DBusNodeInfo.new_for_xml(_SNI_XML)
+        self._item_reg_id = self._conn.register_object(
+            _ITEM_PATH, item_node.interfaces[0],
+            self._sni_method, self._sni_get_property, None,
+        )
+        menu_node = Gio.DBusNodeInfo.new_for_xml(_MENU_XML)
+        self._menu_reg_id = self._conn.register_object(
+            _MENU_PATH, menu_node.interfaces[0],
+            self._menu_method, self._menu_get_property, None,
+        )
+
+        # Own a per-process well-known name (libappindicator convention) so the
+        # watcher can address us by it. Registration is (re)attempted once the
+        # name is actually acquired.
+        self._owner_id = Gio.bus_own_name_on_connection(
+            self._conn, self._bus_name, Gio.BusNameOwnerFlags.NONE,
+            self._on_name_acquired, None,
+        )
+        # Register whenever the watcher is/becomes present — fires immediately if
+        # a host already exists, and again if the host (e.g. the GNOME extension)
+        # restarts. Guarded on name acquisition so we never register a name we
+        # don't yet own.
+        self._watch_id = Gio.bus_watch_name_on_connection(
+            self._conn, _WATCHER_NAME, Gio.BusNameWatcherFlags.NONE,
+            lambda *_: self._register_with_watcher(), None,
+        )
+
+    def _on_name_acquired(self, _conn, _name) -> None:
+        self._name_acquired = True
+        self._register_with_watcher()
+
+    def _register_with_watcher(self) -> None:
+        if self._conn is None or not self._name_acquired:
+            return
+
+        def _done(conn, result):
+            try:
+                conn.call_finish(result)
+                logger.info("Tray: registered StatusNotifierItem with watcher")
+            except GLib.Error as exc:
+                logger.info("Tray: no StatusNotifierWatcher available (%s)", exc)
+
+        self._conn.call(
+            _WATCHER_NAME, _WATCHER_PATH, _WATCHER_NAME,
+            "RegisterStatusNotifierItem",
+            GLib.Variant("(s)", (self._bus_name,)),
+            None, Gio.DBusCallFlags.NONE, -1, None, _done,
+        )
+
+    def _emit_signal(self, path: str, iface: str, name: str, body) -> None:
+        if self._conn is None:
+            return
+        try:
+            self._conn.emit_signal(None, path, iface, name, body)
+        except GLib.Error as exc:
+            logger.debug("Tray: failed to emit %s: %s", name, exc)
+
+    # ------------------------------------------------------------------
+    # StatusNotifierItem interface
+    # ------------------------------------------------------------------
+
+    def _sni_get_property(self, _conn, _sender, _path, _iface, prop):
+        values = {
+            "Category": GLib.Variant("s", "ApplicationStatus"),
+            "Id": GLib.Variant("s", "meeting-recorder"),
+            "Title": GLib.Variant("s", "Meeting Recorder"),
+            "Status": GLib.Variant("s", "Active"),
+            "WindowId": GLib.Variant("u", 0),
+            "IconName": GLib.Variant("s", self._icon_name),
+            "IconThemePath": GLib.Variant("s", ""),
+            "ItemIsMenu": GLib.Variant("b", False),
+            "Menu": GLib.Variant("o", _MENU_PATH),
+            "ToolTip": GLib.Variant(
+                "(sa(iiay)ss)", ("", [], "Meeting Recorder", "")
+            ),
+        }
+        return values.get(prop)
+
+    def _sni_method(self, _conn, _sender, _path, _iface, method, _params, invocation):
+        # Left-click → focus the window. Runs on the GTK main thread (the D-Bus
+        # connection is owned by the main-loop context), so call directly.
+        if method == "Activate":
+            self._window.present_window()
+        invocation.return_value(None)
+
+    # ------------------------------------------------------------------
+    # com.canonical.dbusmenu interface
+    # ------------------------------------------------------------------
+
+    def _menu_get_property(self, _conn, _sender, _path, _iface, prop):
+        values = {
+            "Version": GLib.Variant("u", 3),
+            "TextDirection": GLib.Variant("s", "ltr"),
+            "Status": GLib.Variant("s", "normal"),
+            "IconThemePath": GLib.Variant("as", []),
+        }
+        return values.get(prop)
+
+    def _menu_method(self, _conn, _sender, _path, _iface, method, params, invocation):
+        if method == "GetLayout":
+            # The `av` children are variant ('v') leaves, so each must be a
+            # GLib.Variant; the enclosing root struct is passed as a plain tuple
+            # (PyGObject builds the struct field from raw values, not a pre-made
+            # Variant).
+            children = [
+                GLib.Variant("(ia{sv}av)", (item["id"], self._item_props(item), []))
+                for item in self._menu_items
+            ]
+            invocation.return_value(
+                GLib.Variant("(u(ia{sv}av))", (self._revision, (0, {}, children)))
+            )
+        elif method == "GetGroupProperties":
+            ids, _props = params.unpack()
+            wanted = set(ids)
+            result = [
+                (item["id"], self._item_props(item))
+                for item in self._menu_items
+                if not wanted or item["id"] in wanted
+            ]
+            invocation.return_value(GLib.Variant("(a(ia{sv}))", (result,)))
+        elif method == "GetProperty":
+            item_id, name = params.unpack()
+            item = self._find_item(item_id)
+            val = self._item_props(item).get(name) if item else None
+            invocation.return_value(
+                GLib.Variant("(v)", (val or GLib.Variant("s", ""),))
+            )
+        elif method == "Event":
+            item_id, event_id, _data, _ts = params.unpack()
+            if event_id == "clicked":
+                self._on_menu_clicked(item_id)
+            invocation.return_value(None)
+        elif method == "EventGroup":
+            events, = params.unpack()
+            for item_id, event_id, _data, _ts in events:
+                if event_id == "clicked":
+                    self._on_menu_clicked(item_id)
+            invocation.return_value(GLib.Variant("(ai)", ([],)))
+        elif method == "AboutToShow":
+            invocation.return_value(GLib.Variant("(b)", (False,)))
+        elif method == "AboutToShowGroup":
+            invocation.return_value(GLib.Variant("(aiai)", ([], [])))
         else:
-            icon = "audio-input-microphone"
+            invocation.return_value(None)
 
-        self._set_icon(icon, recording_state)
+    def _item_props(self, item: dict) -> dict:
+        if item.get("type") == "separator":
+            # Some dbusmenu clients warn on missing standard boolean props, so
+            # declare them explicitly. build_menu_model only emits separators
+            # where one belongs, so a tray separator is always visible.
+            return {
+                "type": GLib.Variant("s", "separator"),
+                "visible": GLib.Variant("b", True),
+                "enabled": GLib.Variant("b", True),
+            }
+        return {
+            "label": GLib.Variant("s", item.get("label", "")),
+            "enabled": GLib.Variant("b", item.get("enabled", True)),
+            "visible": GLib.Variant("b", True),
+        }
 
-    def _set_icon(self, icon_name: str, state: str) -> None:
-        raise NotImplementedError
+    # ------------------------------------------------------------------
+    # Menu model materialisation + action dispatch
+    # ------------------------------------------------------------------
 
-    # -- action handlers (shared) -------------------------------------
-    def _on_start_headphones(self) -> None:
+    def _materialize_menu(self) -> list[dict]:
+        """Assign stable integer ids (1..N) to the pure menu model."""
+        model = build_menu_model(self._recording_state, self._jobs)
+        for i, item in enumerate(model, start=1):
+            item["id"] = i
+        return model
+
+    def _find_item(self, item_id: int) -> dict | None:
+        for item in self._menu_items:
+            if item["id"] == item_id:
+                return item
+        return None
+
+    def _on_menu_clicked(self, item_id: int) -> None:
+        item = self._find_item(item_id)
+        if not item or item.get("type") != "action" or not item.get("enabled", True):
+            return
+        self._dispatch_action(item["action"], item.get("job_index"))
+
+    def _dispatch_action(self, action: str, job_index=None) -> None:
         from ..utils.glib_bridge import idle_call
-        idle_call(self._window.on_record_headphones_clicked)
+        w = self._window
+        handlers = {
+            "record_headphones": w.on_record_headphones_clicked,
+            "record_speaker": w.on_record_speaker_clicked,
+            "use_existing": w.on_use_existing_clicked,
+            "pause": w.on_pause_clicked,
+            "resume": w.on_resume_clicked,
+            "stop": w.on_stop_clicked,
+            "cancel_save": w.on_cancel_save_clicked,
+            "cancel": w.on_cancel_clicked,
+        }
+        if action in handlers:
+            idle_call(handlers[action])
+        elif action == "show":
+            # Direct call keeps the click context for window focusing.
+            w.present_window()
+        elif action == "quit":
+            self._quit()
+        elif action == "cancel_job":
+            if job_index is not None and 0 <= job_index < len(self._jobs):
+                # cancel_fn already marshals onto the main thread via idle_call.
+                self._jobs[job_index][1]()
 
-    def _on_start_speaker(self) -> None:
+    def _quit(self) -> None:
         from ..utils.glib_bridge import idle_call
-        idle_call(self._window.on_record_speaker_clicked)
 
-    def _on_use_existing(self) -> None:
-        from ..utils.glib_bridge import idle_call
-        idle_call(self._window.on_use_existing_clicked)
-
-    def _on_pause(self) -> None:
-        from ..utils.glib_bridge import idle_call
-        idle_call(self._window.on_pause_clicked)
-
-    def _on_resume(self) -> None:
-        from ..utils.glib_bridge import idle_call
-        idle_call(self._window.on_resume_clicked)
-
-    def _on_stop(self) -> None:
-        from ..utils.glib_bridge import idle_call
-        idle_call(self._window.on_stop_clicked)
-
-    def _on_cancel_save(self) -> None:
-        from ..utils.glib_bridge import idle_call
-        idle_call(self._window.on_cancel_save_clicked)
-
-    def _on_cancel(self) -> None:
-        from ..utils.glib_bridge import idle_call
-        idle_call(self._window.on_cancel_clicked)
-
-    def _on_show(self) -> None:
-        # Runs on the GTK main thread within the menu "activate" event — call
-        # present_window() directly. Deferring via idle_add would clear the GDK
-        # event context, zeroing Gtk.get_current_event_time() and defeating the
-        # X11 focus-stealing-prevention timestamp.
-        self._window.present_window()
-
-    def _on_quit(self) -> None:
-        from gi.repository import GLib
         def _do_quit():
             if self._window._recorder:
                 self._window._recorder.stop()
             self._window.get_application().quit()
-        GLib.idle_add(_do_quit)
 
-
-class _IndicatorTray(_GtkMenuTray):
-    """AyatanaAppIndicator3-based tray. Menu opens on any click (no left-click
-    action is possible on this backend)."""
-
-    def __init__(self, window) -> None:
-        self._indicator = AyatanaAppIndicator3.Indicator.new(
-            "meeting-recorder",
-            "audio-input-microphone",
-            AyatanaAppIndicator3.IndicatorCategory.APPLICATION_STATUS,
-        )
-        self._indicator.set_status(AyatanaAppIndicator3.IndicatorStatus.ACTIVE)
-        super().__init__(window)
-
-    def _on_menu_built(self) -> None:
-        self._indicator.set_menu(self._menu)
-
-    def _set_icon(self, icon_name: str, state: str) -> None:
-        self._indicator.set_icon_full(icon_name, state)
-
-
-class _StatusIconTray(_GtkMenuTray):
-    """Gtk.StatusIcon (legacy XEmbed) tray. Left-click focuses the window,
-    right-click opens the context menu — separate signals."""
-
-    def __init__(self, window) -> None:
-        import gi
-        gi.require_version("Gtk", "3.0")
-        from gi.repository import Gtk
-
-        self._status_icon = Gtk.StatusIcon.new_from_icon_name("audio-input-microphone")
-        self._status_icon.set_title("Meeting Recorder")
-        self._status_icon.connect("activate", self._on_activate)
-        self._status_icon.connect("popup-menu", self._on_popup_menu)
-        super().__init__(window)
-
-    # Left-click → bring the window up and focus it.
-    def _on_activate(self, _status_icon) -> None:
-        # Runs on the GTK main thread within the click event — call directly so
-        # Gtk.get_current_event_time() keeps the real timestamp (idle_add would
-        # zero it and defeat X11 focus-stealing prevention).
-        self._window.present_window()
-
-    # Right-click → context menu, anchored to the tray icon.
-    def _on_popup_menu(self, status_icon, button, activate_time) -> None:
-        # position_menu anchors the menu next to the icon for both mouse and
-        # keyboard triggers, unlike popup_at_pointer (which follows the cursor).
-        self._menu.popup(
-            None, None, self._Gtk.StatusIcon.position_menu,
-            status_icon, button, activate_time,
-        )
-
-    def _set_icon(self, icon_name: str, state: str) -> None:
-        self._status_icon.set_from_icon_name(icon_name)
-
-    def is_embedded(self) -> bool:
-        return bool(self._status_icon.is_embedded())
-
-    def destroy(self) -> None:
-        if self._status_icon is not None:
-            self._status_icon.set_visible(False)
-            self._status_icon = None
-
-
-class _PystrayTray:
-    """pystray fallback implementation."""
-
-    def __init__(self, window) -> None:
-        import pystray
-        from PIL import Image, ImageDraw
-
-        self._window = window
-        self._recording_state = "idle"
-        self._jobs: list = []
-        self._pystray = pystray
-
-        img = Image.new("RGB", (64, 64), color=(64, 64, 64))
-        draw = ImageDraw.Draw(img)
-        draw.ellipse([16, 16, 48, 48], fill=(220, 50, 50))
-        self._icon_image = img
-
-        self._icon = pystray.Icon(
-            "meeting-recorder",
-            self._icon_image,
-            "Meeting Recorder",
-            menu=self._build_menu(),
-        )
-        import threading
-        threading.Thread(target=self._icon.run, daemon=True).start()
-
-    def _build_menu(self):
-        import pystray
-        from ..utils.glib_bridge import idle_call
-
-        state = self._recording_state
-        jobs = self._jobs
-        items = []
-
-        if state == "idle":
-            items.append(pystray.MenuItem(
-                "Record (Headphones)",
-                lambda *_: idle_call(self._window.on_record_headphones_clicked),
-            ))
-            items.append(pystray.MenuItem(
-                "Record (Speaker)",
-                lambda *_: idle_call(self._window.on_record_speaker_clicked),
-            ))
-            items.append(pystray.MenuItem(
-                "Use Existing Recording",
-                lambda *_: idle_call(self._window.on_use_existing_clicked),
-            ))
-        elif state == "recording":
-            items.append(pystray.MenuItem(
-                "Pause Recording",
-                lambda *_: idle_call(self._window.on_pause_clicked),
-            ))
-            items.append(pystray.MenuItem(
-                "Stop Recording",
-                lambda *_: idle_call(self._window.on_stop_clicked),
-            ))
-        elif state == "paused":
-            items.append(pystray.MenuItem(
-                "Resume Recording",
-                lambda *_: idle_call(self._window.on_resume_clicked),
-            ))
-            items.append(pystray.MenuItem(
-                "Stop Recording",
-                lambda *_: idle_call(self._window.on_stop_clicked),
-            ))
-
-        if jobs:
-            items.append(pystray.MenuItem(
-                f"Processing ({len(jobs)} active)", lambda *_: None, enabled=False
-            ))
-            for label, cancel_fn in jobs:
-                items.append(pystray.MenuItem(f"  Cancel: {label}", cancel_fn))
-
-        items.append(pystray.MenuItem(
-            "Show Window", lambda *_: idle_call(self._window.present_window)
-        ))
-        items.append(pystray.MenuItem("Quit", lambda *_: self._do_quit()))
-
-        return pystray.Menu(*items)
-
-    def _do_quit(self) -> None:
-        from ..utils.glib_bridge import idle_call
-        def _quit():
-            if self._window._recorder:
-                self._window._recorder.stop()
-            self._window.get_application().quit()
-        idle_call(_quit)
-
-    def update(self, recording_state: str, jobs: list) -> None:
-        self._recording_state = recording_state
-        self._jobs = jobs
-        self._icon.menu = self._build_menu()
-        self._icon.update_menu()
+        idle_call(_do_quit)
