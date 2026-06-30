@@ -320,20 +320,22 @@ class TrayIcon:
     # ------------------------------------------------------------------
 
     def _sni_get_property(self, _conn, _sender, _path, _iface, prop):
+        pixmaps = _load_icon_pixmaps(self._icon_name)
+        # Prefer the ARGB pixmaps and send an empty IconName: several SNI hosts
+        # (notably the GNOME AppIndicator extension) prefer IconName and, when it
+        # fails to resolve in the icon theme — which it won't when running from
+        # source — show a fallback placeholder *instead of* falling back to
+        # IconPixmap. An empty name forces every host onto our per-state pixmaps.
+        # Only if the bundled pixmaps fail to load do we fall back to the icon
+        # name, so the tray still shows *something* rather than going invisible.
         values = {
             "Category": GLib.Variant("s", "ApplicationStatus"),
             "Id": GLib.Variant("s", "meeting-recorder"),
             "Title": GLib.Variant("s", "Meeting Recorder"),
             "Status": GLib.Variant("s", "Active"),
             "WindowId": GLib.Variant("u", 0),
-            # Deliberately empty: several SNI hosts (notably the GNOME
-            # AppIndicator extension) prefer IconName and, when it fails to
-            # resolve in the icon theme — which it won't when running from source
-            # — show a fallback placeholder *instead of* falling back to
-            # IconPixmap. Sending no name forces every host onto our per-state
-            # ARGB pixmaps, which always render regardless of theme install.
-            "IconName": GLib.Variant("s", ""),
-            "IconPixmap": GLib.Variant("a(iiay)", _load_icon_pixmaps(self._icon_name)),
+            "IconName": GLib.Variant("s", "" if pixmaps else self._icon_name),
+            "IconPixmap": GLib.Variant("a(iiay)", pixmaps),
             "IconThemePath": GLib.Variant("s", ""),
             "ItemIsMenu": GLib.Variant("b", False),
             "Menu": GLib.Variant("o", _MENU_PATH),
