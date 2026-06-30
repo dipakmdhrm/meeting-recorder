@@ -163,6 +163,11 @@ class TrayIcon:
         self._watch_id = 0
         self._item_reg_id = 0
         self._menu_reg_id = 0
+        # We must own self._bus_name before telling the watcher to register it,
+        # otherwise the watcher can't reach the item. Both name-ownership and the
+        # watcher-appeared signal are async, so we register only once the name is
+        # acquired (from whichever callback fires last).
+        self._name_acquired = False
 
         self._setup_dbus()
 
@@ -201,20 +206,27 @@ class TrayIcon:
         )
 
         # Own a per-process well-known name (libappindicator convention) so the
-        # watcher can address us by it.
+        # watcher can address us by it. Registration is (re)attempted once the
+        # name is actually acquired.
         self._owner_id = Gio.bus_own_name_on_connection(
-            self._conn, self._bus_name, Gio.BusNameOwnerFlags.NONE, None, None,
+            self._conn, self._bus_name, Gio.BusNameOwnerFlags.NONE,
+            self._on_name_acquired, None,
         )
         # Register whenever the watcher is/becomes present — fires immediately if
         # a host already exists, and again if the host (e.g. the GNOME extension)
-        # restarts. This is the single registration path.
+        # restarts. Guarded on name acquisition so we never register a name we
+        # don't yet own.
         self._watch_id = Gio.bus_watch_name_on_connection(
             self._conn, _WATCHER_NAME, Gio.BusNameWatcherFlags.NONE,
             lambda *_: self._register_with_watcher(), None,
         )
 
+    def _on_name_acquired(self, _conn, _name) -> None:
+        self._name_acquired = True
+        self._register_with_watcher()
+
     def _register_with_watcher(self) -> None:
-        if self._conn is None:
+        if self._conn is None or not self._name_acquired:
             return
 
         def _done(conn, result):
@@ -329,7 +341,14 @@ class TrayIcon:
 
     def _item_props(self, item: dict) -> dict:
         if item.get("type") == "separator":
-            return {"type": GLib.Variant("s", "separator")}
+            # Some dbusmenu clients warn on missing standard boolean props, so
+            # declare them explicitly. build_menu_model only emits separators
+            # where one belongs, so a tray separator is always visible.
+            return {
+                "type": GLib.Variant("s", "separator"),
+                "visible": GLib.Variant("b", True),
+                "enabled": GLib.Variant("b", True),
+            }
         return {
             "label": GLib.Variant("s", item.get("label", "")),
             "enabled": GLib.Variant("b", item.get("enabled", True)),
