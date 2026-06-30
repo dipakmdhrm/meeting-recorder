@@ -11,8 +11,9 @@ from pathlib import Path
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
+gi.require_version("Adw", "1")
 gi.require_version("Pango", "1.0")
-from gi.repository import Gdk, Gtk, GLib, Pango
+from gi.repository import Gdk, Gtk, GLib, Pango, Adw
 
 from meeting_recorder.config import settings
 from meeting_recorder.config.defaults import TITLE_PROMPT
@@ -40,6 +41,7 @@ class MeetingExplorer(Gtk.Box):
 
         # Toolbar
         toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        toolbar.add_css_class("toolbar")
         toolbar.set_margin_top(12)
         toolbar.set_margin_bottom(8)
         toolbar.set_margin_start(16)
@@ -71,17 +73,24 @@ class MeetingExplorer(Gtk.Box):
         self._error_label.set_visible(False)
         self.append(self._error_label)
 
-        # Scrollable meeting list
-        self._list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        self._list_box.set_margin_start(16)
-        self._list_box.set_margin_end(16)
-        self._list_box.set_margin_bottom(16)
+        # Scrollable meeting list — a libadwaita boxed list, centred via a clamp.
+        self._list_box = Gtk.ListBox()
+        self._list_box.set_selection_mode(Gtk.SelectionMode.NONE)
+        self._list_box.add_css_class("boxed-list")
+        self._list_box.set_valign(Gtk.Align.START)
+
+        list_clamp = Adw.Clamp(maximum_size=760)
+        list_clamp.set_margin_top(4)
+        list_clamp.set_margin_bottom(16)
+        list_clamp.set_margin_start(12)
+        list_clamp.set_margin_end(12)
+        list_clamp.set_child(self._list_box)
 
         self._scroll = Gtk.ScrolledWindow()
         self._scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self._scroll.set_propagate_natural_height(True)
         self._scroll.set_vexpand(True)
-        self._scroll.set_child(self._list_box)
+        self._scroll.set_child(list_clamp)
         self.append(self._scroll)
 
         # Empty state label
@@ -118,8 +127,10 @@ class MeetingExplorer(Gtk.Box):
     def _add_meeting_row(self, meeting: Meeting) -> None:
         """Add a single meeting row to the list."""
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        row.set_margin_top(4)
-        row.set_margin_bottom(4)
+        row.set_margin_top(8)
+        row.set_margin_bottom(8)
+        row.set_margin_start(12)
+        row.set_margin_end(12)
 
         # Checkbox
         check = Gtk.CheckButton()
@@ -159,7 +170,9 @@ class MeetingExplorer(Gtk.Box):
 
         # AI Title button / status area
         ai_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        ai_box.set_valign(Gtk.Align.CENTER)
         ai_btn = Gtk.Button(icon_name="starred-symbolic")
+        ai_btn.add_css_class("flat")
         ai_btn.set_tooltip_text("Generate a title from meeting notes")
 
         # Build row_data dict before connecting signals that reference it
@@ -201,6 +214,8 @@ class MeetingExplorer(Gtk.Box):
             and not meeting.has_notes
         ):
             summarize_btn = Gtk.Button(icon_name="system-run-symbolic")
+            summarize_btn.add_css_class("flat")
+            summarize_btn.set_valign(Gtk.Align.CENTER)
             summarize_btn.set_tooltip_text("Transcribe and summarize this recording")
             summarize_btn.connect(
                 "clicked",
@@ -211,24 +226,36 @@ class MeetingExplorer(Gtk.Box):
 
         # Rename button
         rename_btn = Gtk.Button(icon_name="document-edit-symbolic")
+        rename_btn.add_css_class("flat")
+        rename_btn.set_valign(Gtk.Align.CENTER)
         rename_btn.set_tooltip_text("Rename meeting")
         rename_btn.connect("clicked", lambda *_, rd=row_data: self._on_rename_clicked(rd))
         row.append(rename_btn)
 
         # Open folder button
         folder_btn = Gtk.Button(icon_name="folder-open-symbolic")
+        folder_btn.add_css_class("flat")
+        folder_btn.set_valign(Gtk.Align.CENTER)
         folder_btn.set_tooltip_text("Open folder")
         folder_btn.connect("clicked", lambda *_, rd=row_data: self._open_folder(rd))
         row.append(folder_btn)
 
         # Per-row delete button
         del_btn = Gtk.Button(icon_name="user-trash-symbolic")
+        del_btn.add_css_class("flat")
+        del_btn.set_valign(Gtk.Align.CENTER)
         del_btn.set_tooltip_text("Delete this meeting")
         del_btn.connect("clicked", lambda *_, rd=row_data: self._on_delete_single(rd))
         row.append(del_btn)
 
+        # Wrap the row in a non-activatable ListBoxRow for the boxed-list look.
+        lb_row = Gtk.ListBoxRow()
+        lb_row.set_activatable(False)
+        lb_row.set_child(row)
+        row_data["row"] = lb_row
+
         self._meeting_rows.append(row_data)
-        self._list_box.append(row)
+        self._list_box.append(lb_row)
 
     def _update_delete_sensitivity(self) -> None:
         selected = any(rd["check"].get_active() for rd in self._meeting_rows)

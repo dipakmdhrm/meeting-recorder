@@ -10,6 +10,7 @@ Requires:       python3 >= 3.10
 Requires:       python3-pip
 Requires:       python3-gobject
 Requires:       gtk4
+Requires:       libadwaita
 Requires:       libnotify
 Requires:       ffmpeg
 Requires:       pulseaudio-utils

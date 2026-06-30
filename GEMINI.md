@@ -57,7 +57,7 @@ This repository is a monorepo containing two applications: a Linux desktop apple
 
 *   **Linux App:**
     *   **Language:** Python
-    *   **UI:** GTK4 (plain GTK4, no libadwaita; async `Gtk.AlertDialog`/`Gtk.FileDialog` instead of blocking `run()`).
+    *   **UI:** GTK4 + libadwaita (`Adw.Application`/`Adw.ApplicationWindow`, preference-row settings, toasts, dark-mode; async `Gtk.AlertDialog`/`Gtk.FileDialog` instead of blocking `run()`).
     *   **Base dependencies (`linux/requirements.txt`):** `google-genai`, `setproctitle` — Gemini-only, minimal.
     *   **Opt-in local engines (installed on demand from Settings → Models):** `faster-whisper` (NVIDIA/CPU) installed via pip; `whisper.cpp` built from source with the detected GPU backend (AMD ROCm/Vulkan, Apple Metal, NVIDIA CUDA, or CPU).
     *   **System tray:** a pure-DBus StatusNotifierItem (`org.kde.StatusNotifierItem` + `com.canonical.dbusmenu`) built on `Gio.DBusConnection` — no GTK widgets and no extra dependency (Gio ships with PyGObject). Left-click focuses the window where the SNI host delivers `Activate`, otherwise opens the menu. GNOME needs the AppIndicator/KStatusNotifierItem extension to provide the SNI host.

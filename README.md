@@ -6,7 +6,7 @@ This repository is a monorepo with two independent apps — a Linux desktop appl
 
 | Path | Contents |
 |---|---|
-| `linux/` | GTK4 desktop applet (Debian / Ubuntu / Fedora / Arch) |
+| `linux/` | GTK4 + libadwaita desktop applet (Debian / Ubuntu / Fedora / Arch) |
 | `android/` | Native Android app (Kotlin + Jetpack Compose) |
 
 ---
@@ -43,7 +43,9 @@ Each recording session creates a folder:
 ### Requirements
 
 - Linux with a supported package manager: **apt** (Debian/Ubuntu/Mint), **dnf** (Fedora/RHEL), or **pacman** (Arch/Manjaro). Works on both **x86_64** and **arm64/aarch64**.
-- System packages installed by `linux/install.sh`: `ffmpeg`, `pulseaudio-utils`, `pipewire-pulse`, Python 3 with GTK4 bindings
+- System packages installed by `linux/install.sh`: `ffmpeg`, `pulseaudio-utils`, `pipewire-pulse`, Python 3 with GTK4 + libadwaita bindings
+
+> **Look & theming:** the app uses **libadwaita**, so it follows your system **light/dark** preference and renders in the Adwaita style. On non-GNOME desktops (KDE, XFCE, Cinnamon, …) it still runs perfectly but keeps the Adwaita look rather than matching a custom desktop theme — this is libadwaita's intended behavior.
 - Python packages (installed into a venv): see `linux/requirements.txt`
 
 The base install is **Gemini-only and minimal** — no local engines or GPU libraries are installed by default. Each local option below is installed **on demand** from **Settings → Models** when you choose it.
@@ -367,7 +369,7 @@ set -x KEY_PASSWORD your_key_pass
 
 ```
 linux/
-├── src/meeting_recorder/  # GTK4 desktop app (Python)
+├── src/meeting_recorder/  # GTK4 + libadwaita desktop app (Python)
 ├── tests/                 # Unit tests
 ├── packaging/             # .deb / .rpm / PKGBUILD / launcher scripts
 ├── install.sh / uninstall.sh

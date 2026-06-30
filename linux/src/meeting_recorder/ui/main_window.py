@@ -16,7 +16,8 @@ from pathlib import Path
 
 import gi
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk, GLib, Gio
+gi.require_version("Adw", "1")
+from gi.repository import Gtk, GLib, Gio, Adw
 
 from meeting_recorder.config import settings
 from ..utils.glib_bridge import assert_main_thread, idle_call
@@ -58,24 +59,17 @@ def _format_time(seconds: int) -> str:
 
 
 def _icon_label_button(icon_name: str, label: str) -> "Gtk.Button":
-    """Build a button showing both an icon and a label.
-
-    GTK4 buttons display either an icon or a label by default (set_image() and
-    set_always_show_image() are gone), so we set an explicit icon+label box as
-    the button's child to reproduce the GTK3 look.
-    """
+    """Build a button showing both an icon and a label using Adw.ButtonContent
+    (the libadwaita idiom for icon+label buttons)."""
     btn = Gtk.Button()
-    box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-    box.append(Gtk.Image.new_from_icon_name(icon_name))
-    box.append(Gtk.Label(label=label))
-    btn.set_child(box)
+    btn.set_child(Adw.ButtonContent(icon_name=icon_name, label=label))
     return btn
 
 
-class MainWindow(Gtk.ApplicationWindow):
+class MainWindow(Adw.ApplicationWindow):
     def __init__(self, **kwargs) -> None:
         super().__init__(title="Meeting Recorder", **kwargs)
-        self.set_default_size(1200, 800)
+        self.set_default_size(1100, 760)
         self.set_resizable(True)
 
         self._state = State.IDLE
@@ -107,38 +101,42 @@ class MainWindow(Gtk.ApplicationWindow):
     # ------------------------------------------------------------------
 
     def _build_ui(self) -> None:
-        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        self.set_child(outer)
+        # Adw.ApplicationWindow has no separate titlebar slot — the whole window
+        # content is one widget. We use an AdwToolbarView (header bar + content)
+        # wrapped in an AdwToastOverlay so transient errors can appear as toasts.
+        self._toast_overlay = Adw.ToastOverlay()
+        self.set_content(self._toast_overlay)
 
-        # Error info bar (recording errors only — pipeline errors go in job rows)
-        self._info_bar = Gtk.InfoBar()
-        self._info_bar.set_message_type(Gtk.MessageType.ERROR)
-        self._info_bar_label = Gtk.Label(label="")
-        self._info_bar_label.set_wrap(True)
-        self._info_bar.add_child(self._info_bar_label)
-        self._info_bar.add_button("Dismiss", Gtk.ResponseType.CLOSE)
-        self._info_bar.connect("response", self._on_info_bar_response)
-        # GTK4 InfoBar shows/hides via the "revealed" property, not show_all().
-        self._info_bar.set_revealed(False)
-        outer.append(self._info_bar)
+        toolbar_view = Adw.ToolbarView()
+        self._toast_overlay.set_child(toolbar_view)
 
-        # Stack for views
-        self._stack = Gtk.Stack()
-        self._stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+        # View stack + switcher (replaces Gtk.Stack/StackSwitcher).
+        self._stack = Adw.ViewStack()
         self._stack.set_vexpand(True)
-        outer.append(self._stack)
+
+        switcher = Adw.ViewSwitcher()
+        switcher.set_stack(self._stack)
+        switcher.set_policy(Adw.ViewSwitcherPolicy.WIDE)
+
+        header = Adw.HeaderBar()
+        header.set_title_widget(switcher)
+        settings_btn = Gtk.Button(icon_name="preferences-system-symbolic")
+        settings_btn.set_tooltip_text("Settings")
+        settings_btn.connect("clicked", self._on_settings_clicked)
+        header.pack_end(settings_btn)
+        toolbar_view.add_top_bar(header)
+        toolbar_view.set_content(self._stack)
 
         # -------------------------------------------------------------
         # View 1: Recorder
         # -------------------------------------------------------------
-        recorder_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        recorder_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
+        recorder_box.set_margin_top(24)
+        recorder_box.set_margin_bottom(24)
+        recorder_box.set_margin_start(12)
+        recorder_box.set_margin_end(12)
 
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        vbox.set_margin_top(24)
-        vbox.set_margin_bottom(24)
-        vbox.set_margin_start(24)
-        vbox.set_margin_end(24)
-        recorder_box.append(vbox)
 
         # Timer label
         self._timer_label = Gtk.Label(label="00:00")
@@ -150,18 +148,17 @@ class MainWindow(Gtk.ApplicationWindow):
         self._status_label = Gtk.Label(label="")
         self._status_label.set_wrap(True)
         self._status_label.set_xalign(0.5)
+        self._status_label.add_css_class("dim-label")
         vbox.append(self._status_label)
 
-        # Meeting title entry
-        title_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        title_label = Gtk.Label(label="Title (optional):")
-        title_label.set_xalign(0)
-        self._title_entry = Gtk.Entry()
-        self._title_entry.set_placeholder_text("e.g. Standup, Sprint Planning…")
-        self._title_entry.set_hexpand(True)
-        title_box.append(title_label)
-        title_box.append(self._title_entry)
-        vbox.append(title_box)
+        # Meeting title entry (boxed-list row for the Adwaita look)
+        title_group = Adw.PreferencesGroup()
+        self._title_row = Adw.EntryRow(title="Title (optional)")
+        title_group.add(self._title_row)
+        # Expose a Gtk.Entry-compatible shim so the rest of the code can keep
+        # using get_text()/set_sensitive() on self._title_entry.
+        self._title_entry = self._title_row
+        vbox.append(title_group)
 
         # Button row
         self._button_box = Gtk.Box(
@@ -171,71 +168,47 @@ class MainWindow(Gtk.ApplicationWindow):
         vbox.append(self._button_box)
 
         # Output paths (shown after "cancel and save")
-        self._output_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self._output_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self._output_box.set_visible(False)
         self._output_label = Gtk.Label(label="")
         self._output_label.set_wrap(True)
         self._output_label.set_xalign(0)
+        self._output_label.add_css_class("dim-label")
         self._open_folder_btn = Gtk.Button(label="Open Output Folder")
+        self._open_folder_btn.set_halign(Gtk.Align.CENTER)
         self._open_folder_btn.connect("clicked", self._on_open_folder)
         self._output_box.append(self._output_label)
         self._output_box.append(self._open_folder_btn)
         vbox.append(self._output_box)
 
-        # Jobs section (hidden until there are jobs)
-        self._jobs_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        # Jobs section (hidden until there are jobs). Job rows are AdwActionRows
+        # added directly to the group's boxed list.
+        self._jobs_section = Adw.PreferencesGroup(title="Background Jobs")
         self._jobs_section.set_visible(False)
-        self._jobs_section.set_margin_start(24)
-        self._jobs_section.set_margin_end(24)
-        self._jobs_section.set_margin_bottom(12)
 
-        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-        self._jobs_section.append(sep)
+        vbox.append(self._jobs_section)
+        recorder_box.append(vbox)
 
-        jobs_hdr = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
-        jobs_hdr.set_margin_top(8)
-        hdr_label = Gtk.Label()
-        hdr_label.set_markup("<b>Background Jobs</b>")
-        hdr_label.set_xalign(0)
-        hdr_label.set_hexpand(True)
-        jobs_hdr.append(hdr_label)
-        self._jobs_section.append(jobs_hdr)
+        # Clamp keeps the recorder content centred at a comfortable width
+        # instead of stretching across a wide window.
+        clamp = Adw.Clamp(maximum_size=560)
+        clamp.set_child(recorder_box)
+        recorder_scroll = Gtk.ScrolledWindow()
+        recorder_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        recorder_scroll.set_child(clamp)
 
-        self._jobs_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        self._jobs_list.set_margin_top(4)
-        scroll = Gtk.ScrolledWindow()
-        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scroll.set_max_content_height(180)
-        scroll.set_propagate_natural_height(True)
-        scroll.set_child(self._jobs_list)
-        self._jobs_section.append(scroll)
-
-        recorder_box.append(self._jobs_section)
-
-        self._stack.add_titled(recorder_box, "recorder", "Record")
+        self._stack.add_titled_with_icon(
+            recorder_scroll, "recorder", "Record", "media-record-symbolic"
+        )
 
         # -------------------------------------------------------------
         # View 2: Meeting Explorer
         # -------------------------------------------------------------
         self._explorer = MeetingExplorer(on_summarize=self._on_summarize_from_explorer)
-        self._stack.add_titled(self._explorer, "explorer", "Library")
+        self._stack.add_titled_with_icon(
+            self._explorer, "explorer", "Library", "view-list-symbolic"
+        )
         self._stack.connect("notify::visible-child-name", self._on_stack_switched)
-
-        # HeaderBar with settings button and stack switcher
-        hb = Gtk.HeaderBar()
-        # GTK4 HeaderBar has no title/subtitle of its own — it shows the window
-        # title. Buttons are toggled via set_show_title_buttons().
-        hb.set_show_title_buttons(True)
-
-        switcher = Gtk.StackSwitcher()
-        switcher.set_stack(self._stack)
-        hb.set_title_widget(switcher)
-
-        settings_btn = Gtk.Button(icon_name="preferences-system")
-        settings_btn.set_tooltip_text("Settings")
-        settings_btn.connect("clicked", self._on_settings_clicked)
-        hb.pack_end(settings_btn)
-        self.set_titlebar(hb)
 
     def _on_stack_switched(self, stack, param):
         if stack.get_visible_child_name() == "explorer":
@@ -275,27 +248,31 @@ class MainWindow(Gtk.ApplicationWindow):
             record_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
             record_row.set_homogeneous(True)
 
-            headphones_btn = _icon_label_button("media-record", "Record (Headphones)")
+            headphones_btn = _icon_label_button("media-record-symbolic", "Record (Headphones)")
             headphones_btn.set_tooltip_text(
                 "Record mic + system audio. Use when wearing headphones."
             )
             headphones_btn.connect("clicked", lambda *_: self.on_record_headphones_clicked())
             headphones_btn.add_css_class("suggested-action")
+            headphones_btn.add_css_class("pill")
             headphones_btn.set_hexpand(True)
             record_row.append(headphones_btn)
 
-            speaker_btn = _icon_label_button("audio-volume-high", "Record (Speaker)")
+            speaker_btn = _icon_label_button("audio-input-microphone-symbolic", "Record (Speaker)")
             speaker_btn.set_tooltip_text(
                 "Record mic only. Use when on speaker to avoid echo."
             )
             speaker_btn.connect("clicked", lambda *_: self.on_record_speaker_clicked())
+            speaker_btn.add_css_class("pill")
             speaker_btn.set_hexpand(True)
             record_row.append(speaker_btn)
 
             idle_vbox.append(record_row)
 
-            existing_btn = _icon_label_button("document-open", "Use Existing Recording")
+            existing_btn = _icon_label_button("document-open-symbolic", "Use Existing Recording")
             existing_btn.connect("clicked", lambda *_: self.on_use_existing_clicked())
+            existing_btn.add_css_class("pill")
+            existing_btn.set_halign(Gtk.Align.CENTER)
             idle_vbox.append(existing_btn)
 
             self._button_box.append(idle_vbox)
@@ -304,22 +281,25 @@ class MainWindow(Gtk.ApplicationWindow):
             self._status_label.set_text(status or "Recording…")
             self._title_entry.set_sensitive(False)
             self._output_box.set_visible(False)
-            self._info_bar.set_revealed(False)
 
-            pause_btn = _icon_label_button("media-playback-pause", "Pause")
+            pause_btn = _icon_label_button("media-playback-pause-symbolic", "Pause")
             pause_btn.connect("clicked", lambda *_: self.on_pause_clicked())
+            pause_btn.add_css_class("pill")
             self._button_box.append(pause_btn)
 
-            stop_btn = _icon_label_button("media-playback-stop", "Stop")
+            stop_btn = _icon_label_button("media-playback-stop-symbolic", "Stop")
             stop_btn.connect("clicked", lambda *_: self.on_stop_clicked())
             stop_btn.add_css_class("destructive-action")
+            stop_btn.add_css_class("pill")
             self._button_box.append(stop_btn)
 
             save_btn = Gtk.Button(label="Cancel (save recording)")
+            save_btn.add_css_class("pill")
             save_btn.connect("clicked", lambda *_: self.on_cancel_save_clicked())
             self._button_box.append(save_btn)
 
             cancel_btn = Gtk.Button(label="Cancel")
+            cancel_btn.add_css_class("pill")
             cancel_btn.connect("clicked", lambda *_: self.on_cancel_clicked())
             self._button_box.append(cancel_btn)
 
@@ -327,21 +307,25 @@ class MainWindow(Gtk.ApplicationWindow):
             self._status_label.set_text(status or "Paused")
             self._title_entry.set_sensitive(False)
 
-            resume_btn = _icon_label_button("media-playback-start", "Resume")
+            resume_btn = _icon_label_button("media-playback-start-symbolic", "Resume")
             resume_btn.connect("clicked", lambda *_: self.on_resume_clicked())
             resume_btn.add_css_class("suggested-action")
+            resume_btn.add_css_class("pill")
             self._button_box.append(resume_btn)
 
-            stop_btn = _icon_label_button("media-playback-stop", "Stop")
+            stop_btn = _icon_label_button("media-playback-stop-symbolic", "Stop")
             stop_btn.connect("clicked", lambda *_: self.on_stop_clicked())
             stop_btn.add_css_class("destructive-action")
+            stop_btn.add_css_class("pill")
             self._button_box.append(stop_btn)
 
             save_btn = Gtk.Button(label="Cancel (save recording)")
+            save_btn.add_css_class("pill")
             save_btn.connect("clicked", lambda *_: self.on_cancel_save_clicked())
             self._button_box.append(save_btn)
 
             cancel_btn = Gtk.Button(label="Cancel")
+            cancel_btn.add_css_class("pill")
             cancel_btn.connect("clicked", lambda *_: self.on_cancel_clicked())
             self._button_box.append(cancel_btn)
 
@@ -352,6 +336,7 @@ class MainWindow(Gtk.ApplicationWindow):
             cancel_btn = Gtk.Button(label="Cancel")
             cancel_btn.connect("clicked", lambda *_: self.on_cancel_countdown_clicked())
             cancel_btn.add_css_class("destructive-action")
+            cancel_btn.add_css_class("pill")
             self._button_box.append(cancel_btn)
 
     def _notify_tray(self) -> None:
@@ -807,8 +792,8 @@ class MainWindow(Gtk.ApplicationWindow):
         widgets = self._job_widgets.pop(job.job_id, None)
         if widgets:
             row = widgets.get("row")
-            if row and row.get_parent() is self._jobs_list:
-                self._jobs_list.remove(row)
+            if row is not None:
+                self._jobs_section.remove(row)
         if job in self._jobs:
             self._jobs.remove(job)
         if not self._jobs:
@@ -823,43 +808,32 @@ class MainWindow(Gtk.ApplicationWindow):
         """Add a row for a new job to the jobs panel. Main thread only."""
         assert_main_thread()
 
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        row.set_margin_top(2)
-        row.set_margin_bottom(2)
+        row = Adw.ActionRow(title=job.label, subtitle="Processing…")
+        row.set_title_lines(1)
 
         spinner = Gtk.Spinner()
         spinner.start()
-        row.append(spinner)
+        spinner.set_valign(Gtk.Align.CENTER)
+        row.add_prefix(spinner)
 
-        status_icon = Gtk.Image.new_from_icon_name("system-run")
+        status_icon = Gtk.Image.new_from_icon_name("system-run-symbolic")
+        status_icon.set_valign(Gtk.Align.CENTER)
         status_icon.set_visible(False)
-        row.append(status_icon)
+        row.add_prefix(status_icon)
 
-        label_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        label_box.set_hexpand(True)
-        job_name_label = Gtk.Label(label=job.label)
-        job_name_label.set_xalign(0)
-        status_label = Gtk.Label(label="Processing…")
-        status_label.set_xalign(0)
-        label_box.append(job_name_label)
-        label_box.append(status_label)
-        row.append(label_box)
-
-        # The expanding label_box above pushes action_box to the right edge,
-        # reproducing the GTK3 row.pack_end(action_box) layout.
         action_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        row.append(action_box)
+        action_box.set_valign(Gtk.Align.CENTER)
+        row.add_suffix(action_box)
 
         self._job_widgets[job.job_id] = {
             "row": row,
             "spinner": spinner,
             "status_icon": status_icon,
-            "status_label": status_label,
             "action_box": action_box,
         }
         self._rebuild_action_box(job)
 
-        self._jobs_list.append(row)
+        self._jobs_section.add(row)
         self._jobs_section.set_visible(True)
 
     def _update_job_row(self, job: _Job) -> None:
@@ -871,7 +845,7 @@ class MainWindow(Gtk.ApplicationWindow):
 
         spinner: Gtk.Spinner = widgets["spinner"]
         status_icon: Gtk.Image = widgets["status_icon"]
-        status_label: Gtk.Label = widgets["status_label"]
+        row: Adw.ActionRow = widgets["row"]
 
         spinner.stop()
         spinner.set_visible(False)
@@ -879,11 +853,11 @@ class MainWindow(Gtk.ApplicationWindow):
 
         if job.status == "done":
             status_icon.set_from_icon_name("emblem-ok-symbolic")
-            status_label.set_text("Done")
+            row.set_subtitle("Done")
         elif job.status == "error":
-            status_icon.set_from_icon_name("dialog-error")
+            status_icon.set_from_icon_name("dialog-error-symbolic")
             err = (job.error_msg or "Error")[:60]
-            status_label.set_text(f"Error: {err}")
+            row.set_subtitle(f"Error: {err}")
 
         self._rebuild_action_box(job)
 
@@ -897,21 +871,25 @@ class MainWindow(Gtk.ApplicationWindow):
 
         if job.status == "processing":
             btn = Gtk.Button(label="Cancel")
+            btn.add_css_class("flat")
             btn.connect("clicked", lambda *_, j=job: self._on_cancel_job(j))
             action_box.append(btn)
         elif job.status == "done":
             btn = Gtk.Button(label="Open Folder")
+            btn.add_css_class("flat")
             btn.connect("clicked", lambda *_, j=job: self._on_open_job_folder(j))
             action_box.append(btn)
             action_box.append(self._make_dismiss_btn(job))
         elif job.status == "error":
             btn = Gtk.Button(label="Retry")
+            btn.add_css_class("flat")
             btn.connect("clicked", lambda *_, j=job: self._on_retry_job(j))
             action_box.append(btn)
             action_box.append(self._make_dismiss_btn(job))
 
     def _make_dismiss_btn(self, job: _Job) -> Gtk.Button:
-        btn = Gtk.Button(icon_name="window-close")
+        btn = Gtk.Button(icon_name="window-close-symbolic")
+        btn.add_css_class("flat")
         btn.set_tooltip_text("Dismiss")
         btn.connect("clicked", lambda *_, j=job: self._dismiss_job(j))
         return btn
@@ -921,7 +899,7 @@ class MainWindow(Gtk.ApplicationWindow):
         assert_main_thread()
         widgets = self._job_widgets.get(job.job_id)
         if widgets:
-            widgets["status_label"].set_text(msg)
+            widgets["row"].set_subtitle(msg)
 
     # ------------------------------------------------------------------
     # Recorder / pipeline callbacks (may arrive from background threads)
@@ -957,12 +935,11 @@ class MainWindow(Gtk.ApplicationWindow):
     def _show_error(self, msg: str) -> None:
         assert_main_thread()
         logger.error("UI error shown: %s", msg)
-        self._info_bar_label.set_text(msg)
-        self._info_bar_label.set_selectable(True)
-        self._info_bar.set_revealed(True)
-
-    def _on_info_bar_response(self, bar: Gtk.InfoBar, response_id: int) -> None:
-        bar.set_revealed(False)
+        # Recording/setup errors surface as an Adwaita toast (transient,
+        # dismissable). Pipeline errors still appear in their job row.
+        toast = Adw.Toast(title=msg)
+        toast.set_timeout(0)  # stays until dismissed or replaced
+        self._toast_overlay.add_toast(toast)
 
     # ------------------------------------------------------------------
     # Settings

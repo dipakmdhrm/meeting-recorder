@@ -10,6 +10,7 @@ depends=(
     'python-pip'
     'python-gobject'
     'gtk4'
+    'libadwaita'
     'libnotify'
     'ffmpeg'
     'libpulse'

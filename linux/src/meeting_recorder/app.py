@@ -12,7 +12,8 @@ from pathlib import Path
 
 import gi
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk, GLib, Gio
+gi.require_version("Adw", "1")
+from gi.repository import Gtk, GLib, Gio, Adw
 
 from meeting_recorder.config.defaults import APP_ID, APP_NAME
 from meeting_recorder.config import settings
@@ -33,7 +34,7 @@ def _check_system_deps() -> list[str]:
     return missing
 
 
-class MeetingRecorderApp(Gtk.Application):
+class MeetingRecorderApp(Adw.Application):
     def __init__(self) -> None:
         super().__init__(
             application_id=APP_ID,
@@ -45,7 +46,9 @@ class MeetingRecorderApp(Gtk.Application):
 
     # ------------------------------------------------------------------
     def do_startup(self) -> None:
-        Gtk.Application.do_startup(self)
+        # Chain up to Adw.Application so libadwaita is initialised (style manager,
+        # dark-mode portal, Adwaita stylesheet).
+        Adw.Application.do_startup(self)
         self._setup_logging()
         # Without hold(), GApplication exits as soon as the last window is hidden.
         # We hide to tray rather than closing, so we need to keep the app alive manually.
@@ -171,4 +174,4 @@ class MeetingRecorderApp(Gtk.Application):
         # exit but the child process would otherwise become an orphan.
         if self._call_detector is not None:
             self._call_detector.stop()
-        Gtk.Application.do_shutdown(self)
+        Adw.Application.do_shutdown(self)
