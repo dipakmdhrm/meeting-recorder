@@ -18,12 +18,75 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 
-from gi.repository import Gio, GLib
+import gi
+
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import GdkPixbuf, Gio, GLib
 
 from .tray_model import build_menu_model, icon_for_state
 
 logger = logging.getLogger(__name__)
+
+# The custom tray artwork ships inside the package (so it travels with every
+# install and works when running from source). Each state has its own basename —
+# see ``tray_model.icon_for_state`` — with one PNG per size below.
+_TRAY_ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets" / "tray"
+_TRAY_ICON_SIZES = (24, 32, 48, 64)
+
+# (width, height, ARGB-bytes) tuples are expensive to rebuild per property read,
+# and the host re-reads on every NewIcon, so memoise per icon basename.
+_pixmap_cache: dict[str, list] = {}
+
+
+def _pixbuf_to_argb(pixbuf: "GdkPixbuf.Pixbuf") -> tuple:
+    """Convert a GdkPixbuf into an SNI pixmap tuple ``(width, height, bytes)``.
+
+    StatusNotifierItem wants 32-bit ARGB in network (big-endian) byte order — each
+    pixel laid out as A, R, G, B. GdkPixbuf stores RGBA, so we reorder per pixel.
+    """
+    width = pixbuf.get_width()
+    height = pixbuf.get_height()
+    rowstride = pixbuf.get_rowstride()
+    n_channels = pixbuf.get_n_channels()
+    pixels = pixbuf.get_pixels()
+    argb = bytearray(width * height * 4)
+    out = 0
+    for y in range(height):
+        row = y * rowstride
+        for x in range(width):
+            p = row + x * n_channels
+            a = pixels[p + 3] if n_channels == 4 else 255
+            argb[out] = a
+            argb[out + 1] = pixels[p]      # R
+            argb[out + 2] = pixels[p + 1]  # G
+            argb[out + 3] = pixels[p + 2]  # B
+            out += 4
+    return (width, height, bytes(argb))
+
+
+def _load_icon_pixmaps(name: str) -> list:
+    """Load every bundled size for ``name`` as SNI ARGB pixmap tuples.
+
+    Returns an empty list if no artwork is found, in which case the host falls
+    back to the ``IconName`` we also advertise.
+    """
+    if name in _pixmap_cache:
+        return _pixmap_cache[name]
+    pixmaps: list = []
+    for size in _TRAY_ICON_SIZES:
+        path = _TRAY_ASSETS_DIR / f"{name}-{size}.png"
+        if not path.exists():
+            continue
+        try:
+            pixbuf = GdkPixbuf.Pixbuf.new_from_file(str(path))
+        except GLib.Error as exc:
+            logger.warning("Tray: could not load icon %s: %s", path, exc)
+            continue
+        pixmaps.append(_pixbuf_to_argb(pixbuf))
+    _pixmap_cache[name] = pixmaps
+    return pixmaps
 
 
 # ---------------------------------------------------------------------------
@@ -39,6 +102,7 @@ _SNI_XML = """
     <property name="Status" type="s" access="read"/>
     <property name="WindowId" type="u" access="read"/>
     <property name="IconName" type="s" access="read"/>
+    <property name="IconPixmap" type="a(iiay)" access="read"/>
     <property name="IconThemePath" type="s" access="read"/>
     <property name="ItemIsMenu" type="b" access="read"/>
     <property name="Menu" type="o" access="read"/>
@@ -256,13 +320,22 @@ class TrayIcon:
     # ------------------------------------------------------------------
 
     def _sni_get_property(self, _conn, _sender, _path, _iface, prop):
+        pixmaps = _load_icon_pixmaps(self._icon_name)
+        # Prefer the ARGB pixmaps and send an empty IconName: several SNI hosts
+        # (notably the GNOME AppIndicator extension) prefer IconName and, when it
+        # fails to resolve in the icon theme — which it won't when running from
+        # source — show a fallback placeholder *instead of* falling back to
+        # IconPixmap. An empty name forces every host onto our per-state pixmaps.
+        # Only if the bundled pixmaps fail to load do we fall back to the icon
+        # name, so the tray still shows *something* rather than going invisible.
         values = {
             "Category": GLib.Variant("s", "ApplicationStatus"),
             "Id": GLib.Variant("s", "meeting-recorder"),
             "Title": GLib.Variant("s", "Meeting Recorder"),
             "Status": GLib.Variant("s", "Active"),
             "WindowId": GLib.Variant("u", 0),
-            "IconName": GLib.Variant("s", self._icon_name),
+            "IconName": GLib.Variant("s", "" if pixmaps else self._icon_name),
+            "IconPixmap": GLib.Variant("a(iiay)", pixmaps),
             "IconThemePath": GLib.Variant("s", ""),
             "ItemIsMenu": GLib.Variant("b", False),
             "Menu": GLib.Variant("o", _MENU_PATH),

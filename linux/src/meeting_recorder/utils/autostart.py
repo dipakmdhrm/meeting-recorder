@@ -10,6 +10,8 @@ import logging
 import shutil
 from pathlib import Path
 
+from meeting_recorder.config.defaults import APP_ID
+
 logger = logging.getLogger(__name__)
 
 APP_NAME = "meeting-recorder"
@@ -28,11 +30,12 @@ Type=Application
 Name=Meeting Recorder
 Comment=Record, transcribe and summarize meetings
 Exec={exec_path}
-Icon=audio-input-microphone
+Icon=meeting-recorder
 Terminal=false
 Categories=AudioVideo;Audio;Recorder;
 Keywords=meeting;record;transcribe;notes;audio;
 StartupNotify=true
+StartupWMClass={app_id}
 """
 
 
@@ -56,7 +59,9 @@ def update_autostart(enabled: bool) -> None:
             return
         AUTOSTART_DIR.mkdir(parents=True, exist_ok=True)
         try:
-            autostart_file.write_text(DESKTOP_TEMPLATE.format(exec_path=_find_exec()))
+            autostart_file.write_text(
+                DESKTOP_TEMPLATE.format(exec_path=_find_exec(), app_id=APP_ID)
+            )
             logger.info("Enabled autostart: wrote %s", autostart_file)
         except Exception as exc:
             logger.error("Failed to enable autostart: %s", exc)

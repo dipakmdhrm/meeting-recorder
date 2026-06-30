@@ -14,7 +14,7 @@ def notify(
     summary: str,
     body: str = "",
     app_name: str = "Meeting Recorder",
-    icon: str = "audio-input-microphone",
+    icon: str = "meeting-recorder",
 ) -> None:
     """Send a desktop notification using notify-send (libnotify)."""
     cmd = [

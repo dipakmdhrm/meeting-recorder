@@ -29,6 +29,16 @@ package() {
 
     install -Dm 755 linux/packaging/usr/bin/meeting-recorder \
         "${pkgdir}/usr/bin/meeting-recorder"
-    install -Dm 644 linux/packaging/usr/share/applications/meeting-recorder.desktop \
-        "${pkgdir}/usr/share/applications/meeting-recorder.desktop"
+    install -Dm 644 linux/packaging/usr/share/applications/io.github.dipakmdhrm.MeetingRecorder.desktop \
+        "${pkgdir}/usr/share/applications/io.github.dipakmdhrm.MeetingRecorder.desktop"
+
+    # Application icon (hicolor theme) under the Icon=meeting-recorder name the
+    # desktop file references, so the shell renders it for the matched window.
+    local icons_src="linux/src/meeting_recorder/assets/icons/hicolor"
+    for size in 16 24 32 48 64 128 256; do
+        install -Dm 644 "${icons_src}/${size}x${size}/apps/meeting-recorder.png" \
+            "${pkgdir}/usr/share/icons/hicolor/${size}x${size}/apps/meeting-recorder.png"
+    done
+    install -Dm 644 "${icons_src}/scalable/apps/meeting-recorder.svg" \
+        "${pkgdir}/usr/share/icons/hicolor/scalable/apps/meeting-recorder.svg"
 }

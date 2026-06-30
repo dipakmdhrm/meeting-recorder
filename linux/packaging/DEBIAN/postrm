@@ -17,6 +17,7 @@ if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
         rm -f "$home_dir/.config/autostart/meeting-recorder.desktop" 2>/dev/null || true
     done
 
-    # Update desktop database
+    # Update desktop database and icon cache
     update-desktop-database /usr/share/applications 2>/dev/null || true
+    gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
 fi
