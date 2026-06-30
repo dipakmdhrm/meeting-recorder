@@ -33,17 +33,30 @@ if [ -f "$BIN_DIR/$APP_NAME" ]; then
 fi
 
 # ── 4. Desktop entry ─────────────────────────────────────────────────────────
-if [ -f "$APPS_DIR/$APP_NAME.desktop" ]; then
-    info "Removing desktop entry…"
-    rm -f "$APPS_DIR/$APP_NAME.desktop"
-    update-desktop-database "$APPS_DIR" 2>/dev/null || true
-fi
+# Current entry is named after the app id; also remove the legacy names.
+APP_ID="io.github.dipakmdhrm.MeetingRecorder"
+info "Removing desktop entry…"
+rm -f "$APPS_DIR/$APP_ID.desktop" \
+      "$APPS_DIR/$APP_NAME.desktop" \
+      "$APPS_DIR/com.github.mint-meeting-recorder.desktop"
+update-desktop-database "$APPS_DIR" 2>/dev/null || true
 
 # ── 5. Autostart entry ───────────────────────────────────────────────────────
 if [ -f "$AUTOSTART_DIR/$APP_NAME.desktop" ]; then
     info "Removing autostart entry…"
     rm -f "$AUTOSTART_DIR/$APP_NAME.desktop"
 fi
+
+# ── 5b. Application icons (hicolor theme) ────────────────────────────────────
+ICON_THEME_DIR="$HOME/.local/share/icons/hicolor"
+info "Removing application icons…"
+for size in 16 24 32 48 64 128 256; do
+    rm -f "$ICON_THEME_DIR/${size}x${size}/apps/$APP_NAME.png" \
+          "$ICON_THEME_DIR/${size}x${size}/apps/com.github.mint-meeting-recorder.png"
+done
+rm -f "$ICON_THEME_DIR/scalable/apps/$APP_NAME.svg" \
+      "$ICON_THEME_DIR/scalable/apps/com.github.mint-meeting-recorder.svg"
+gtk-update-icon-cache -f -t "$ICON_THEME_DIR" 2>/dev/null || true
 
 # ── 6. System log directory ──────────────────────────────────────────────────
 if [ -d "$SYSTEM_LOG_DIR" ]; then

@@ -12,8 +12,9 @@ from pathlib import Path
 
 import gi
 gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, GLib, Gio, Adw
+from gi.repository import Gtk, Gdk, GLib, Gio, Adw
 
 from meeting_recorder.config.defaults import APP_ID, APP_NAME
 from meeting_recorder.config import settings
@@ -50,10 +51,34 @@ class MeetingRecorderApp(Adw.Application):
         # dark-mode portal, Adwaita stylesheet).
         Adw.Application.do_startup(self)
         self._setup_logging()
+        self._setup_app_icon()
         # Without hold(), GApplication exits as soon as the last window is hidden.
         # We hide to tray rather than closing, so we need to keep the app alive manually.
         # The matching release() is never called; we exit via quit() instead.
         self.hold()
+
+    @staticmethod
+    def _setup_app_icon() -> None:
+        """Make the launcher/window icon resolvable, including from source.
+
+        GTK4 derives a window's icon from the application id looked up in the
+        active icon theme. Packaging installs the icon into the system hicolor
+        theme, but when running from source nothing is installed — so we add the
+        bundled hicolor tree (``assets/icons``) to the icon theme search path and
+        register it as the default window icon. This is what makes the shell/
+        taskbar (e.g. Dash to Panel) show the app icon instead of a generic one.
+        """
+        try:
+            display = Gdk.Display.get_default()
+            if display is None:
+                return
+            icons_dir = Path(__file__).resolve().parent / "assets" / "icons"
+            Gtk.IconTheme.get_for_display(display).add_search_path(str(icons_dir))
+            # The themed icon is the generic "meeting-recorder" name (matches the
+            # desktop file's Icon= key), independent of the application id.
+            Gtk.Window.set_default_icon_name("meeting-recorder")
+        except Exception as exc:  # never let icon setup break startup
+            logger.warning("Failed to set up application icon: %s", exc)
 
     @staticmethod
     def _setup_logging() -> None:

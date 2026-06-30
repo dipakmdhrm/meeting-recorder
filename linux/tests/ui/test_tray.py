@@ -23,16 +23,16 @@ def _actions(items):
 class TestIconForState:
     def test_recording_wins(self):
         # Recording takes priority even when jobs are active.
-        assert icon_for_state("recording", [("j", lambda: None)]) == "media-record"
+        assert icon_for_state("recording", [("j", lambda: None)]) == "meeting-recorder-recording"
 
     def test_paused(self):
-        assert icon_for_state("paused", []) == "media-playback-pause"
+        assert icon_for_state("paused", []) == "meeting-recorder-paused"
 
     def test_jobs_when_idle(self):
-        assert icon_for_state("idle", [("j", lambda: None)]) == "system-run"
+        assert icon_for_state("idle", [("j", lambda: None)]) == "meeting-recorder-processing"
 
     def test_idle_no_jobs(self):
-        assert icon_for_state("idle", []) == "audio-input-microphone"
+        assert icon_for_state("idle", []) == "meeting-recorder"
 
 
 class TestBuildMenuModel:

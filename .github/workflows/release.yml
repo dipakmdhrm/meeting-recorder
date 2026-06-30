@@ -85,8 +85,21 @@ jobs:
           cp linux/requirements.txt "$STAGING/opt/meeting-recorder/"
           cp linux/packaging/usr/bin/meeting-recorder "$STAGING/usr/bin/meeting-recorder"
           chmod 755 "$STAGING/usr/bin/meeting-recorder"
-          cp linux/packaging/usr/share/applications/meeting-recorder.desktop \
-             "$STAGING/usr/share/applications/meeting-recorder.desktop"
+          cp linux/packaging/usr/share/applications/io.github.dipakmdhrm.MeetingRecorder.desktop \
+             "$STAGING/usr/share/applications/io.github.dipakmdhrm.MeetingRecorder.desktop"
+
+          # Application icon (hicolor theme) under the Icon=meeting-recorder name
+          # the desktop file references, so the shell renders the matched window.
+          ICONS_SRC="linux/src/meeting_recorder/assets/icons/hicolor"
+          for size in 16 24 32 48 64 128 256; do
+            dest="$STAGING/usr/share/icons/hicolor/${size}x${size}/apps"
+            mkdir -p "$dest"
+            cp "$ICONS_SRC/${size}x${size}/apps/meeting-recorder.png" "$dest/meeting-recorder.png"
+          done
+          mkdir -p "$STAGING/usr/share/icons/hicolor/scalable/apps"
+          cp "$ICONS_SRC/scalable/apps/meeting-recorder.svg" \
+             "$STAGING/usr/share/icons/hicolor/scalable/apps/meeting-recorder.svg"
+
           for f in postinst prerm postrm; do
             cp "linux/packaging/DEBIAN/$f" "$STAGING/DEBIAN/$f"
             chmod 755 "$STAGING/DEBIAN/$f"
