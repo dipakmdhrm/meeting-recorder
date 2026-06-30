@@ -5,11 +5,11 @@ The tray is a D-Bus StatusNotifierItem; the D-Bus wiring is integration-level an
 stays outside unit scope (see the test-coverage boundaries in CLAUDE.md). The
 icon-selection and menu-construction *policy* is pure and is guarded here.
 
-Importing ``tray`` is CI-safe: it imports only ``Gio``/``GLib`` (which ship with
-PyGObject) and constructs no GTK widgets or D-Bus connections at import time.
+The helpers live in ``tray_model`` (gi-free) so this test runs without PyGObject
+— the CI test environment installs only pytest.
 """
 
-from meeting_recorder.ui.tray import build_menu_model, icon_for_state
+from meeting_recorder.ui.tray_model import build_menu_model, icon_for_state
 
 
 def _labels(items):
