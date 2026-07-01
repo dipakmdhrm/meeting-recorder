@@ -42,10 +42,9 @@ rm -f "$APPS_DIR/$APP_ID.desktop" \
 update-desktop-database "$APPS_DIR" 2>/dev/null || true
 
 # ── 5. Autostart entry ───────────────────────────────────────────────────────
-if [ -f "$AUTOSTART_DIR/$APP_NAME.desktop" ]; then
-    info "Removing autostart entry…"
-    rm -f "$AUTOSTART_DIR/$APP_NAME.desktop"
-fi
+# Current entry is named after the app id; also remove the legacy name.
+info "Removing autostart entry…"
+rm -f "$AUTOSTART_DIR/$APP_ID.desktop" "$AUTOSTART_DIR/$APP_NAME.desktop"
 
 # ── 5b. Application icons (hicolor theme) ────────────────────────────────────
 ICON_THEME_DIR="$HOME/.local/share/icons/hicolor"

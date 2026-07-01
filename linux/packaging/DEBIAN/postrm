@@ -14,7 +14,8 @@ if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
 
     # Remove autostart entries created by the app for any user
     for home_dir in /home/*; do
-        rm -f "$home_dir/.config/autostart/meeting-recorder.desktop" 2>/dev/null || true
+        rm -f "$home_dir/.config/autostart/io.github.dipakmdhrm.MeetingRecorder.desktop" \
+              "$home_dir/.config/autostart/meeting-recorder.desktop" 2>/dev/null || true
     done
 
     # Update desktop database and icon cache

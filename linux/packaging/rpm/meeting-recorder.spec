@@ -77,7 +77,8 @@ if [ "$1" -eq 0 ]; then
     rm -rf /opt/meeting-recorder/venv
     rm -rf /var/log/meeting-recorder
     for home_dir in /home/*; do
-        rm -f "$home_dir/.config/autostart/meeting-recorder.desktop" 2>/dev/null || true
+        rm -f "$home_dir/.config/autostart/io.github.dipakmdhrm.MeetingRecorder.desktop" \
+              "$home_dir/.config/autostart/meeting-recorder.desktop" 2>/dev/null || true
     done
     update-desktop-database %{_datadir}/applications 2>/dev/null || true
     gtk-update-icon-cache -f -t %{_datadir}/icons/hicolor 2>/dev/null || true
