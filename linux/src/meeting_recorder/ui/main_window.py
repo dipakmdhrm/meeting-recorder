@@ -12,8 +12,6 @@ import os
 import shutil
 import subprocess
 import threading
-from dataclasses import dataclass, field
-from enum import Enum, auto
 from pathlib import Path
 
 import gi
@@ -26,6 +24,8 @@ from meeting_recorder.config import settings
 from meeting_recorder.utils.filename import output_paths
 from meeting_recorder.utils.meeting_scanner import Meeting, find_audio_file
 
+from ..core.job import Job, JobStatus, actions_for_status
+from ..core.state_machine import State, can_transition
 from ..core.task_runner import CancelToken, TaskRunner
 from ..utils.glib_bridge import assert_main_thread, idle_call
 from ..utils.gtk_compat import remove_all_children
@@ -35,26 +35,9 @@ from .meeting_explorer import MeetingExplorer
 logger = logging.getLogger(__name__)
 
 
-class State(Enum):
-    IDLE = auto()
-    RECORDING = auto()
-    PAUSED = auto()
-    COUNTDOWN = auto()
-
-
-@dataclass
-class _Job:
-    job_id: int
-    audio_path: Path
-    transcript_path: Path
-    notes_path: Path
-    label: str
-    status: str = "processing"  # "processing" | "done" | "error"
-    error_msg: str | None = None
-    cancelled: bool = False
-    # Cooperative cancellation for the pipeline worker: checked between
-    # stages so a cancelled job stops instead of burning API quota.
-    token: CancelToken = field(default_factory=CancelToken)
+# State and Job now live in core/ (pure, unit-tested); State is re-exported
+# here for existing importers (app.py checks window state via this module).
+__all__ = ["MainWindow", "State"]
 
 
 def _format_time(seconds: int) -> str:
@@ -97,9 +80,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._recorder_done = threading.Event()
 
         # Jobs
-        self._jobs: list[_Job] = []
+        self._jobs: list[Job] = []
         self._next_job_id: int = 0
-        self._pending_job: _Job | None = None
+        self._pending_job: Job | None = None
         self._job_widgets: dict[int, dict] = {}
 
         self._build_ui()
@@ -240,6 +223,10 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _transition(self, new_state: State, **kwargs) -> None:
         assert_main_thread()
+        if not can_transition(self._state, new_state):
+            # Log loudly but keep the UI consistent — an illegal jump is a
+            # programming error, not something to crash the session over.
+            logger.error("Illegal state transition %s -> %s", self._state.name, new_state.name)
         self._state = new_state
         self._update_ui(**kwargs)
         self._notify_tray()
@@ -364,7 +351,7 @@ class MainWindow(Adw.ApplicationWindow):
         tray_jobs = [
             (j.label, lambda j=j: idle_call(self._on_cancel_job, j))
             for j in self._jobs
-            if j.status == "processing" and not j.cancelled
+            if j.status is JobStatus.PROCESSING and not j.cancelled
         ]
         try:
             app._tray.update(recording_state, tray_jobs)
@@ -489,7 +476,7 @@ class MainWindow(Adw.ApplicationWindow):
                 self._show_error(f"Failed to copy audio file: {e}")
                 return
 
-        job = _Job(
+        job = Job(
             job_id=self._next_job_id,
             audio_path=audio_path,
             transcript_path=transcript_path,
@@ -519,14 +506,14 @@ class MainWindow(Adw.ApplicationWindow):
             self._show_error("No audio file found in meeting folder.")
             return
 
-        if any(j.audio_path == audio_path and j.status == "processing" for j in self._jobs):
+        if any(j.audio_path == audio_path and j.status is JobStatus.PROCESSING for j in self._jobs):
             self._show_error("This meeting is already being processed.")
             return
 
         transcript_path = meeting.path / "transcript.md"
         notes_path = meeting.path / "notes.md"
 
-        job = _Job(
+        job = Job(
             job_id=self._next_job_id,
             audio_path=audio_path,
             transcript_path=transcript_path,
@@ -569,7 +556,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Create a pending job — added to the list only after the countdown
         # expires so it can be cleanly discarded if the user cancels.
-        self._pending_job = _Job(
+        self._pending_job = Job(
             job_id=self._next_job_id,
             audio_path=self._audio_path,
             transcript_path=self._transcript_path,
@@ -701,7 +688,7 @@ class MainWindow(Adw.ApplicationWindow):
     # Pipeline / job management
     # ------------------------------------------------------------------
 
-    def _submit_pipeline_job(self, job: _Job) -> None:
+    def _submit_pipeline_job(self, job: Job) -> None:
         """Run the AI pipeline for *job* in the background.
 
         The worker only reads the job; all job mutations happen in the
@@ -715,7 +702,7 @@ class MainWindow(Adw.ApplicationWindow):
             description=f"pipeline: {job.label}",
         )
 
-    def _submit_recorded_job(self, job: _Job) -> None:
+    def _submit_recorded_job(self, job: Job) -> None:
         """Like _submit_pipeline_job, but waits for the recorder to finish first."""
         self._runner.submit(
             self._recorded_job_worker,
@@ -725,7 +712,7 @@ class MainWindow(Adw.ApplicationWindow):
             description=f"pipeline (after stop): {job.label}",
         )
 
-    def _recorded_job_worker(self, job: _Job):
+    def _recorded_job_worker(self, job: Job):
         """Worker: wait for recorder.stop() to complete, then run the pipeline."""
         self._recorder_done.wait(timeout=35)
         if job.cancelled:
@@ -733,7 +720,7 @@ class MainWindow(Adw.ApplicationWindow):
         idle_call(self._update_job_status_text, job, "Transcribing…")
         return self._pipeline_worker(job)
 
-    def _pipeline_worker(self, job: _Job):
+    def _pipeline_worker(self, job: Job):
         """Worker: run transcription + summarisation. Returns final output paths,
         or None if the job was cancelled between stages."""
         from meeting_recorder.processing.pipeline import Pipeline, PipelineCancelled
@@ -755,7 +742,7 @@ class MainWindow(Adw.ApplicationWindow):
             return None
         return pipeline.output_paths
 
-    def _on_pipeline_finished(self, job: _Job, paths) -> None:
+    def _on_pipeline_finished(self, job: Job, paths) -> None:
         assert_main_thread()
         if job.cancelled or paths is None:
             return
@@ -769,35 +756,35 @@ class MainWindow(Adw.ApplicationWindow):
             job.notes_path = notes_path
         self._on_job_done(job)
 
-    def _on_pipeline_failed(self, job: _Job, exc: Exception) -> None:
+    def _on_pipeline_failed(self, job: Job, exc: Exception) -> None:
         assert_main_thread()
         if not job.cancelled:
             self._on_job_error(job, str(exc))
 
-    def _on_job_done(self, job: _Job) -> None:
+    def _on_job_done(self, job: Job) -> None:
         assert_main_thread()
-        job.status = "done"
+        job.status = JobStatus.DONE
         self._update_job_row(job)
         self._notify_tray()
         self._send_job_complete_notification(job)
 
-    def _on_job_error(self, job: _Job, msg: str) -> None:
+    def _on_job_error(self, job: Job, msg: str) -> None:
         assert_main_thread()
-        job.status = "error"
+        job.status = JobStatus.ERROR
         job.error_msg = msg
         self._update_job_row(job)
         self._notify_tray()
 
-    def _on_cancel_job(self, job: _Job) -> None:
+    def _on_cancel_job(self, job: Job) -> None:
         assert_main_thread()
         job.cancelled = True
         job.token.cancel()
         self._dismiss_job(job)
         logger.info("Job %d cancelled by user", job.job_id)
 
-    def _on_retry_job(self, job: _Job) -> None:
+    def _on_retry_job(self, job: Job) -> None:
         assert_main_thread()
-        job.status = "processing"
+        job.status = JobStatus.PROCESSING
         job.error_msg = None
         job.cancelled = False
         job.token = CancelToken()
@@ -805,13 +792,13 @@ class MainWindow(Adw.ApplicationWindow):
         self._notify_tray()
         self._submit_pipeline_job(job)
 
-    def _on_open_job_folder(self, job: _Job) -> None:
+    def _on_open_job_folder(self, job: Job) -> None:
         try:
             subprocess.Popen(["xdg-open", str(job.audio_path.parent)])
         except Exception:
             pass
 
-    def _dismiss_job(self, job: _Job) -> None:
+    def _dismiss_job(self, job: Job) -> None:
         assert_main_thread()
         widgets = self._job_widgets.pop(job.job_id, None)
         if widgets:
@@ -828,7 +815,7 @@ class MainWindow(Adw.ApplicationWindow):
     # Jobs panel UI
     # ------------------------------------------------------------------
 
-    def _add_job_row(self, job: _Job) -> None:
+    def _add_job_row(self, job: Job) -> None:
         """Add a row for a new job to the jobs panel. Main thread only."""
         assert_main_thread()
 
@@ -860,7 +847,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._jobs_section.add(row)
         self._jobs_section.set_visible(True)
 
-    def _update_job_row(self, job: _Job) -> None:
+    def _update_job_row(self, job: Job) -> None:
         """Refresh icon, status text, and action buttons for a status change."""
         assert_main_thread()
         widgets = self._job_widgets.get(job.job_id)
@@ -875,50 +862,53 @@ class MainWindow(Adw.ApplicationWindow):
         spinner.set_visible(False)
         status_icon.set_visible(True)
 
-        if job.status == "done":
+        if job.status is JobStatus.DONE:
             status_icon.set_from_icon_name("emblem-ok-symbolic")
             row.set_subtitle("Done")
-        elif job.status == "error":
+        elif job.status is JobStatus.ERROR:
             status_icon.set_from_icon_name("dialog-error-symbolic")
             err = (job.error_msg or "Error")[:60]
             row.set_subtitle(f"Error: {err}")
 
         self._rebuild_action_box(job)
 
-    def _rebuild_action_box(self, job: _Job) -> None:
-        """Replace the action buttons in the job row for the current status."""
+    def _rebuild_action_box(self, job: Job) -> None:
+        """Replace the action buttons in the job row for the current status.
+
+        Which buttons appear is decided by the pure actions_for_status()
+        policy in core/job.py; this method only renders them.
+        """
         widgets = self._job_widgets.get(job.job_id)
         if not widgets:
             return
         action_box: Gtk.Box = widgets["action_box"]
         remove_all_children(action_box)
 
-        if job.status == "processing":
-            btn = Gtk.Button(label="Cancel")
+        for action in actions_for_status(job.status):
+            if action == "cancel":
+                btn = Gtk.Button(label="Cancel")
+                btn.connect("clicked", lambda *_, j=job: self._on_cancel_job(j))
+            elif action == "open_folder":
+                btn = Gtk.Button(label="Open Folder")
+                btn.connect("clicked", lambda *_, j=job: self._on_open_job_folder(j))
+            elif action == "retry":
+                btn = Gtk.Button(label="Retry")
+                btn.connect("clicked", lambda *_, j=job: self._on_retry_job(j))
+            else:  # dismiss
+                btn = self._make_dismiss_btn(job)
+                action_box.append(btn)
+                continue
             btn.add_css_class("flat")
-            btn.connect("clicked", lambda *_, j=job: self._on_cancel_job(j))
             action_box.append(btn)
-        elif job.status == "done":
-            btn = Gtk.Button(label="Open Folder")
-            btn.add_css_class("flat")
-            btn.connect("clicked", lambda *_, j=job: self._on_open_job_folder(j))
-            action_box.append(btn)
-            action_box.append(self._make_dismiss_btn(job))
-        elif job.status == "error":
-            btn = Gtk.Button(label="Retry")
-            btn.add_css_class("flat")
-            btn.connect("clicked", lambda *_, j=job: self._on_retry_job(j))
-            action_box.append(btn)
-            action_box.append(self._make_dismiss_btn(job))
 
-    def _make_dismiss_btn(self, job: _Job) -> Gtk.Button:
+    def _make_dismiss_btn(self, job: Job) -> Gtk.Button:
         btn = Gtk.Button(icon_name="window-close-symbolic")
         btn.add_css_class("flat")
         btn.set_tooltip_text("Dismiss")
         btn.connect("clicked", lambda *_, j=job: self._dismiss_job(j))
         return btn
 
-    def _update_job_status_text(self, job: _Job, msg: str) -> None:
+    def _update_job_status_text(self, job: Job, msg: str) -> None:
         """Update the status text for a job (pipeline progress). Main thread only."""
         assert_main_thread()
         widgets = self._job_widgets.get(job.job_id)
@@ -940,7 +930,7 @@ class MainWindow(Adw.ApplicationWindow):
         idle_call(self._transition, State.IDLE)
         idle_call(self._show_error, msg)
 
-    def _send_job_complete_notification(self, job: _Job) -> None:
+    def _send_job_complete_notification(self, job: Job) -> None:
         from .notifications import notify
 
         body_parts = []
