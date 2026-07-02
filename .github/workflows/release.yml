@@ -105,20 +105,11 @@ jobs:
             chmod 755 "$STAGING/DEBIAN/$f"
           done
 
-          {
-            echo "Package: meeting-recorder"
-            echo "Version: ${VERSION}"
-            echo "Section: utils"
-            echo "Priority: optional"
-            echo "Architecture: all"
-            echo "Depends: python3 (>= 3.10), python3-venv, python3-gi, python3-gi-cairo, gir1.2-gtk-3.0, gir1.2-ayatanaappindicator3-0.1, libayatana-appindicator3-1, gir1.2-notify-0.7, libnotify4, libnotify-bin, ffmpeg, pulseaudio-utils, curl"
-            echo "Recommends: pipewire-pulse"
-            echo "Suggests: libcublas12, libcudart12"
-            echo "Maintainer: Meeting Recorder <noreply@github.com>"
-            echo "Description: Meeting recorder with AI transcription and summarization"
-            echo " Records meetings, transcribes audio using Google Gemini or local Whisper,"
-            echo " and generates structured notes with Gemini or local Ollama."
-          } > "$STAGING/DEBIAN/control"
+          # Single source of truth for the control file (Depends must match the
+          # GTK4 + libadwaita runtime) — CI installs the same template, so any
+          # dependency drift fails the pipeline before it can ship.
+          sed "s/@VERSION@/${VERSION}/" linux/packaging/DEBIAN/control.template \
+            > "$STAGING/DEBIAN/control"
 
           dpkg-deb --build "$STAGING" "meeting-recorder_${VERSION}_all.deb"
 

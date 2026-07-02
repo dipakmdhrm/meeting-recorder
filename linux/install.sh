@@ -25,7 +25,7 @@ err()     { echo -e "${RED}[error]${NC} $*" >&2; }
 install_deps_apt() {
     info "Installing system dependencies (apt)..."
     sudo apt-get update -qq
-    sudo apt-get install -y python3 python3-venv python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1 libadwaita-1-0 gir1.2-notify-0.7 libnotify4 libnotify-bin ffmpeg pulseaudio-utils pipewire-pulse 2>/dev/null || true
+    sudo apt-get install -y python3 python3-venv python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1 libadwaita-1-0 libnotify4 libnotify-bin ffmpeg pulseaudio-utils pipewire-pulse 2>/dev/null || true
 
 }
 

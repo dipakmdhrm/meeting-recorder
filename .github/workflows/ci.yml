@@ -90,16 +90,10 @@ jobs:
             chmod 755 "$STAGING/DEBIAN/$f"
           done
 
-          {
-            echo "Package: meeting-recorder"
-            echo "Version: 0.0.0-ci"
-            echo "Section: utils"
-            echo "Priority: optional"
-            echo "Architecture: all"
-            echo "Depends: python3 (>= 3.10)"
-            echo "Maintainer: CI <ci@example.com>"
-            echo "Description: CI build test"
-          } > "$STAGING/DEBIAN/control"
+          # Use the same control template as the release workflow so CI
+          # exercises the real Depends line (catches dependency drift).
+          sed "s/@VERSION@/0.0.0/" linux/packaging/DEBIAN/control.template \
+            > "$STAGING/DEBIAN/control"
 
           dpkg-deb --build "$STAGING" meeting-recorder.deb
 
@@ -112,6 +106,25 @@ jobs:
           dpkg --contents meeting-recorder.deb | grep -q "usr/share/applications/io.github.dipakmdhrm.MeetingRecorder.desktop"
           dpkg --contents meeting-recorder.deb | grep -q "usr/share/icons/hicolor/256x256/apps/meeting-recorder.png"
           echo "All required paths present in .deb"
+
+      # Install the package with its real Depends line and import the app the
+      # same way the launcher does.  Fails if the control template ever drifts
+      # from the runtime requirements (e.g. GTK4/libadwaita typelibs).
+      - name: Install .deb and import smoke test
+        if: matrix.pkg == 'deb'
+        run: |
+          apt-get update -qq
+          apt-get install -y ./meeting-recorder.deb
+          PYTHONPATH=/opt/meeting-recorder/linux/src \
+            /opt/meeting-recorder/venv/bin/python - <<'EOF'
+          import gi
+          gi.require_version("Gtk", "4.0")
+          gi.require_version("Adw", "1")
+          from gi.repository import Gtk, Adw
+          import google.genai
+          import meeting_recorder
+          print("GTK4 + Adw typelibs, venv deps, and app package all import OK")
+          EOF
 
       # ── rpm ────────────────────────────────────────────────────────────────
 
