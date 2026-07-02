@@ -2,11 +2,15 @@ package com.github.meetingrecorder
 
 import com.github.meetingrecorder.data.Config
 import com.github.meetingrecorder.data.GeminiClient
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
@@ -15,6 +19,7 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.whenever
+import kotlin.coroutines.coroutineContext
 
 class GeminiClientTest {
 
@@ -22,19 +27,25 @@ class GeminiClientTest {
     val tempDir = TemporaryFolder()
 
     private val server = MockWebServer()
+    private lateinit var config: Config
+    private lateinit var baseUrl: String
     private lateinit var client: GeminiClient
+
+    /** Delays requested by the client (backoff + poll waits) — recorded, never slept. */
+    private val recordedDelays = mutableListOf<Long>()
 
     @Before
     fun setUp() {
         server.start()
-        val config = mock<Config>().also {
+        config = mock<Config>().also {
             whenever(it.apiKey).thenReturn("test-key")
             whenever(it.model).thenReturn("gemini-flash-latest")
             whenever(it.transcriptionPrompt).thenReturn("")
             whenever(it.summarizationPrompt).thenReturn("")
             whenever(it.titlePrompt).thenReturn("")
         }
-        client = GeminiClient(config, server.url("/").toString().trimEnd('/'))
+        baseUrl = server.url("/").toString().trimEnd('/')
+        client = GeminiClient(config, baseUrl, delayFn = { recordedDelays += it })
     }
 
     @After
@@ -161,6 +172,118 @@ class GeminiClientTest {
                 "Expected failure message, got: ${e.message}",
                 e.message!!.lowercase().contains("fail"),
             )
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Retry on transient failures
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun `transient 503 on upload init is retried and succeeds`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(503).setBody("Service Unavailable"))
+        server.enqueue(uploadInitResponse())
+        server.enqueue(uploadBytesResponse("files/retry"))
+        server.enqueue(pollResponse("ACTIVE"))
+        server.enqueue(contentResponse("Retried transcript."))
+
+        assertEquals("Retried transcript.", client.transcribe(audioFile()))
+        assertEquals(5, server.requestCount)
+        assertEquals(listOf(2_000L), recordedDelays) // one backoff, recorded not slept
+    }
+
+    @Test
+    fun `transient 429 on generateContent is retried and succeeds`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(429).setBody("Rate limited"))
+        server.enqueue(contentResponse("Notes after retry."))
+
+        assertEquals("Notes after retry.", client.summarize("transcript"))
+        assertEquals(2, server.requestCount)
+        assertEquals(listOf(2_000L), recordedDelays)
+    }
+
+    @Test
+    fun `transient 500 during poll is retried and poll loop continues`() = runTest {
+        server.enqueue(uploadInitResponse())
+        server.enqueue(uploadBytesResponse("files/pollretry"))
+        server.enqueue(MockResponse().setResponseCode(500).setBody("Internal"))
+        server.enqueue(pollResponse("PROCESSING"))
+        server.enqueue(pollResponse("ACTIVE"))
+        server.enqueue(contentResponse("Poll retried."))
+
+        assertEquals("Poll retried.", client.transcribe(audioFile()))
+        assertEquals(6, server.requestCount)
+        // 2s backoff for the 500, then a 2s poll interval after PROCESSING
+        assertEquals(listOf(2_000L, 2_000L), recordedDelays)
+    }
+
+    @Test
+    fun `persistent 503 exhausts retries with exponential backoff and fails`() = runTest {
+        repeat(3) { server.enqueue(MockResponse().setResponseCode(503).setBody("down")) }
+
+        try {
+            client.summarize("transcript")
+            fail("Expected RuntimeException")
+        } catch (e: RuntimeException) {
+            assertTrue("Expected 503, got: ${e.message}", e.message!!.contains("503"))
+        }
+        assertEquals(3, server.requestCount) // initial attempt + 2 retries
+        assertEquals(listOf(2_000L, 4_000L), recordedDelays) // doubling backoff
+    }
+
+    @Test
+    fun `permanent 401 fails immediately without retry`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(401).setBody("Unauthorized"))
+
+        try {
+            client.transcribe(audioFile())
+            fail("Expected RuntimeException")
+        } catch (e: RuntimeException) {
+            assertTrue("Expected 401, got: ${e.message}", e.message!!.contains("401"))
+        }
+        assertEquals(1, server.requestCount)
+        assertTrue("No backoff expected, got: $recordedDelays", recordedDelays.isEmpty())
+    }
+
+    @Test
+    fun `retry loop stops promptly when coroutine is cancelled`() = runTest {
+        repeat(3) { server.enqueue(MockResponse().setResponseCode(503).setBody("down")) }
+
+        val job = launch {
+            // delayFn cancels the coroutine mid-backoff; ensureActive() before the
+            // next attempt must abort the retry loop instead of hitting the server again.
+            val cancellingClient = GeminiClient(config, baseUrl, delayFn = { coroutineContext.cancel() })
+            try {
+                cancellingClient.summarize("transcript")
+                fail("Expected CancellationException")
+            } catch (_: CancellationException) {
+                // expected
+            }
+        }
+        job.join()
+
+        assertEquals(1, server.requestCount) // no further attempts after cancellation
+    }
+
+    // -------------------------------------------------------------------------
+    // API key handling
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun `api key is sent as header and never appears in URLs`() = runTest {
+        server.enqueue(uploadInitResponse())
+        server.enqueue(uploadBytesResponse("files/hdr"))
+        server.enqueue(pollResponse("ACTIVE"))
+        server.enqueue(contentResponse("Header auth works."))
+
+        client.transcribe(audioFile())
+
+        repeat(4) {
+            val request = server.takeRequest()
+            assertEquals("test-key", request.getHeader("x-goog-api-key"))
+            val url = request.requestUrl.toString()
+            assertFalse("API key leaked into URL: $url", url.contains("test-key"))
+            assertFalse("URL still has key param: $url", url.contains("key="))
         }
     }
 
