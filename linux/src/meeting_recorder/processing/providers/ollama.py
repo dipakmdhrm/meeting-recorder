@@ -16,6 +16,15 @@ from ...config.defaults import OLLAMA_DEFAULT_HOST, SUMMARIZATION_PROMPT
 logger = logging.getLogger(__name__)
 
 
+def _read_error_detail(exc: urllib.error.HTTPError) -> str:
+    """Extract the "error" field from an Ollama HTTP error body, if present."""
+    try:
+        detail = json.loads(exc.read()).get("error", "")
+    except Exception:
+        detail = ""
+    return detail or f"HTTP {exc.code}"
+
+
 def get_loaded_models(host: str) -> list[str]:
     """Return names of models currently loaded in ollama's memory. Empty list if unreachable."""
     try:
@@ -56,11 +65,14 @@ class OllamaProvider:
         host: str = OLLAMA_DEFAULT_HOST,
         summarization_prompt: str = "",
         timeout_minutes: int = 10,
+        http_open: Callable | None = None,
     ) -> None:
         self._model = model
         self._host = host.rstrip("/")
         self._summarization_prompt = summarization_prompt or SUMMARIZATION_PROMPT
         self._timeout = timeout_minutes * 60
+        # Injectable for tests, mirroring services.ollama_service.OllamaClient.
+        self._http_open = http_open or urllib.request.urlopen
 
     def summarize(
         self,
@@ -88,8 +100,15 @@ class OllamaProvider:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+            with self._http_open(req, timeout=self._timeout) as resp:
                 data = json.loads(resp.read())
+        except urllib.error.HTTPError as exc:
+            # The server answered but refused the request (e.g. model not
+            # pulled).  Surface its "error" field instead of the misleading
+            # "cannot reach Ollama" message.
+            raise RuntimeError(
+                f"Ollama error: {_read_error_detail(exc)}"
+            ) from exc
         except urllib.error.URLError as exc:
             raise RuntimeError(
                 f"Cannot reach Ollama at {self._host}. "
@@ -100,6 +119,9 @@ class OllamaProvider:
                 f"Ollama did not respond within {self._timeout // 60} minutes. "
                 "The transcript may be too long, or the model may be overloaded."
             )
+
+        if data.get("error"):
+            raise RuntimeError(f"Ollama error: {data['error']}")
 
         response = data.get("response", "").strip()
         if not response:

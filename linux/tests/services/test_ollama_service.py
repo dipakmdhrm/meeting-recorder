@@ -168,3 +168,25 @@ class TestPullModel:
         client = OllamaClient(http_open=lambda *a, **kw: FakeStreamResponse(lines))
         result, _ = self._pull(client)
         assert result is True
+
+    def test_raises_when_server_reports_error_mid_stream(self):
+        lines = [
+            json.dumps({"status": "pulling"}).encode() + b"\n",
+            json.dumps({"error": "no space left on device"}).encode() + b"\n",
+        ]
+        client = OllamaClient(http_open=lambda *a, **kw: FakeStreamResponse(lines))
+        with pytest.raises(RuntimeError, match="no space left on device"):
+            self._pull(client)
+
+    def test_stream_uses_bounded_read_timeout(self):
+        # A stalled server must eventually raise instead of hanging forever.
+        seen: dict = {}
+
+        def capture(req, timeout=None):
+            seen["timeout"] = timeout
+            return FakeStreamResponse([json.dumps({"status": "success"}).encode() + b"\n"])
+
+        client = OllamaClient(http_open=capture)
+        result, _ = self._pull(client)
+        assert result is True
+        assert seen["timeout"] is not None and seen["timeout"] > 0

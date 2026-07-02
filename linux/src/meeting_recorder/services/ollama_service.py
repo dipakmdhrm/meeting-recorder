@@ -16,6 +16,11 @@ from typing import Callable
 
 logger = logging.getLogger(__name__)
 
+# Socket-read timeout for streaming responses.  Applies per read, not to the
+# whole download: a healthy pull keeps data flowing, while a stalled server
+# raises instead of hanging the worker thread forever.
+STREAM_READ_TIMEOUT = 300
+
 
 class OllamaClient:
     """HTTP client for the Ollama local API."""
@@ -47,7 +52,8 @@ class OllamaClient:
         Calls ``on_progress`` with a human-readable status string as data
         arrives.  Returns ``True`` when the server confirms success, ``False``
         if the stream ended without an explicit success message.
-        Raises on network error.
+        Raises on network error, or ``RuntimeError`` if the server reports an
+        error mid-stream (e.g. unknown model, out of disk).
         """
         payload = json.dumps({"name": model, "stream": True}).encode()
         req = urllib.request.Request(
@@ -56,7 +62,7 @@ class OllamaClient:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with self._http_open(req, timeout=None) as resp:
+        with self._http_open(req, timeout=STREAM_READ_TIMEOUT) as resp:
             while True:
                 line = resp.readline()
                 if not line:
@@ -65,6 +71,10 @@ class OllamaClient:
                     data = json.loads(line.decode())
                 except json.JSONDecodeError:
                     continue
+                if data.get("error"):
+                    raise RuntimeError(
+                        f"Ollama failed to pull {model!r}: {data['error']}"
+                    )
                 status_text = data.get("status", "")
                 total = data.get("total", 0)
                 completed = data.get("completed", 0)
