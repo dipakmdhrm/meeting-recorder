@@ -25,6 +25,7 @@ from meeting_recorder.utils.filename import output_paths
 from meeting_recorder.utils.meeting_scanner import Meeting, find_audio_file
 
 from ..core.job import Job, JobStatus, actions_for_status
+from ..core.job_manager import JobManager
 from ..core.state_machine import State, can_transition
 from ..core.task_runner import CancelToken, TaskRunner
 from ..utils.glib_bridge import assert_main_thread, idle_call
@@ -79,17 +80,28 @@ class MainWindow(Adw.ApplicationWindow):
         self._countdown_remaining: int = 0
         self._recorder_done = threading.Event()
 
-        # Jobs
-        self._jobs: list[Job] = []
-        self._next_job_id: int = 0
+        # Jobs — owned by the JobManager (persisted to jobs.json so a crash
+        # or quit mid-transcription re-offers the job on next start).
+        self._job_manager = JobManager()
         self._pending_job: Job | None = None
         self._job_widgets: dict[int, dict] = {}
 
         self._build_ui()
+        self._restore_persisted_jobs()
         self._transition(State.IDLE)
         # GTK4 replaced the "delete-event" signal with "close-request"; the
         # handler still vetoes the close (returns True) and hides to the tray.
         self.connect("close-request", self._on_close_request)
+
+    def _restore_persisted_jobs(self) -> None:
+        """Re-offer jobs from the previous session (crash/quit recovery).
+
+        Interrupted jobs come back as error rows with a Retry button —
+        mirrors the Android app's recoverOrphanedRecordings() convention.
+        """
+        for job in self._job_manager.load_persisted():
+            self._add_job_row(job)
+            self._update_job_row(job)
 
     # ------------------------------------------------------------------
     # UI construction
@@ -350,7 +362,7 @@ class MainWindow(Adw.ApplicationWindow):
         recording_state = state_names.get(self._state, "idle")
         tray_jobs = [
             (j.label, lambda j=j: idle_call(self._on_cancel_job, j))
-            for j in self._jobs
+            for j in self._job_manager.jobs
             if j.status is JobStatus.PROCESSING and not j.cancelled
         ]
         try:
@@ -476,15 +488,12 @@ class MainWindow(Adw.ApplicationWindow):
                 self._show_error(f"Failed to copy audio file: {e}")
                 return
 
-        job = Job(
-            job_id=self._next_job_id,
+        job = self._job_manager.create(
             audio_path=audio_path,
             transcript_path=transcript_path,
             notes_path=notes_path,
             label=Path(filename).name,
         )
-        self._next_job_id += 1
-        self._jobs.append(job)
         self._add_job_row(job)
         self._notify_tray()
         self._submit_pipeline_job(job)
@@ -506,22 +515,22 @@ class MainWindow(Adw.ApplicationWindow):
             self._show_error("No audio file found in meeting folder.")
             return
 
-        if any(j.audio_path == audio_path and j.status is JobStatus.PROCESSING for j in self._jobs):
+        if any(
+            j.audio_path == audio_path and j.status is JobStatus.PROCESSING
+            for j in self._job_manager.jobs
+        ):
             self._show_error("This meeting is already being processed.")
             return
 
         transcript_path = meeting.path / "transcript.md"
         notes_path = meeting.path / "notes.md"
 
-        job = Job(
-            job_id=self._next_job_id,
+        job = self._job_manager.create(
             audio_path=audio_path,
             transcript_path=transcript_path,
             notes_path=notes_path,
             label=meeting.time_label,
         )
-        self._next_job_id += 1
-        self._jobs.append(job)
         self._add_job_row(job)
         self._notify_tray()
 
@@ -557,13 +566,12 @@ class MainWindow(Adw.ApplicationWindow):
         # Create a pending job — added to the list only after the countdown
         # expires so it can be cleanly discarded if the user cancels.
         self._pending_job = Job(
-            job_id=self._next_job_id,
+            job_id=self._job_manager.allocate_id(),
             audio_path=self._audio_path,
             transcript_path=self._transcript_path,
             notes_path=self._notes_path,
             label=self._make_job_label(),
         )
-        self._next_job_id += 1
 
         self._recorder_done.clear()
         self._runner.submit(self._stop_recorder_bg, recorder, description="stop recorder")
@@ -577,7 +585,7 @@ class MainWindow(Adw.ApplicationWindow):
             job = self._pending_job
             self._pending_job = None
             if job is not None:
-                self._jobs.append(job)
+                self._job_manager.add(job)
                 self._add_job_row(job)
                 self._submit_recorded_job(job)
             self._transition(State.IDLE)
@@ -609,7 +617,7 @@ class MainWindow(Adw.ApplicationWindow):
         job = self._pending_job
         self._pending_job = None
         if job is not None:
-            self._jobs.append(job)
+            self._job_manager.add(job)
             self._add_job_row(job)
             self._submit_recorded_job(job)
         self._transition(State.IDLE)
@@ -754,6 +762,7 @@ class MainWindow(Adw.ApplicationWindow):
             job.transcript_path = transcript_path
         if notes_path:
             job.notes_path = notes_path
+        self._job_manager.persist()  # auto-title may have moved the paths
         self._on_job_done(job)
 
     def _on_pipeline_failed(self, job: Job, exc: Exception) -> None:
@@ -763,15 +772,14 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_job_done(self, job: Job) -> None:
         assert_main_thread()
-        job.status = JobStatus.DONE
+        self._job_manager.mark_done(job)
         self._update_job_row(job)
         self._notify_tray()
         self._send_job_complete_notification(job)
 
     def _on_job_error(self, job: Job, msg: str) -> None:
         assert_main_thread()
-        job.status = JobStatus.ERROR
-        job.error_msg = msg
+        self._job_manager.mark_error(job, msg)
         self._update_job_row(job)
         self._notify_tray()
 
@@ -784,10 +792,9 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_retry_job(self, job: Job) -> None:
         assert_main_thread()
-        job.status = JobStatus.PROCESSING
-        job.error_msg = None
         job.cancelled = False
         job.token = CancelToken()
+        self._job_manager.mark_processing(job)
         self._update_job_row(job)
         self._notify_tray()
         self._submit_pipeline_job(job)
@@ -805,9 +812,8 @@ class MainWindow(Adw.ApplicationWindow):
             row = widgets.get("row")
             if row is not None:
                 self._jobs_section.remove(row)
-        if job in self._jobs:
-            self._jobs.remove(job)
-        if not self._jobs:
+        self._job_manager.remove(job)
+        if not self._job_manager.jobs:
             self._jobs_section.set_visible(False)
         self._notify_tray()
 
