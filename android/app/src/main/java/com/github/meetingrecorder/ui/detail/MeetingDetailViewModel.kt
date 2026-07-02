@@ -1,12 +1,11 @@
 package com.github.meetingrecorder.ui.detail
 
 import android.media.MediaPlayer
-import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.github.meetingrecorder.data.Config
-import com.github.meetingrecorder.data.GeminiClient
-import com.github.meetingrecorder.data.MeetingRepository
+import com.github.meetingrecorder.data.MeetingProcessor
+import com.github.meetingrecorder.util.extensionToMimeType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -27,14 +26,13 @@ sealed interface GenState {
     data class Error(val msg: String) : GenState
 }
 
-private const val TAG = "MeetingDetailViewModel"
-
 // View model for the meeting detail screen. Plain ViewModel — no Context needed (MediaPlayer is
-// context-free); dependencies are constructor-injected via appViewModelFactory.
+// context-free); dependencies are constructor-injected via appViewModelFactory. The generation
+// workflows (transcribe/summarize/title/disk writes) live in MeetingProcessor; this class keeps
+// only screen state and playback.
 class MeetingDetailViewModel(
     private val config: Config,
-    private val meetingRepository: MeetingRepository,
-    private val gemini: GeminiClient,
+    private val processor: MeetingProcessor,
 ) : ViewModel() {
 
     private val _transcript = MutableStateFlow<String?>(null)
@@ -135,18 +133,13 @@ class MeetingDetailViewModel(
         generationJob = viewModelScope.launch {
             _genState.value = GenState.Processing("Starting…")
             try {
-                withContext(Dispatchers.IO) {
-                    val transcript = gemini.transcribe(audio, extensionToMimeType(audio.extension)) {
-                        _genState.value = GenState.Processing(it)
-                    }
-                    val notes = gemini.summarize(transcript) { _genState.value = GenState.Processing(it) }
-                    File(dir, "transcript.md").writeText(transcript)
-                    File(dir, "notes.md").writeText(notes)
-                    maybeGenerateTitle(notes)
-                    meetingRepository.saveMeetingMeta(dir, currentTitle, durationSeconds)
-                    _transcript.value = transcript
-                    _notes.value = notes
+                val result = processor.transcribeAndSummarize(audio, extensionToMimeType(audio.extension)) {
+                    _genState.value = GenState.Processing(it)
                 }
+                maybeGenerateTitle(result.notes)
+                processor.saveResults(dir, result.transcript, result.notes, currentTitle, durationSeconds)
+                _transcript.value = result.transcript
+                _notes.value = result.notes
                 _genState.value = GenState.Idle
             } catch (e: CancellationException) {
                 throw e // a cancelled job (e.g. reload) must not surface as an error
@@ -173,13 +166,10 @@ class MeetingDetailViewModel(
         generationJob = viewModelScope.launch {
             _genState.value = GenState.Processing("Generating meeting notes…")
             try {
-                withContext(Dispatchers.IO) {
-                    val notes = gemini.summarize(transcript) { _genState.value = GenState.Processing(it) }
-                    File(dir, "notes.md").writeText(notes)
-                    maybeGenerateTitle(notes)
-                    meetingRepository.saveMeetingMeta(dir, currentTitle, durationSeconds)
-                    _notes.value = notes
-                }
+                val notes = processor.summarizeTranscript(transcript) { _genState.value = GenState.Processing(it) }
+                maybeGenerateTitle(notes)
+                processor.saveNotes(dir, notes, currentTitle, durationSeconds)
+                _notes.value = notes
                 _genState.value = GenState.Idle
             } catch (e: CancellationException) {
                 throw e // a cancelled job (e.g. reload) must not surface as an error
@@ -192,21 +182,8 @@ class MeetingDetailViewModel(
     /** Auto-generate a title when the meeting has none (best-effort, mirrors the main flow). */
     private suspend fun maybeGenerateTitle(notes: String) {
         if (currentTitle.isNullOrBlank()) {
-            try {
-                currentTitle = gemini.generateTitle(notes).trim()
-            } catch (e: Exception) {
-                Log.w(TAG, "Title generation failed; keeping meeting untitled", e)
-            }
+            processor.generateTitle(notes)?.let { currentTitle = it }
         }
-    }
-
-    private fun extensionToMimeType(ext: String): String = when (ext.lowercase()) {
-        "mp3" -> "audio/mpeg"
-        "wav" -> "audio/wav"
-        "ogg" -> "audio/ogg"
-        "flac" -> "audio/flac"
-        "webm" -> "audio/webm"
-        else -> "audio/mp4"
     }
 
     fun playPause() {

@@ -11,8 +11,10 @@ import com.github.meetingrecorder.R
 import com.github.meetingrecorder.audio.RecordingPhase
 import com.github.meetingrecorder.audio.RecordingService
 import com.github.meetingrecorder.data.Config
-import com.github.meetingrecorder.data.GeminiClient
+import com.github.meetingrecorder.data.MeetingProcessor
 import com.github.meetingrecorder.data.MeetingRepository
+import com.github.meetingrecorder.util.extensionToMimeType
+import com.github.meetingrecorder.util.normalizeMimeType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -42,7 +44,7 @@ class MainViewModel(
     application: Application,
     private val config: Config,
     private val meetingRepository: MeetingRepository,
-    private val gemini: GeminiClient,
+    private val processor: MeetingProcessor,
 ) : AndroidViewModel(application) {
 
     private val app: Application = application
@@ -347,40 +349,17 @@ class MainViewModel(
         return null
     }
 
-    private fun normalizeMimeType(mimeType: String): String = when (mimeType) {
-        "audio/m4a", "audio/x-m4a" -> "audio/mp4"
-        "audio/x-wav" -> "audio/wav"
-        "audio/mp3" -> "audio/mpeg"
-        else -> mimeType
-    }
-
-    private fun extensionToMimeType(ext: String): String = when (ext.lowercase()) {
-        "mp3" -> "audio/mpeg"
-        "wav" -> "audio/wav"
-        "ogg" -> "audio/ogg"
-        "flac" -> "audio/flac"
-        "webm" -> "audio/webm"
-        else -> "audio/mp4"
-    }
-
     private suspend fun processRecording(audioFile: File, mimeType: String = "audio/mp4") {
-        val transcript = gemini.transcribe(audioFile, mimeType) { status ->
-            _state.value = RecordingState.Processing(status)
-        }
-        val notes = gemini.summarize(transcript) { status ->
+        val result = processor.transcribeAndSummarize(audioFile, mimeType) { status ->
             _state.value = RecordingState.Processing(status)
         }
 
-        // Auto-generate title when none was provided (best-effort)
+        // Auto-generate title when none was provided (best-effort; null on failure keeps it untitled)
         if (currentTitle == null) {
-            try {
-                currentTitle = gemini.generateTitle(notes).trim()
-            } catch (e: Exception) {
-                Log.w(TAG, "Title generation failed; keeping meeting untitled", e)
-            }
+            currentTitle = processor.generateTitle(result.notes)
         }
 
-        _state.value = RecordingState.Done(transcript, notes)
+        _state.value = RecordingState.Done(result.transcript, result.notes)
     }
 
     fun saveResults() {
@@ -389,12 +368,8 @@ class MainViewModel(
 
         viewModelScope.launch {
             try {
-                withContext(Dispatchers.IO) {
-                    File(meetingDir, "transcript.md").writeText(done.transcript)
-                    File(meetingDir, "notes.md").writeText(done.notes)
-                    meetingRepository.saveMeetingMeta(meetingDir, currentTitle, durationSeconds)
-                    lockFile?.delete()
-                }
+                processor.saveResults(meetingDir, done.transcript, done.notes, currentTitle, durationSeconds)
+                withContext(Dispatchers.IO) { lockFile?.delete() }
                 lockFile = null
                 isInPlace = false
                 _state.value = RecordingState.Ready

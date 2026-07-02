@@ -5,6 +5,7 @@ import android.os.Environment
 import android.os.storage.StorageManager
 import com.github.meetingrecorder.data.Config
 import com.github.meetingrecorder.data.GeminiClient
+import com.github.meetingrecorder.data.MeetingProcessor
 import com.github.meetingrecorder.data.MeetingRepository
 import java.io.File
 
@@ -22,6 +23,9 @@ class AppContainer(context: Context) {
 
     /** Shared Gemini client; it reads the latest key/model/prompts from [config] on every call. */
     val geminiClient: GeminiClient by lazy { GeminiClient(config) }
+
+    /** Shared processing workflow (transcribe → summarize → title → save) used by the record and detail flows. */
+    val meetingProcessor: MeetingProcessor by lazy { MeetingProcessor(geminiClient, meetingRepository) }
 
     /**
      * Resolves the shared `Documents` directory on primary external storage

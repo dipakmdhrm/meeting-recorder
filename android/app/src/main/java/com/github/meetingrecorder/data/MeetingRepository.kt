@@ -4,7 +4,7 @@ import org.json.JSONObject
 import java.io.File
 import java.time.LocalDateTime
 
-class MeetingRepository(private val rootDir: File) {
+class MeetingRepository(private val rootDir: File) : MeetingStore {
 
     // Captured when the repository (a per-process singleton) is constructed — effectively app launch.
     // recoverOrphanedRecordings() only acts on directories locked *before* this moment, so a recording
@@ -127,7 +127,7 @@ class MeetingRepository(private val rootDir: File) {
         return dir
     }
 
-    fun saveMeetingMeta(dir: File, title: String?, durationSeconds: Int?) {
+    override fun saveMeetingMeta(dir: File, title: String?, durationSeconds: Int?) {
         val json = JSONObject()
         if (title != null) json.put("title", title)
         if (durationSeconds != null) json.put("duration_seconds", durationSeconds)

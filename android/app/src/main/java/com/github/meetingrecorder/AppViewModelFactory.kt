@@ -22,11 +22,11 @@ private val CreationExtras.meetingRecorderApp: MeetingRecorderApp
 val appViewModelFactory: ViewModelProvider.Factory = viewModelFactory {
     initializer {
         val app = meetingRecorderApp
-        MainViewModel(app, app.container.config, app.container.meetingRepository, app.container.geminiClient)
+        MainViewModel(app, app.container.config, app.container.meetingRepository, app.container.meetingProcessor)
     }
     initializer {
         val app = meetingRecorderApp
-        MeetingDetailViewModel(app.container.config, app.container.meetingRepository, app.container.geminiClient)
+        MeetingDetailViewModel(app.container.config, app.container.meetingProcessor)
     }
     initializer {
         val app = meetingRecorderApp
