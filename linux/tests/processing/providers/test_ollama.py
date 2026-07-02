@@ -134,3 +134,17 @@ class TestSummarize:
         with pytest.raises(RuntimeError, match="model not found"):
             provider.summarize("transcript")
         assert len(calls) == 1
+
+
+class TestMalformedResponses:
+    def test_non_dict_json_response_raises_clear_error(self):
+        provider = _provider(lambda *a, **kw: FakeReadResponse(b'["unexpected"]'))
+        with pytest.raises(RuntimeError, match="invalid response format"):
+            provider.summarize("transcript")
+
+    def test_null_response_field_treated_as_empty(self):
+        # "response": null must not become the literal string "None".
+        body = json.dumps({"response": None}).encode()
+        provider = _provider(lambda *a, **kw: FakeReadResponse(body))
+        with pytest.raises(RuntimeError, match="empty response"):
+            provider.summarize("transcript")

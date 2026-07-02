@@ -10,10 +10,13 @@ fun extensionToMimeType(ext: String): String = when (ext.lowercase()) {
     else -> "audio/mp4"
 }
 
-/** Normalizes MIME-type aliases reported by content resolvers to the canonical audio types Gemini expects. */
-fun normalizeMimeType(mimeType: String): String = when (mimeType) {
+/**
+ * Normalizes MIME-type aliases reported by content resolvers to the canonical audio types
+ * Gemini expects. MIME types are case-insensitive (RFC 2045), so matching is done lowercased.
+ */
+fun normalizeMimeType(mimeType: String): String = when (val lowered = mimeType.lowercase()) {
     "audio/m4a", "audio/x-m4a" -> "audio/mp4"
     "audio/x-wav" -> "audio/wav"
     "audio/mp3" -> "audio/mpeg"
-    else -> mimeType
+    else -> lowered
 }

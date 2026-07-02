@@ -66,58 +66,64 @@ class MeetingDetailViewModel(
     private var durationSeconds: Int = 0
     private var generationJob: Job? = null
 
+    // Everything read off disk by load(), so file I/O happens on IO and the
+    // ViewModel state assignments happen on the Main thread only.
+    private data class LoadedMeeting(
+        val transcript: String?,
+        val notes: String?,
+        val title: String?,
+        val durationSeconds: Int,
+        val audioFile: File?,
+        val player: MediaPlayer?,
+    )
+
     fun load(meetingPath: String) {
         // Cancel any in-flight generation from a previously loaded meeting so its background
         // writes can't clobber the meeting we're loading now.
         generationJob?.cancel()
+        val dir = File(meetingPath)
+        meetingDir = dir
+        _genState.value = GenState.Idle
         viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                val dir = File(meetingPath)
-                meetingDir = dir
-                _genState.value = GenState.Idle
-
-                _transcript.value = File(dir, "transcript.md")
-                    .takeIf { it.exists() }?.readText()
-                _notes.value = File(dir, "notes.md")
-                    .takeIf { it.exists() }?.readText()
+            val loaded = withContext(Dispatchers.IO) {
+                val transcript = File(dir, "transcript.md").takeIf { it.exists() }?.readText()
+                val notes = File(dir, "notes.md").takeIf { it.exists() }?.readText()
 
                 // Preserve existing title / duration so generation writes them back correctly.
-                val metaFile = File(dir, "meeting.json")
-                if (metaFile.exists()) {
+                val meta = File(dir, "meeting.json").takeIf { it.exists() }?.let { metaFile ->
                     try {
-                        val meta = MeetingMeta.parse(metaFile.readText())
-                        currentTitle = meta.title
-                        durationSeconds = meta.durationSeconds ?: 0
+                        MeetingMeta.parse(metaFile.readText())
                     } catch (_: Exception) {
-                        currentTitle = null
-                        durationSeconds = 0
+                        null
                     }
-                } else {
-                    currentTitle = null
-                    durationSeconds = 0
                 }
 
-                mediaPlayer?.release()
-                mediaPlayer = null
-                _hasAudio.value = false
-
-                audioFile = sequenceOf(File(dir, "recording.m4a"), File(dir, "recording.mp3"))
+                val audio = sequenceOf(File(dir, "recording.m4a"), File(dir, "recording.mp3"))
                     .firstOrNull { it.exists() }
-
-                if (audioFile != null) {
-                    mediaPlayer = MediaPlayer().apply {
-                        setDataSource(audioFile!!.absolutePath)
-                        setOnCompletionListener {
-                            _isPlaying.value = false
-                            _currentTime.value = "00:00"
-                            timeUpdaterJob?.cancel()
-                        }
+                val player = audio?.let {
+                    MediaPlayer().apply {
+                        setDataSource(it.absolutePath)
                         prepare()
-                        _totalTime.value = formatDuration(duration.toLong())
                     }
-                    _hasAudio.value = true
                 }
+                LoadedMeeting(transcript, notes, meta?.title, meta?.durationSeconds ?: 0, audio, player)
             }
+
+            _transcript.value = loaded.transcript
+            _notes.value = loaded.notes
+            currentTitle = loaded.title
+            durationSeconds = loaded.durationSeconds
+
+            mediaPlayer?.release()
+            mediaPlayer = loaded.player
+            audioFile = loaded.audioFile
+            loaded.player?.setOnCompletionListener {
+                _isPlaying.value = false
+                _currentTime.value = "00:00"
+                timeUpdaterJob?.cancel()
+            }
+            _totalTime.value = loaded.player?.let { formatDuration(it.duration.toLong()) } ?: "00:00"
+            _hasAudio.value = loaded.player != null
         }
     }
 

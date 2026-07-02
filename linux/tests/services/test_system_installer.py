@@ -69,7 +69,8 @@ class TestOllamaInstallerIsAvailable:
 
 
 class TestOllamaInstallerInstall:
-    SCRIPT = b"#!/bin/sh\necho installing\n"
+    # Padded past the installer's minimum-size sanity check.
+    SCRIPT = b"#!/bin/sh\necho installing\n" + b"# padding\n" * 120
 
     def _install(self, rc: int = 0, fetch=None):
         ran: list[list[str]] = []
@@ -488,3 +489,16 @@ class TestWhisperEngineInstaller:
 
         inst = WhisperEngineInstaller(runner_fn=boom)
         assert inst.install() is False
+
+
+class TestOllamaInstallerScriptValidation:
+    def test_tiny_fetched_script_aborts_without_running(self):
+        # A captive portal / proxy can answer 200 with a tiny body; executing
+        # it would silently "succeed" without installing anything.
+        ran: list[list[str]] = []
+        inst = OllamaInstaller(
+            fetch_fn=lambda _url: b"#!/bin/sh\n",
+            run_fn=lambda cmd: ran.append(cmd) or 0,
+        )
+        assert inst.install() is False
+        assert ran == []

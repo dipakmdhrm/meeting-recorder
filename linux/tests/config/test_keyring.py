@@ -185,3 +185,37 @@ class TestSettingsKeyringIntegration:
 
     def test_migration_noop_without_config_file(self, config_in_tmp):
         assert settings.migrate_key_to_keyring(keyring=_store()) is False
+
+
+class TestLockedKeyringSafety:
+    def test_available_does_not_unlock_the_collection(self):
+        # A mere availability probe must never trigger a password prompt.
+        collection = FakeCollection(locked=True)
+        store = KeyringStore(secretstorage_module=FakeSecretStorage(collection=collection))
+        assert store.available() is True
+        assert collection.is_locked() is True  # untouched
+
+    def test_saving_other_settings_with_unreachable_keyring_keeps_the_secret(self, config_in_tmp):
+        # Regression for the key-loss edge case: key saved to the keyring,
+        # then the keyring becomes unreachable (locked / prompt dismissed).
+        working = _store()
+        settings.save({"gemini_api_key": "AIzaReal", "auto_title": True}, keyring=working)
+
+        # load() with the broken keyring yields an empty key ...
+        broken = _store(fail=True)
+        cfg = settings.load(keyring=broken)
+        assert cfg["gemini_api_key"] == ""
+
+        # ... and saving unrelated settings with that config must NOT wipe
+        # the sentinel from disk or delete the stored secret.
+        cfg["auto_title"] = False
+        settings.save(cfg, keyring=broken)
+        on_disk = json.loads((config_in_tmp / "config.json").read_text())
+        assert on_disk["gemini_api_key"] == settings.KEYRING_SENTINEL
+        assert working.get() == "AIzaReal"  # secret survives
+
+    def test_clearing_key_with_working_keyring_still_deletes(self, config_in_tmp):
+        store = _store()
+        settings.save({"gemini_api_key": "AIzaReal"}, keyring=store)
+        settings.save({"gemini_api_key": ""}, keyring=store)
+        assert store.get() is None

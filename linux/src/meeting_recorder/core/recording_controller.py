@@ -233,9 +233,13 @@ class RecordingController:
                 except OSError:
                     pass  # directory not empty (other files) — leave it
 
+        def _done(_result: Any) -> None:
+            self._on_state(State.IDLE, "Recording discarded.")
+            self._on_discarded()
+
         self._runner.submit(
             _stop_and_discard,
-            on_done=lambda _r: self._on_discarded(),
+            on_done=_done,
             on_error=lambda exc: self._on_error(f"Failed to stop recording: {exc}"),
             description="stop recorder (discard)",
         )

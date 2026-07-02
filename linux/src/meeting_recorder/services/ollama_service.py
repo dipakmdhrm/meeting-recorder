@@ -72,6 +72,8 @@ class OllamaClient:
                     data = json.loads(line.decode())
                 except json.JSONDecodeError:
                     continue
+                if not isinstance(data, dict):
+                    continue
                 if data.get("error"):
                     raise RuntimeError(f"Ollama failed to pull {model!r}: {data['error']}")
                 status_text = data.get("status", "")

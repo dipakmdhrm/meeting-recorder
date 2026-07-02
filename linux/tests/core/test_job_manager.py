@@ -151,3 +151,18 @@ class TestStartupRecovery:
         _create(first)
         restored = _mgr(tmp_path).load_persisted()
         assert restored[0].token.cancelled is False
+
+
+class TestMalformedStateFiles:
+    def test_non_dict_json_starts_empty(self, tmp_path):
+        (tmp_path / "jobs.json").write_text('["not", "an", "object"]')
+        assert _mgr(tmp_path).load_persisted() == []
+
+    def test_malformed_next_id_tolerated(self, tmp_path):
+        (tmp_path / "jobs.json").write_text(
+            json.dumps({"version": 1, "next_id": "garbage", "jobs": []})
+        )
+        mgr = _mgr(tmp_path)
+        assert mgr.load_persisted() == []
+        job = _create(mgr)  # id allocation must still work
+        assert job.job_id == 0

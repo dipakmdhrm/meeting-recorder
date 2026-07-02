@@ -65,16 +65,21 @@ class AudioWatcher:
         self,
         on_detected: Callable[[str], None],
         spawn_fn: Callable[[], Any] | None = None,
-        sleep_fn: Callable[[float], None] = time.sleep,
+        sleep_fn: Callable[[float], None] | None = None,
         monotonic_fn: Callable[[], float] = time.monotonic,
     ) -> None:
         self._on_detected = on_detected
         self._spawn = spawn_fn or _spawn_pactl
-        self._sleep = sleep_fn
         self._monotonic = monotonic_fn
         self._proc: Any | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
+        # Default backoff sleep waits on the stop event so shutdown interrupts
+        # a pending restart immediately instead of blocking in time.sleep.
+        self._sleep: Callable[[float], None] = sleep_fn or self._interruptible_sleep
+
+    def _interruptible_sleep(self, seconds: float) -> None:
+        self._stop.wait(seconds)
 
     def start(self) -> None:
         self._stop.clear()
@@ -121,8 +126,14 @@ class AudioWatcher:
             self._sleep(backoff)
             backoff = min(backoff * 2, _MAX_BACKOFF)
 
-        # Reap the child so it doesn't linger as a zombie.
+        # stop() may have raced the spawn: terminate again here so a process
+        # created after the stop flag was set is still torn down, then reap it
+        # so it doesn't linger as a zombie.
         if self._proc:
+            try:
+                self._proc.terminate()
+            except Exception:
+                pass
             try:
                 self._proc.wait(timeout=5)
             except Exception:

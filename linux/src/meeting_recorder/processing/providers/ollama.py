@@ -22,7 +22,8 @@ logger = logging.getLogger(__name__)
 def _read_error_detail(exc: urllib.error.HTTPError) -> str:
     """Extract the "error" field from an Ollama HTTP error body, if present."""
     try:
-        detail = json.loads(exc.read()).get("error", "")
+        data = json.loads(exc.read())
+        detail = data.get("error", "") if isinstance(data, dict) else ""
     except Exception:
         detail = ""
     return detail or f"HTTP {exc.code}"
@@ -132,10 +133,13 @@ class OllamaProvider:
                 "The transcript may be too long, or the model may be overloaded."
             ) from None
 
+        if not isinstance(data, dict):
+            raise RuntimeError("Ollama returned an invalid response format.")
         if data.get("error"):
             raise RuntimeError(f"Ollama error: {data['error']}")
 
-        response = str(data.get("response", "")).strip()
+        # "response": null must read as empty (str(None) would be truthy "None").
+        response = str(data.get("response") or "").strip()
         if not response:
             raise RuntimeError(f"Ollama returned an empty response for model {self._model!r}.")
         return response

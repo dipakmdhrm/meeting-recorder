@@ -1,7 +1,12 @@
 post_install() {
     python3 -m venv /opt/meeting-recorder/venv --system-site-packages
     /opt/meeting-recorder/venv/bin/pip install --quiet --upgrade pip
-    /opt/meeting-recorder/venv/bin/pip install --quiet -r /opt/meeting-recorder/requirements.txt
+    # Prefer the pinned lock file when present (reproducible installs).
+    if [ -f /opt/meeting-recorder/requirements.lock ]; then
+        /opt/meeting-recorder/venv/bin/pip install --quiet -r /opt/meeting-recorder/requirements.lock
+    else
+        /opt/meeting-recorder/venv/bin/pip install --quiet -r /opt/meeting-recorder/requirements.txt
+    fi
     mkdir -p /var/log/meeting-recorder
     chmod 1777 /var/log/meeting-recorder
     update-desktop-database /usr/share/applications 2>/dev/null || true

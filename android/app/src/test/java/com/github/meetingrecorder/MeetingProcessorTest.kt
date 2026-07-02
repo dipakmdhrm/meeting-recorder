@@ -4,6 +4,7 @@ import com.github.meetingrecorder.data.Config
 import com.github.meetingrecorder.data.GeminiClient
 import com.github.meetingrecorder.data.MeetingProcessor
 import com.github.meetingrecorder.data.MeetingRepository
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -194,5 +195,41 @@ class MeetingProcessorTest {
         return MockResponse()
             .setResponseCode(200)
             .setBody("""{"candidates":[{"content":{"parts":[{"text":"$escaped"}]}}]}""")
+    }
+
+    // -------------------------------------------------------------------------
+    // Cancellation: generateTitle must propagate CancellationException,
+    // never swallow it into a null title
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun `generateTitle propagates cancellation instead of returning null`() = runTest {
+        // A transient 503 makes the client enter its retry backoff, whose
+        // injected delay suspends forever — cancelling the job then must
+        // surface as cancellation, not as a caught-and-logged failure.
+        server.enqueue(MockResponse().setResponseCode(503))
+        val gemini = GeminiClient(
+            config,
+            server.url("/").toString().trimEnd('/'),
+            delayFn = { kotlinx.coroutines.delay(Long.MAX_VALUE) },
+        )
+        val cancellable = MeetingProcessor(
+            gemini = gemini,
+            store = repository,
+            logWarn = { msg, _ -> loggedWarnings += msg },
+        )
+
+        var completedWithNull = false
+        val job = launch {
+            cancellable.generateTitle("some notes")
+            completedWithNull = true // must never be reached
+        }
+        testScheduler.runCurrent() // let the request fail and enter backoff
+        job.cancel()
+        job.join()
+
+        assertTrue(job.isCancelled)
+        assertFalse(completedWithNull)
+        assertTrue(loggedWarnings.isEmpty()) // cancellation is not "a failure"
     }
 }

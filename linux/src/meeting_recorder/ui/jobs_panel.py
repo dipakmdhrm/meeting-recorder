@@ -86,17 +86,24 @@ class JobsPanel:
         status_icon: Gtk.Image = widgets["status_icon"]
         row: Adw.ActionRow = widgets["row"]
 
-        spinner.stop()
-        spinner.set_visible(False)
-        status_icon.set_visible(True)
-
-        if job.status is JobStatus.DONE:
-            status_icon.set_from_icon_name("emblem-ok-symbolic")
-            row.set_subtitle("Done")
-        elif job.status is JobStatus.ERROR:
-            status_icon.set_from_icon_name("dialog-error-symbolic")
-            err = (job.error_msg or "Error")[:60]
-            row.set_subtitle(f"Error: {err}")
+        if job.status is JobStatus.PROCESSING:
+            # A retried job goes back to spinning instead of keeping the
+            # stale error icon and message.
+            status_icon.set_visible(False)
+            spinner.set_visible(True)
+            spinner.start()
+            row.set_subtitle("Processing…")
+        else:
+            spinner.stop()
+            spinner.set_visible(False)
+            status_icon.set_visible(True)
+            if job.status is JobStatus.DONE:
+                status_icon.set_from_icon_name("emblem-ok-symbolic")
+                row.set_subtitle("Done")
+            else:
+                status_icon.set_from_icon_name("dialog-error-symbolic")
+                err = (job.error_msg or "Error")[:60]
+                row.set_subtitle(f"Error: {err}")
 
         self._rebuild_action_box(job)
 

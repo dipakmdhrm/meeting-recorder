@@ -107,6 +107,8 @@ class ModelsPage:
         self._wcpp_backend_combo: IdComboRow | None = None
         self._ollama_grid: ModelRowGrid | None = None
         self._ollama_status_row: Adw.ActionRow | None = None
+        self._ollama_model_combo: IdComboRow | None = None
+        self._ollama_host_entry: Adw.EntryRow | None = None
 
         self.widget = self._build()
 
@@ -630,6 +632,7 @@ class ModelsPage:
         if self._wcpp_backend_combo is not None:
             cfg["whisper_cpp_backend"] = self._wcpp_backend_combo.get_active_id() or "auto"
 
-        if self._ollama_inst.is_available():
+        if self._ollama_model_combo is not None:
             cfg["ollama_model"] = self._ollama_model_combo.get_active_id() or OLLAMA_MODELS[0]
+        if self._ollama_host_entry is not None:
             cfg["ollama_host"] = self._ollama_host_entry.get_text().strip() or OLLAMA_DEFAULT_HOST

@@ -40,13 +40,22 @@ class KeyringStore:
     # ------------------------------------------------------------------
 
     def available(self) -> bool:
-        """True if the Secret Service can actually be reached right now."""
+        """True if the Secret Service can be reached right now.
+
+        Deliberately does NOT unlock the collection: this is called from
+        startup/save paths, and triggering a synchronous password prompt from
+        a mere availability probe would be intrusive. get()/set() unlock when
+        the secret is actually needed.
+        """
         if self._ss is None:
             return False
         try:
-            conn, _collection = self._open()
-            conn.close()
-            return True
+            conn = self._ss.dbus_init()
+            try:
+                self._ss.get_default_collection(conn)
+                return True
+            finally:
+                conn.close()
         except Exception as exc:
             logger.debug("Secret Service unavailable: %s", exc)
             return False
@@ -103,7 +112,13 @@ class KeyringStore:
 
     def _open(self) -> tuple[Any, Any]:
         conn = self._ss.dbus_init()
-        collection = self._ss.get_default_collection(conn)
-        if collection.is_locked():
-            collection.unlock()
+        try:
+            collection = self._ss.get_default_collection(conn)
+            if collection.is_locked():
+                collection.unlock()
+        except Exception:
+            # Close the connection on failure (e.g. the user dismissed the
+            # unlock prompt) so repeated failures don't leak descriptors.
+            conn.close()
+            raise
         return conn, collection

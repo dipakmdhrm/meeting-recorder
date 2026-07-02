@@ -1,6 +1,7 @@
 package com.github.meetingrecorder.data
 
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -50,6 +51,10 @@ class MeetingProcessor(
      */
     suspend fun generateTitle(notes: String): String? = try {
         gemini.generateTitle(notes).trim()
+    } catch (e: CancellationException) {
+        // Never swallow cancellation: the caller's coroutine must stop instead
+        // of continuing to write results after the user cancelled.
+        throw e
     } catch (e: Exception) {
         logWarn("Title generation failed; keeping meeting untitled", e)
         null

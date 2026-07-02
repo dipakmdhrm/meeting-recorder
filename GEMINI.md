@@ -15,13 +15,25 @@
    git push -u origin <descriptive-branch-name>
    gh pr create --base main --title "..." --body "..."
    ```
-4. Wait for CI to pass before merging.
-5. After the PR is merged, tag releases from `main` (never from a feature branch).
-5.1 If changes are only in linux app create tag for linux release only (eg. v1.2.3)
-5.2 If changes are only in android app create tag for android release only (eg. android-1.2.3)
-5.3 If changes are in both, create both releases
+4. **Wait 5 minutes for automated review comments** (e.g. Gemini Code Assist), then fetch
+   them (`gh api repos/<owner>/<repo>/pulls/<n>/comments`). Validate each comment against
+   the actual code — reviewers can be stale or wrong. Address the valid ones with commits
+   on the same branch; reply to invalid/stale ones explaining why. Resolve the review
+   threads you have handled (GraphQL `resolveReviewThread`), don't just reply.
+5. Wait for CI to pass.
+6. **Never merge a PR — merging is always the user's decision and action**, even when CI
+   is green and all review comments are addressed. Stop when the PR is ready and report
+   its URL.
+7. After the user merges, releases are tagged from `main` (never from a feature branch);
+   the auto-release workflow handles this based on which directories changed
+   (v* for Linux, android-* for Android).
 
-This applies to all agents (Claude, Gemini, etc.) — no direct pushes to `main` under any circumstances.
+**One PR per prompt:** create exactly one pull request per user request, even when the
+work is large. Use multiple commits on the same branch for reviewability instead of
+fanning out into many small PRs — only split when the user explicitly asks.
+
+This applies to all agents (Claude, Gemini, etc.) — no direct pushes to `main`, and no
+merges, under any circumstances.
 
 ---
 
@@ -68,6 +80,11 @@ This repository is a monorepo containing two applications: a Linux desktop apple
     *   **Dependencies:** `androidx.compose`, `androidx.lifecycle`, `androidx.navigation`, `okhttp`, `coroutines`, `kotlinx-serialization-json` (all JSON handling — meeting.json and the Gemini wire format — uses `kotlinx.serialization` DTOs, not `org.json`)
 
 ### Architecture
+
+> **Authoritative architecture documentation lives in `CLAUDE.md`** (Linux architecture,
+> Android architecture, and test-coverage boundaries) and is kept in sync with the code
+> on every PR. The summary below is intentionally brief — when it disagrees with
+> CLAUDE.md, CLAUDE.md is right.
 
 The project is structured as a monorepo with two main directories:
 

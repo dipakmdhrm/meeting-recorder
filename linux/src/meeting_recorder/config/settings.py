@@ -86,9 +86,25 @@ def save(config: dict[str, Any], keyring: KeyringStore | None = None) -> None:
         if store.available() and store.set(key):
             to_write["gemini_api_key"] = KEYRING_SENTINEL
     elif not key:
-        # Key cleared — don't leave a stale secret behind in the keyring.
-        store.delete()
+        if store.available():
+            # Key cleared — don't leave a stale secret behind in the keyring.
+            store.delete()
+        elif _stored_key_is_sentinel():
+            # The keyring is unreachable (e.g. locked and the unlock prompt
+            # was dismissed), so this empty key almost certainly came from a
+            # failed load(), not from the user clearing it. Keep the sentinel
+            # so the secret is not silently lost by saving unrelated settings.
+            to_write["gemini_api_key"] = KEYRING_SENTINEL
     _write(to_write)
+
+
+def _stored_key_is_sentinel() -> bool:
+    """True if config.json on disk currently stores the keyring sentinel."""
+    try:
+        stored = json.loads(_config_path().read_text())
+    except Exception:
+        return False
+    return isinstance(stored, dict) and stored.get("gemini_api_key") == KEYRING_SENTINEL
 
 
 def migrate_key_to_keyring(keyring: KeyringStore | None = None) -> bool:

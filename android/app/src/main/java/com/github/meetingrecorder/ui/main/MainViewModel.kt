@@ -76,27 +76,29 @@ class MainViewModel(
         durationSeconds = 0
 
         viewModelScope.launch {
-            val meetingDir = try {
+            // Do the blocking I/O on IO, but assign ViewModel state on Main only
+            // (these properties are read/written on the Main thread elsewhere).
+            val (meetingDir, lock) = try {
                 withContext(Dispatchers.IO) {
-                    meetingRepository.createMeetingDir(title).also { dir ->
-                        lockFile = File(dir, ".recording").also { it.createNewFile() }
-                    }
+                    val dir = meetingRepository.createMeetingDir(title)
+                    dir to File(dir, ".recording").also { it.createNewFile() }
                 }
             } catch (e: Exception) {
                 _state.value = RecordingState.Error("Could not create recording folder: ${e.message}")
                 return@launch
             }
+            lockFile = lock
             currentMeetingDir = meetingDir
 
             try {
                 RecordingService.start(app, meetingDir, config.audioQuality.bitrate)
             } catch (e: Exception) {
+                lockFile = null
+                currentMeetingDir = null
                 withContext(Dispatchers.IO) {
-                    lockFile?.delete()
-                    lockFile = null
+                    lock.delete()
                     meetingDir.deleteRecursively()
                 }
-                currentMeetingDir = null
                 _state.value = RecordingState.Error("Could not start recording: ${e.message}")
                 return@launch
             }
@@ -201,11 +203,14 @@ class MainViewModel(
             _state.value = RecordingState.Ready
             return
         }
+        val title = currentTitle
+        val duration = durationSeconds
+        val lock = lockFile
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    meetingRepository.saveMeetingMeta(meetingDir, currentTitle, durationSeconds)
-                    lockFile?.delete()
+                    meetingRepository.saveMeetingMeta(meetingDir, title, duration)
+                    lock?.delete()
                 }
                 lockFile = null
                 _state.value = RecordingState.Ready
@@ -268,24 +273,23 @@ class MainViewModel(
         // processing runs. If processing fails the original audio-only meeting is unaffected.
         lockFile = null
         viewModelScope.launch {
-            // Preserve existing title and duration so saveResults() writes them back correctly.
-            withContext(Dispatchers.IO) {
+            // Preserve existing title and duration so saveResults() writes them back
+            // correctly. Parse on IO; assign ViewModel state on Main.
+            val meta = withContext(Dispatchers.IO) {
                 val metaFile = File(meetingDir, "meeting.json")
                 if (metaFile.exists()) {
                     try {
-                        val meta = MeetingMeta.parse(metaFile.readText())
-                        currentTitle = meta.title
-                        durationSeconds = meta.durationSeconds ?: 0
+                        MeetingMeta.parse(metaFile.readText())
                     } catch (e: Exception) {
                         Log.w(TAG, "Could not read meeting.json in ${meetingDir.name}; proceeding without title/duration", e)
-                        currentTitle = null
-                        durationSeconds = 0
+                        null
                     }
                 } else {
-                    currentTitle = null
-                    durationSeconds = 0
+                    null
                 }
             }
+            currentTitle = meta?.title
+            durationSeconds = meta?.durationSeconds ?: 0
             try {
                 processRecording(audioFile, extensionToMimeType(audioFile.extension))
             } catch (e: Exception) {
@@ -368,8 +372,9 @@ class MainViewModel(
 
         viewModelScope.launch {
             try {
+                val lock = lockFile
                 processor.saveResults(meetingDir, done.transcript, done.notes, currentTitle, durationSeconds)
-                withContext(Dispatchers.IO) { lockFile?.delete() }
+                withContext(Dispatchers.IO) { lock?.delete() }
                 lockFile = null
                 isInPlace = false
                 _state.value = RecordingState.Ready

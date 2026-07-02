@@ -43,4 +43,12 @@ class MimeTest {
         assertEquals("audio/ogg", normalizeMimeType("audio/ogg"))
         assertEquals("application/octet-stream", normalizeMimeType("application/octet-stream"))
     }
+
+    @Test
+    fun `mime normalization is case-insensitive per RFC 2045`() {
+        assertEquals("audio/mp4", normalizeMimeType("AUDIO/M4A"))
+        assertEquals("audio/wav", normalizeMimeType("Audio/X-Wav"))
+        assertEquals("audio/mpeg", normalizeMimeType("AUDIO/MP3"))
+        assertEquals("audio/ogg", normalizeMimeType("Audio/OGG"))
+    }
 }

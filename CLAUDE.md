@@ -17,13 +17,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    git push -u origin <descriptive-branch-name>
    gh pr create --base main --title "..." --body "..."
    ```
-4. Wait for CI to pass before merging.
-5. After the PR is merged, tag releases from `main` (never from a feature branch).
-5.1 If changes are only in linux app create tag for linux release only (eg. v1.2.3)
-5.2 If changes are only in android app create tag for android release only (eg. android-1.2.3)
-5.3 If changes are in both, create both releases
+4. **Wait 5 minutes for automated review comments** (e.g. Gemini Code Assist), then fetch
+   them (`gh api repos/<owner>/<repo>/pulls/<n>/comments`). Validate each comment against
+   the actual code — reviewers can be stale or wrong. Address the valid ones with commits
+   on the same branch; reply to invalid/stale ones explaining why. Resolve the review
+   threads you have handled (GraphQL `resolveReviewThread`), don't just reply.
+5. Wait for CI to pass.
+6. **Never merge a PR — merging is always the user's decision and action**, even when CI
+   is green and all review comments are addressed. Stop when the PR is ready and report
+   its URL.
+7. After the user merges, releases are tagged from `main` (never from a feature branch);
+   the auto-release workflow handles this based on which directories changed
+   (v* for Linux, android-* for Android).
 
-This applies to all agents (Claude, Gemini, etc.) — no direct pushes to `main` under any circumstances.
+**One PR per prompt:** create exactly one pull request per user request, even when the
+work is large. Use multiple commits on the same branch for reviewability instead of
+fanning out into many small PRs — only split when the user explicitly asks.
+
+This applies to all agents (Claude, Gemini, etc.) — no direct pushes to `main`, and no
+merges, under any circumstances.
 
 ---
 
@@ -122,7 +134,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 - Pause/resume works via **segments**: pause terminates ffmpeg cleanly (saving the current segment), resume spawns a new ffmpeg writing the next segment, and stop concatenates all segments with ffmpeg's concat demuxer so paused intervals are excluded. `stop()` blocks until ffmpeg exits and segments are merged; a monitor thread reports unexpected ffmpeg death via `on_error`.
 - Two modes: mic+system (`Record (Headphones)`) and mic-only (`Record (Speaker)` — the monitor is skipped to avoid echo).
 
-**Recording state machine** (`core/state_machine.py`): `State` (IDLE/RECORDING/PAUSED/COUNTDOWN) plus the pure `can_transition()` legality table — `MainWindow._transition()` validates against it (logs an error on an illegal jump). `core/job.py` holds the `Job` dataclass (`JobStatus` enum, per-job `CancelToken`) and `actions_for_status()`, the pure policy for which buttons a job row offers. `State` is re-exported from `ui/main_window.py` for existing importers.
+**Recording state machine** (`core/state_machine.py`): `State` (IDLE/RECORDING/PAUSED/COUNTDOWN) plus the pure `can_transition()` legality table — `RecordingController._set_state()` validates against it (logs an error on an illegal jump). `core/job.py` holds the `Job` dataclass (`JobStatus` enum, per-job `CancelToken`) and `actions_for_status()`, the pure policy for which buttons a job row offers. `State` is re-exported from `ui/main_window.py` for existing importers.
 
 **Recording lifecycle** (`core/recording_controller.py`): `RecordingController` owns the Recorder instance, the stop/processing countdown, and the authoritative lifecycle `State`; `MainWindow` only renders state changes (`_apply_state`) and forwards button clicks (`window._state` is a read-through property — app.py/tray still read it). Callbacks: `on_state`/`on_error`/`on_commit(PendingRecording)`/`on_saved`/`on_discarded`/`on_countdown`; `on_timer` and `on_recorder_error` arrive on recorder worker threads and the window wraps them with `idle_call`. GTK dependencies (countdown scheduler, recorder factory, device validation) are injected, so the whole lifecycle is unit-testable headless. `make_job_label()` and `settings.api_key_error()` are the extracted pure helpers.
 

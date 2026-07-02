@@ -122,6 +122,11 @@ class JobManager:
         except (json.JSONDecodeError, OSError) as exc:
             logger.warning("Could not read %s (%s); starting with no jobs", self._file, exc)
             return []
+        if not isinstance(data, dict):
+            logger.warning(
+                "Persisted state in %s is not an object; starting with no jobs", self._file
+            )
+            return []
 
         restored: list[Job] = []
         for entry in data.get("jobs", []):
@@ -145,7 +150,11 @@ class JobManager:
             restored.append(job)
 
         self._jobs = restored
-        self._next_id = max([int(data.get("next_id", 0))] + [j.job_id + 1 for j in restored])
+        try:
+            next_id = int(data.get("next_id", 0))
+        except (TypeError, ValueError):
+            next_id = 0
+        self._next_id = max([next_id] + [j.job_id + 1 for j in restored])
         self._persist()  # drop DONE entries from disk right away
         return list(restored)
 

@@ -29,6 +29,7 @@ Supports both cloud (Google Gemini) and local (Whisper + Ollama) processing.
 install -d %{buildroot}/opt/meeting-recorder/linux/src
 cp -r linux/src/. %{buildroot}/opt/meeting-recorder/linux/src/
 install -m 644 linux/requirements.txt %{buildroot}/opt/meeting-recorder/requirements.txt
+install -m 644 linux/requirements.lock %{buildroot}/opt/meeting-recorder/requirements.lock
 
 install -Dm 755 linux/packaging/usr/bin/meeting-recorder \
     %{buildroot}%{_bindir}/meeting-recorder
@@ -49,6 +50,7 @@ install -Dm 644 ${ICONS_SRC}/scalable/apps/meeting-recorder.svg \
 %dir /opt/meeting-recorder
 /opt/meeting-recorder/linux/
 /opt/meeting-recorder/requirements.txt
+/opt/meeting-recorder/requirements.lock
 %{_bindir}/meeting-recorder
 %{_datadir}/applications/io.github.dipakmdhrm.MeetingRecorder.desktop
 %{_datadir}/icons/hicolor/*/apps/meeting-recorder.*
@@ -56,7 +58,12 @@ install -Dm 644 ${ICONS_SRC}/scalable/apps/meeting-recorder.svg \
 %post
 python3 -m venv /opt/meeting-recorder/venv --system-site-packages
 /opt/meeting-recorder/venv/bin/pip install --quiet --upgrade pip
-/opt/meeting-recorder/venv/bin/pip install --quiet -r /opt/meeting-recorder/requirements.txt
+# Prefer the pinned lock file when present (reproducible installs).
+if [ -f /opt/meeting-recorder/requirements.lock ]; then
+    /opt/meeting-recorder/venv/bin/pip install --quiet -r /opt/meeting-recorder/requirements.lock
+else
+    /opt/meeting-recorder/venv/bin/pip install --quiet -r /opt/meeting-recorder/requirements.txt
+fi
 mkdir -p /var/log/meeting-recorder
 chmod 1777 /var/log/meeting-recorder
 update-desktop-database %{_datadir}/applications 2>/dev/null || true

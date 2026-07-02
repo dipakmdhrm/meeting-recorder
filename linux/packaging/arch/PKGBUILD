@@ -26,6 +26,7 @@ package() {
     install -d "${pkgdir}/opt/meeting-recorder/linux/src"
     cp -r linux/src/. "${pkgdir}/opt/meeting-recorder/linux/src/"
     install -m 644 linux/requirements.txt "${pkgdir}/opt/meeting-recorder/requirements.txt"
+    install -m 644 linux/requirements.lock "${pkgdir}/opt/meeting-recorder/requirements.lock"
 
     install -Dm 755 linux/packaging/usr/bin/meeting-recorder \
         "${pkgdir}/usr/bin/meeting-recorder"

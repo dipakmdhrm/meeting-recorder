@@ -32,6 +32,7 @@ import hashlib
 import logging
 import os
 import platform
+import shlex
 import shutil
 import subprocess
 import sys
@@ -43,10 +44,15 @@ logger = logging.getLogger(__name__)
 
 OLLAMA_INSTALL_URL = "https://ollama.com/install.sh"
 
+# The real install script is ~10 KB; anything tiny is a broken/captive response.
+MIN_INSTALL_SCRIPT_BYTES = 1000
+
 
 def _run_command(cmd: list[str]) -> int:
     """Default runner: execute an argv list without a shell, logging it first."""
-    logger.info("Running: %s", " ".join(cmd))
+    # shlex.join quotes arguments with spaces (e.g. sh -c snippets) so the
+    # logged command is accurate and copy-pasteable.
+    logger.info("Running: %s", shlex.join(cmd))
     return subprocess.call(cmd)
 
 
@@ -154,6 +160,14 @@ class OllamaInstaller:
         """Download and run the Ollama install script. Returns ``True`` on success."""
         try:
             script = self._fetch(OLLAMA_INSTALL_URL)
+            if len(script) < MIN_INSTALL_SCRIPT_BYTES:
+                # A captive portal or proxy can return a tiny/empty 200 body;
+                # executing that would silently "succeed" without installing.
+                logger.error(
+                    "Ollama install script suspiciously small (%d bytes) — aborting",
+                    len(script),
+                )
+                return False
             digest = hashlib.sha256(script).hexdigest()
             logger.info(
                 "Fetched Ollama install script (%d bytes, sha256=%s) from %s",
@@ -161,10 +175,12 @@ class OllamaInstaller:
                 digest,
                 OLLAMA_INSTALL_URL,
             )
-            fd, path = tempfile.mkstemp(suffix=".sh", prefix="ollama-install-")
+            with tempfile.NamedTemporaryFile(
+                suffix=".sh", prefix="ollama-install-", delete=False
+            ) as f:
+                f.write(script)
+                path = f.name
             try:
-                with os.fdopen(fd, "wb") as f:
-                    f.write(script)
                 return self._run(["sh", path]) == 0
             finally:
                 try:
@@ -217,7 +233,7 @@ class CudaInstaller:
                 )
                 code = self._run(
                     build_privileged_command(
-                        f"dnf config-manager --add-repo {repo_url}"
+                        f"dnf config-manager --add-repo '{repo_url}'"
                         " && dnf install -y libcublas-12-x cuda-cudart-12-x",
                         self._which,
                     )
