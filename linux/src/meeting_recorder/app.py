@@ -21,6 +21,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 from meeting_recorder.config import settings
 from meeting_recorder.config.defaults import APP_ID, APP_NAME
+from meeting_recorder.core.task_runner import TaskRunner
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,9 @@ class MeetingRecorderApp(Adw.Application):
         self.window = None
         self._tray = None
         self._call_detector = None
+        # Single background-work facility for the whole app; shut down (with a
+        # bounded grace period) in do_shutdown so jobs aren't killed silently.
+        self.task_runner = TaskRunner()
 
     # ------------------------------------------------------------------
     def do_startup(self) -> None:
@@ -131,7 +135,7 @@ class MeetingRecorderApp(Adw.Application):
     def _create_window(self) -> None:
         from .ui.main_window import MainWindow
 
-        self.window = MainWindow(application=self)
+        self.window = MainWindow(runner=self.task_runner, application=self)
 
         # System tray (best-effort)
         try:
@@ -201,4 +205,9 @@ class MeetingRecorderApp(Adw.Application):
         # exit but the child process would otherwise become an orphan.
         if self._call_detector is not None:
             self._call_detector.stop()
+        # Give in-flight background work (recorder stop, pipeline jobs) a
+        # bounded chance to finish instead of killing it silently on exit.
+        abandoned = self.task_runner.shutdown(grace_seconds=10)
+        if abandoned:
+            logger.warning("Exited with unfinished background tasks: %s", ", ".join(abandoned))
         Adw.Application.do_shutdown(self)

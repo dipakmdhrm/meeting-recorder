@@ -12,7 +12,6 @@ import os
 import shutil
 import subprocess
 import threading
-import traceback
 from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
@@ -27,6 +26,7 @@ from meeting_recorder.config import settings
 from meeting_recorder.utils.filename import output_paths
 from meeting_recorder.utils.meeting_scanner import Meeting, find_audio_file
 
+from ..core.task_runner import TaskRunner
 from ..utils.glib_bridge import assert_main_thread, idle_call
 from ..utils.gtk_compat import remove_all_children
 from ..utils.recording_import import resolve_existing_recording_target
@@ -72,10 +72,14 @@ def _icon_label_button(icon_name: str, label: str) -> Gtk.Button:
 
 
 class MainWindow(Adw.ApplicationWindow):
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, runner: TaskRunner, **kwargs) -> None:
         super().__init__(title="Meeting Recorder", **kwargs)
         self.set_default_size(1100, 760)
         self.set_resizable(True)
+
+        # All background work goes through the app-wide TaskRunner (results
+        # and errors are routed back to the main thread; joined on exit).
+        self._runner = runner
 
         self._state = State.IDLE
         self._recorder = None
@@ -493,7 +497,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._jobs.append(job)
         self._add_job_row(job)
         self._notify_tray()
-        threading.Thread(target=self._run_pipeline_for_job, args=(job,), daemon=True).start()
+        self._submit_pipeline_job(job)
 
     def _on_summarize_from_explorer(self, meeting: Meeting) -> None:
         """Handle a Summarize request from the meeting explorer."""
@@ -534,7 +538,7 @@ class MainWindow(Adw.ApplicationWindow):
         # Switch to the Record tab so the user sees job progress
         self._stack.set_visible_child_name("recorder")
 
-        threading.Thread(target=self._run_pipeline_for_job, args=(job,), daemon=True).start()
+        self._submit_pipeline_job(job)
 
     def on_pause_clicked(self) -> None:
         assert_main_thread()
@@ -572,7 +576,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._next_job_id += 1
 
         self._recorder_done.clear()
-        threading.Thread(target=self._stop_recorder_bg, args=(recorder,), daemon=True).start()
+        self._runner.submit(self._stop_recorder_bg, recorder, description="stop recorder")
 
         cfg = settings.load()
         if cfg.get("processing_countdown_enabled", False):
@@ -585,9 +589,7 @@ class MainWindow(Adw.ApplicationWindow):
             if job is not None:
                 self._jobs.append(job)
                 self._add_job_row(job)
-                threading.Thread(
-                    target=self._wait_and_process_job, args=(job,), daemon=True
-                ).start()
+                self._submit_recorded_job(job)
             self._transition(State.IDLE)
 
     def _make_job_label(self) -> str:
@@ -619,17 +621,9 @@ class MainWindow(Adw.ApplicationWindow):
         if job is not None:
             self._jobs.append(job)
             self._add_job_row(job)
-            threading.Thread(target=self._wait_and_process_job, args=(job,), daemon=True).start()
+            self._submit_recorded_job(job)
         self._transition(State.IDLE)
         return GLib.SOURCE_REMOVE
-
-    def _wait_and_process_job(self, job: _Job) -> None:
-        """Background: wait for recorder.stop() to complete, then run pipeline."""
-        self._recorder_done.wait(timeout=35)
-        if job.cancelled:
-            return
-        idle_call(self._update_job_status_text, job, "Transcribing…")
-        self._run_pipeline_for_job(job)
 
     def on_cancel_countdown_clicked(self) -> None:
         assert_main_thread()
@@ -651,15 +645,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._recorder = None
         self._transition(State.IDLE, status="Stopping recording…")
 
-        def _bg():
-            try:
-                recorder.stop()
-            except Exception as exc:
-                idle_call(self._show_error, f"Failed to stop recording: {exc}")
-                return
-            idle_call(_done)
-
-        def _done():
+        def _done(_result) -> None:
             self._transition(State.IDLE, status="Recording saved (no transcription).")
             paths = []
             if transcript_path and transcript_path.exists():
@@ -672,7 +658,12 @@ class MainWindow(Adw.ApplicationWindow):
                 self._output_label.set_text("\n".join(paths))
                 self._output_box.set_visible(True)
 
-        threading.Thread(target=_bg, daemon=True).start()
+        self._runner.submit(
+            recorder.stop,
+            on_done=_done,
+            on_error=lambda exc: self._show_error(f"Failed to stop recording: {exc}"),
+            description="stop recorder (cancel + save)",
+        )
 
     def on_cancel_clicked(self) -> None:
         assert_main_thread()
@@ -683,12 +674,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._recorder = None
         self._transition(State.IDLE, status="Cancelling…")
 
-        def _bg():
-            try:
-                recorder.stop()
-            except Exception as exc:
-                idle_call(self._show_error, f"Failed to stop recording: {exc}")
-                return
+        def _stop_and_discard() -> None:
+            recorder.stop()
             if audio_path and audio_path.exists():
                 try:
                     audio_path.unlink()
@@ -697,18 +684,54 @@ class MainWindow(Adw.ApplicationWindow):
             if audio_path:
                 try:
                     audio_path.parent.rmdir()
-                except Exception:
-                    pass
-            idle_call(self._transition, State.IDLE)
+                except OSError:
+                    pass  # directory not empty (other files) — leave it
 
-        threading.Thread(target=_bg, daemon=True).start()
+        self._runner.submit(
+            _stop_and_discard,
+            on_done=lambda _r: self._transition(State.IDLE),
+            on_error=lambda exc: self._show_error(f"Failed to stop recording: {exc}"),
+            description="stop recorder (discard)",
+        )
 
     # ------------------------------------------------------------------
     # Pipeline / job management
     # ------------------------------------------------------------------
 
-    def _run_pipeline_for_job(self, job: _Job) -> None:
-        """Background: run transcription + summarisation for a job."""
+    def _submit_pipeline_job(self, job: _Job) -> None:
+        """Run the AI pipeline for *job* in the background.
+
+        The worker only reads the job; all job mutations happen in the
+        main-thread callbacks, so no locking is needed.
+        """
+        self._runner.submit(
+            self._pipeline_worker,
+            job,
+            on_done=lambda paths, j=job: self._on_pipeline_finished(j, paths),
+            on_error=lambda exc, j=job: self._on_pipeline_failed(j, exc),
+            description=f"pipeline: {job.label}",
+        )
+
+    def _submit_recorded_job(self, job: _Job) -> None:
+        """Like _submit_pipeline_job, but waits for the recorder to finish first."""
+        self._runner.submit(
+            self._recorded_job_worker,
+            job,
+            on_done=lambda paths, j=job: self._on_pipeline_finished(j, paths),
+            on_error=lambda exc, j=job: self._on_pipeline_failed(j, exc),
+            description=f"pipeline (after stop): {job.label}",
+        )
+
+    def _recorded_job_worker(self, job: _Job):
+        """Worker: wait for recorder.stop() to complete, then run the pipeline."""
+        self._recorder_done.wait(timeout=35)
+        if job.cancelled:
+            return None
+        idle_call(self._update_job_status_text, job, "Transcribing…")
+        return self._pipeline_worker(job)
+
+    def _pipeline_worker(self, job: _Job):
+        """Worker: run transcription + summarisation. Returns final output paths."""
         from meeting_recorder.processing.pipeline import Pipeline
 
         cfg = settings.load()
@@ -721,23 +744,27 @@ class MainWindow(Adw.ApplicationWindow):
                 idle_call(self._update_job_status_text, job, msg) if not job.cancelled else None
             ),
         )
-        try:
-            pipeline.run()
-            # Update job paths in case auto-title renamed the directory
-            audio_path, transcript_path, notes_path = pipeline.output_paths
-            job.audio_path = audio_path
-            if transcript_path:
-                job.transcript_path = transcript_path
-            if notes_path:
-                job.notes_path = notes_path
+        pipeline.run()
+        return pipeline.output_paths
 
-            if not job.cancelled:
-                idle_call(self._on_job_done, job)
-        except Exception as exc:
-            full = traceback.format_exc()
-            logger.error("Pipeline failed for job %d:\n%s", job.job_id, full)
-            if not job.cancelled:
-                idle_call(self._on_job_error, job, str(exc))
+    def _on_pipeline_finished(self, job: _Job, paths) -> None:
+        assert_main_thread()
+        if job.cancelled or paths is None:
+            return
+        # Update job paths in case auto-title renamed the directory.
+        audio_path, transcript_path, notes_path = paths
+        if audio_path:
+            job.audio_path = audio_path
+        if transcript_path:
+            job.transcript_path = transcript_path
+        if notes_path:
+            job.notes_path = notes_path
+        self._on_job_done(job)
+
+    def _on_pipeline_failed(self, job: _Job, exc: Exception) -> None:
+        assert_main_thread()
+        if not job.cancelled:
+            self._on_job_error(job, str(exc))
 
     def _on_job_done(self, job: _Job) -> None:
         assert_main_thread()
@@ -766,7 +793,7 @@ class MainWindow(Adw.ApplicationWindow):
         job.cancelled = False
         self._update_job_row(job)
         self._notify_tray()
-        threading.Thread(target=self._run_pipeline_for_job, args=(job,), daemon=True).start()
+        self._submit_pipeline_job(job)
 
     def _on_open_job_folder(self, job: _Job) -> None:
         try:
