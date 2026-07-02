@@ -279,11 +279,11 @@ jobs:
       - name: Verify pacman package structure
         if: matrix.pkg == 'pacman'
         run: |
-          bsdtar -tf arch-build/*.pkg.tar.zst | grep -q usr/bin/meeting-recorder
-          bsdtar -tf arch-build/*.pkg.tar.zst | grep -q opt/meeting-recorder/linux/src
-          bsdtar -tf arch-build/*.pkg.tar.zst | grep -q opt/meeting-recorder/requirements.lock
-          bsdtar -tf arch-build/*.pkg.tar.zst | grep -q usr/share/applications/io.github.dipakmdhrm.MeetingRecorder.desktop
-          bsdtar -tf arch-build/*.pkg.tar.zst | grep -q usr/share/icons/hicolor/256x256/apps/meeting-recorder.png
+          bsdtar -tf arch-build/*.pkg.tar.* | grep -q usr/bin/meeting-recorder
+          bsdtar -tf arch-build/*.pkg.tar.* | grep -q opt/meeting-recorder/linux/src
+          bsdtar -tf arch-build/*.pkg.tar.* | grep -q opt/meeting-recorder/requirements.lock
+          bsdtar -tf arch-build/*.pkg.tar.* | grep -q usr/share/applications/io.github.dipakmdhrm.MeetingRecorder.desktop
+          bsdtar -tf arch-build/*.pkg.tar.* | grep -q usr/share/icons/hicolor/256x256/apps/meeting-recorder.png
           echo "All required paths present in pacman package"
 
       # Same guard as the .deb/.rpm: install with the real depends array
@@ -292,7 +292,7 @@ jobs:
       - name: Install pacman package and import smoke test
         if: matrix.pkg == 'pacman'
         run: |
-          pacman -U --noconfirm arch-build/*.pkg.tar.zst
+          pacman -U --noconfirm arch-build/*.pkg.tar.*
           PYTHONPATH=/opt/meeting-recorder/linux/src \
             /opt/meeting-recorder/venv/bin/python - <<'EOF'
           import gi
