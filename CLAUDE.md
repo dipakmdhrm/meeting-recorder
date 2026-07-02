@@ -158,7 +158,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## Android architecture
 
-**Application class:** `MeetingRecorderApp` initialises two singletons on startup: `Config` (SharedPreferences wrapper) and `MeetingRepository` (file-system meeting store rooted at `Documents/Meetings/`).
+**Application class & DI:** `MeetingRecorderApp` owns an `AppContainer` (manual dependency container — deliberately no Hilt/Koin at this size) that wires the app-wide singletons: `Config` (SharedPreferences wrapper), `MeetingRepository` (file-system meeting store rooted at `Documents/Meetings/`), and a shared `GeminiClient`. ViewModels get these as constructor parameters through the shared `appViewModelFactory` (`viewModelFactory { initializer { … } }` reading the app from `APPLICATION_KEY`) instead of casting `application`; only ViewModels that genuinely need a Context stay `AndroidViewModel` (`MainViewModel` — service start/getString/contentResolver; `MeetingsViewModel` — getString), while `MeetingDetailViewModel` and `SettingsViewModel` are plain `ViewModel`s. Startup orphan recovery (`recoverOrphanedRecordings()`) runs in an application-scoped coroutine (`SupervisorJob() + Dispatchers.IO`), not a raw `Thread`.
 
 **Navigation:** `AppNavGraph` (Compose Navigation) with four routes:
 - `main` → `MainScreen` (record button, status)
@@ -166,7 +166,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 - `meetings` → `MeetingsScreen` (list of past meetings)
 - `meeting_detail/{meetingPath}` → `MeetingDetailScreen` (Notes / Transcript / Audio tabs)
 
-File system paths are passed as nav arguments with `/` encoded as `%2F`.
+Routes are defined once in `ui/nav/Routes.kt` (`Routes.MAIN`, `Routes.meetingDetail(path)`, `Routes.MEETING_DETAIL_PATTERN`, …) — no call site hand-builds route strings. File system paths are passed as nav arguments with `/` encoded as `%2F` via the pure `Routes.encodeMeetingPath`/`decodeMeetingPath` helpers (JVM-tested in `RoutesTest`).
 
 **Settings save model:** Each settings tab holds local draft state in the Composable. The ViewModel setters write directly to `Config`/SharedPreferences. The Save button is what calls the setters — nothing is persisted on keystroke. Empty string stored for a prompt = use built-in default (same convention as Linux).
 
@@ -178,7 +178,9 @@ File system paths are passed as nav arguments with `/` encoded as `%2F`.
 
 **Detail-screen generation:** `MeetingDetailScreen` / `MeetingDetailViewModel` can generate or regenerate content for a meeting already in the library — *Generate transcript & notes* (when audio exists), *Generate notes* (reusing an existing transcript, no re-upload), and *Regenerate notes* — reusing `GeminiClient` and the same disk-write + `saveMeetingMeta` pattern as the record flow. Playback uses `MediaPlayer` in the same ViewModel; the Audio tab is only shown when `hasAudio` is true. `GenerateActionDecision` is a pure helper for which empty-state button to offer.
 
-**Storage:** `Documents/Meetings/YYYY/MonthName/DD/HH-MM[_title]/` on external storage (`MANAGE_EXTERNAL_STORAGE` permission required). Meetings can be renamed and deleted from `MeetingsScreen`.
+**Storage:** `Documents/Meetings/YYYY/MonthName/DD/HH-MM[_title]/` on external storage (`MANAGE_EXTERNAL_STORAGE` permission required). Meetings can be renamed and deleted from `MeetingsScreen`. The `Documents` root is resolved in `AppContainer` via `StorageManager.primaryStorageVolume.directory` (non-deprecated; same `/storage/emulated/0` root the docs-deprecated `Environment.getExternalStoragePublicDirectory()` used).
+
+`MANAGE_EXTERNAL_STORAGE` is a **deliberate decision**, not an oversight: the app is distributed as a GitHub APK (not on the Play Store), and the shared, user-visible `Documents/Meetings/` tree survives app uninstall and is the same on-disk format the Linux app reads and writes. If Play Store distribution ever becomes a goal, the migration path is a SAF tree grant (`ACTION_OPEN_DOCUMENT_TREE` over the same `Documents/Meetings/` directory), which preserves the shared on-disk format — until then, do not swap the permission model.
 
 ---
 
@@ -194,5 +196,6 @@ JVM-only unit tests (no Robolectric) in `app/src/test/`:
 - `GeminiClientTest` — full coverage of the upload→poll→generate flow using `MockWebServer`
 - `RecordingStopDecisionTest` — covers `decideStopOutcome` branch ordering
 - `GenerateActionDecisionTest` — covers the detail-screen empty-state button policy
+- `RoutesTest` — covers the nav-route builders and the `%2F` meeting-path encode/decode round-trip
 
-ViewModels (`MainViewModel`, `MeetingDetailViewModel`, `SettingsViewModel`) and all Compose UI are **not** unit-tested; they require Android platform APIs or the Compose testing framework, neither of which is in the current test setup. The established pattern is to **extract pure decision logic out of a ViewModel into a standalone function** (e.g. `RecordingStopDecision.kt`, `GenerateActionDecision.kt`) so the policy is unit-testable even though the ViewModel is not.
+ViewModels (`MainViewModel`, `MeetingDetailViewModel`, `MeetingsViewModel`, `SettingsViewModel`) and all Compose UI are **not** unit-tested; they require Android platform APIs or the Compose testing framework, neither of which is in the current test setup. The established pattern is to **extract pure decision logic out of a ViewModel into a standalone function** (e.g. `RecordingStopDecision.kt`, `GenerateActionDecision.kt`) so the policy is unit-testable even though the ViewModel is not.

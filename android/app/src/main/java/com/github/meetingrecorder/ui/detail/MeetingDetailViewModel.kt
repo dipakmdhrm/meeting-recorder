@@ -1,12 +1,12 @@
 package com.github.meetingrecorder.ui.detail
 
-import android.app.Application
 import android.media.MediaPlayer
 import android.util.Log
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.github.meetingrecorder.MeetingRecorderApp
+import com.github.meetingrecorder.data.Config
 import com.github.meetingrecorder.data.GeminiClient
+import com.github.meetingrecorder.data.MeetingRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -29,10 +29,13 @@ sealed interface GenState {
 
 private const val TAG = "MeetingDetailViewModel"
 
-// View model for the meeting detail screen
-class MeetingDetailViewModel(application: Application) : AndroidViewModel(application) {
-
-    private val app = application as MeetingRecorderApp
+// View model for the meeting detail screen. Plain ViewModel — no Context needed (MediaPlayer is
+// context-free); dependencies are constructor-injected via appViewModelFactory.
+class MeetingDetailViewModel(
+    private val config: Config,
+    private val meetingRepository: MeetingRepository,
+    private val gemini: GeminiClient,
+) : ViewModel() {
 
     private val _transcript = MutableStateFlow<String?>(null)
     val transcript: StateFlow<String?> = _transcript.asStateFlow()
@@ -125,7 +128,7 @@ class MeetingDetailViewModel(application: Application) : AndroidViewModel(applic
         if (_genState.value is GenState.Processing) return
         val dir = meetingDir ?: return
         val audio = audioFile ?: return
-        if (app.config.apiKey.isBlank()) {
+        if (config.apiKey.isBlank()) {
             _genState.value = GenState.Error("No Gemini API key set. Add one in Settings.")
             return
         }
@@ -133,15 +136,14 @@ class MeetingDetailViewModel(application: Application) : AndroidViewModel(applic
             _genState.value = GenState.Processing("Starting…")
             try {
                 withContext(Dispatchers.IO) {
-                    val gemini = GeminiClient(app.config)
                     val transcript = gemini.transcribe(audio, extensionToMimeType(audio.extension)) {
                         _genState.value = GenState.Processing(it)
                     }
                     val notes = gemini.summarize(transcript) { _genState.value = GenState.Processing(it) }
                     File(dir, "transcript.md").writeText(transcript)
                     File(dir, "notes.md").writeText(notes)
-                    maybeGenerateTitle(gemini, notes)
-                    app.meetingRepository.saveMeetingMeta(dir, currentTitle, durationSeconds)
+                    maybeGenerateTitle(notes)
+                    meetingRepository.saveMeetingMeta(dir, currentTitle, durationSeconds)
                     _transcript.value = transcript
                     _notes.value = notes
                 }
@@ -164,7 +166,7 @@ class MeetingDetailViewModel(application: Application) : AndroidViewModel(applic
         if (_genState.value is GenState.Processing) return
         val dir = meetingDir ?: return
         val transcript = _transcript.value ?: return
-        if (app.config.apiKey.isBlank()) {
+        if (config.apiKey.isBlank()) {
             _genState.value = GenState.Error("No Gemini API key set. Add one in Settings.")
             return
         }
@@ -172,11 +174,10 @@ class MeetingDetailViewModel(application: Application) : AndroidViewModel(applic
             _genState.value = GenState.Processing("Generating meeting notes…")
             try {
                 withContext(Dispatchers.IO) {
-                    val gemini = GeminiClient(app.config)
                     val notes = gemini.summarize(transcript) { _genState.value = GenState.Processing(it) }
                     File(dir, "notes.md").writeText(notes)
-                    maybeGenerateTitle(gemini, notes)
-                    app.meetingRepository.saveMeetingMeta(dir, currentTitle, durationSeconds)
+                    maybeGenerateTitle(notes)
+                    meetingRepository.saveMeetingMeta(dir, currentTitle, durationSeconds)
                     _notes.value = notes
                 }
                 _genState.value = GenState.Idle
@@ -189,7 +190,7 @@ class MeetingDetailViewModel(application: Application) : AndroidViewModel(applic
     }
 
     /** Auto-generate a title when the meeting has none (best-effort, mirrors the main flow). */
-    private suspend fun maybeGenerateTitle(gemini: GeminiClient, notes: String) {
+    private suspend fun maybeGenerateTitle(notes: String) {
         if (currentTitle.isNullOrBlank()) {
             try {
                 currentTitle = gemini.generateTitle(notes).trim()

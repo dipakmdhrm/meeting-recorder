@@ -49,13 +49,14 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.github.meetingrecorder.R
+import com.github.meetingrecorder.appViewModelFactory
 import com.github.meetingrecorder.data.Config
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
-    viewModel: SettingsViewModel = viewModel(),
+    viewModel: SettingsViewModel = viewModel(factory = appViewModelFactory),
 ) {
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
 

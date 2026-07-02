@@ -38,13 +38,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.github.meetingrecorder.R
+import com.github.meetingrecorder.appViewModelFactory
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MeetingDetailScreen(
     meetingPath: String,
     onBack: () -> Unit,
-    viewModel: MeetingDetailViewModel = viewModel(),
+    viewModel: MeetingDetailViewModel = viewModel(factory = appViewModelFactory),
 ) {
     LaunchedEffect(meetingPath) { viewModel.load(meetingPath) }
 

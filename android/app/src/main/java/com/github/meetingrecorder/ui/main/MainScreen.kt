@@ -57,13 +57,14 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.github.meetingrecorder.R
+import com.github.meetingrecorder.appViewModelFactory
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
     onNavigateToSettings: () -> Unit,
     onNavigateToMeetings: () -> Unit,
-    viewModel: MainViewModel = viewModel(),
+    viewModel: MainViewModel = viewModel(factory = appViewModelFactory),
 ) {
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current

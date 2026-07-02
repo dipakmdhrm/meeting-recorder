@@ -49,6 +49,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.github.meetingrecorder.R
+import com.github.meetingrecorder.appViewModelFactory
 import com.github.meetingrecorder.data.Meeting
 import java.time.format.DateTimeFormatter
 
@@ -57,7 +58,7 @@ import java.time.format.DateTimeFormatter
 fun MeetingsScreen(
     onBack: () -> Unit,
     onMeetingClick: (String) -> Unit,
-    viewModel: MeetingsViewModel = viewModel(),
+    viewModel: MeetingsViewModel = viewModel(factory = appViewModelFactory),
 ) {
     val meetings by viewModel.meetings.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()

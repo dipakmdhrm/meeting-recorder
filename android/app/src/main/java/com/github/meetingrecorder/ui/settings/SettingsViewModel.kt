@@ -1,17 +1,14 @@
 package com.github.meetingrecorder.ui.settings
 
-import android.app.Application
-import androidx.lifecycle.AndroidViewModel
-import com.github.meetingrecorder.MeetingRecorderApp
+import androidx.lifecycle.ViewModel
 import com.github.meetingrecorder.data.AudioQuality
 import com.github.meetingrecorder.data.Config
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-class SettingsViewModel(application: Application) : AndroidViewModel(application) {
-
-    private val config = (application as MeetingRecorderApp).config
+// Plain ViewModel — no Context needed; Config is constructor-injected via appViewModelFactory.
+class SettingsViewModel(private val config: Config) : ViewModel() {
 
     private val _apiKey = MutableStateFlow(config.apiKey)
     val apiKey: StateFlow<String> = _apiKey.asStateFlow()

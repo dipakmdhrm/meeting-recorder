@@ -7,11 +7,12 @@ import android.provider.DocumentsContract
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.github.meetingrecorder.MeetingRecorderApp
 import com.github.meetingrecorder.R
 import com.github.meetingrecorder.audio.RecordingPhase
 import com.github.meetingrecorder.audio.RecordingService
+import com.github.meetingrecorder.data.Config
 import com.github.meetingrecorder.data.GeminiClient
+import com.github.meetingrecorder.data.MeetingRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -35,9 +36,16 @@ sealed class RecordingState {
 
 private const val TAG = "MainViewModel"
 
-class MainViewModel(application: Application) : AndroidViewModel(application) {
+// AndroidViewModel because it genuinely needs a Context: starting/stopping RecordingService,
+// getString, and contentResolver. Everything else is constructor-injected via appViewModelFactory.
+class MainViewModel(
+    application: Application,
+    private val config: Config,
+    private val meetingRepository: MeetingRepository,
+    private val gemini: GeminiClient,
+) : AndroidViewModel(application) {
 
-    private val app = application as MeetingRecorderApp
+    private val app: Application = application
 
     private val _state = MutableStateFlow<RecordingState>(RecordingState.Ready)
     val state: StateFlow<RecordingState> = _state.asStateFlow()
@@ -54,7 +62,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // discardResults() must not delete the directory in this case.
     private var isInPlace: Boolean = false
 
-    fun hasApiKey(): Boolean = app.config.apiKey.isNotBlank()
+    fun hasApiKey(): Boolean = config.apiKey.isNotBlank()
 
     fun startRecording(title: String?) {
         if (!hasApiKey()) {
@@ -68,7 +76,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val meetingDir = try {
                 withContext(Dispatchers.IO) {
-                    app.meetingRepository.createMeetingDir(title).also { dir ->
+                    meetingRepository.createMeetingDir(title).also { dir ->
                         lockFile = File(dir, ".recording").also { it.createNewFile() }
                     }
                 }
@@ -79,7 +87,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             currentMeetingDir = meetingDir
 
             try {
-                RecordingService.start(app, meetingDir, app.config.audioQuality.bitrate)
+                RecordingService.start(app, meetingDir, config.audioQuality.bitrate)
             } catch (e: Exception) {
                 withContext(Dispatchers.IO) {
                     lockFile?.delete()
@@ -126,7 +134,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     fileExists = audioFile.exists(),
                     fileLength = audioFile.length(),
                     silenced = status.silenced,
-                    countdownEnabled = app.config.processingCountdownEnabled,
+                    countdownEnabled = config.processingCountdownEnabled,
                 )
             }
             when (outcome) {
@@ -194,7 +202,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    app.meetingRepository.saveMeetingMeta(meetingDir, currentTitle, durationSeconds)
+                    meetingRepository.saveMeetingMeta(meetingDir, currentTitle, durationSeconds)
                     lockFile?.delete()
                 }
                 lockFile = null
@@ -220,7 +228,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         lockFile = null
         withContext(Dispatchers.IO) {
             try {
-                app.meetingRepository.saveMeetingMeta(meetingDir, title, duration)
+                meetingRepository.saveMeetingMeta(meetingDir, title, duration)
             } catch (_: Exception) {
                 // Best-effort: even if the meta write fails, removing the lock below keeps the audio visible.
             }
@@ -240,7 +248,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val resolvedFile = resolveUriToFile(uri)
             val existingDir = resolvedFile?.let {
-                withContext(Dispatchers.IO) { app.meetingRepository.meetingDirContaining(it) }
+                withContext(Dispatchers.IO) { meetingRepository.meetingDirContaining(it) }
             }
             if (resolvedFile != null && existingDir != null) {
                 processInPlace(existingDir, resolvedFile)
@@ -293,7 +301,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 // Directory creation and lock file are blocking I/O — run on IO dispatcher.
                 val (meetingDir, lf) = withContext(Dispatchers.IO) {
-                    val dir = app.meetingRepository.createMeetingDir(null)
+                    val dir = meetingRepository.createMeetingDir(null)
                     val lf = File(dir, ".recording").also { it.createNewFile() }
                     dir to lf
                 }
@@ -356,8 +364,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun processRecording(audioFile: File, mimeType: String = "audio/mp4") {
-        val gemini = GeminiClient(app.config)
-
         val transcript = gemini.transcribe(audioFile, mimeType) { status ->
             _state.value = RecordingState.Processing(status)
         }
@@ -386,7 +392,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 withContext(Dispatchers.IO) {
                     File(meetingDir, "transcript.md").writeText(done.transcript)
                     File(meetingDir, "notes.md").writeText(done.notes)
-                    app.meetingRepository.saveMeetingMeta(meetingDir, currentTitle, durationSeconds)
+                    meetingRepository.saveMeetingMeta(meetingDir, currentTitle, durationSeconds)
                     lockFile?.delete()
                 }
                 lockFile = null

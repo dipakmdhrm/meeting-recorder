@@ -13,30 +13,28 @@ import com.github.meetingrecorder.ui.settings.SettingsScreen
 fun AppNavGraph() {
     val navController = rememberNavController()
 
-    NavHost(navController = navController, startDestination = "main") {
-        composable("main") {
+    NavHost(navController = navController, startDestination = Routes.MAIN) {
+        composable(Routes.MAIN) {
             MainScreen(
-                onNavigateToSettings = { navController.navigate("settings") },
-                onNavigateToMeetings = { navController.navigate("meetings") },
+                onNavigateToSettings = { navController.navigate(Routes.SETTINGS) },
+                onNavigateToMeetings = { navController.navigate(Routes.MEETINGS) },
             )
         }
-        composable("settings") {
+        composable(Routes.SETTINGS) {
             SettingsScreen(onBack = { navController.popBackStack() })
         }
-        composable("meetings") {
+        composable(Routes.MEETINGS) {
             MeetingsScreen(
                 onBack = { navController.popBackStack() },
                 onMeetingClick = { absolutePath ->
-                    // Encode slashes so the path survives NavHost route matching
-                    val encoded = absolutePath.replace("/", "%2F")
-                    navController.navigate("meeting_detail/$encoded")
+                    navController.navigate(Routes.meetingDetail(absolutePath))
                 },
             )
         }
-        composable("meeting_detail/{meetingPath}") { backStackEntry ->
+        composable(Routes.MEETING_DETAIL_PATTERN) { backStackEntry ->
             val path = backStackEntry.arguments
-                ?.getString("meetingPath")
-                ?.replace("%2F", "/")
+                ?.getString(Routes.MEETING_PATH_ARG)
+                ?.let(Routes::decodeMeetingPath)
                 ?: ""
             MeetingDetailScreen(
                 meetingPath = path,

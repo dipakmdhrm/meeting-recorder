@@ -1,31 +1,25 @@
 package com.github.meetingrecorder
 
 import android.app.Application
-import android.os.Environment
-import com.github.meetingrecorder.data.Config
-import com.github.meetingrecorder.data.MeetingRepository
-import java.io.File
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 class MeetingRecorderApp : Application() {
 
-    lateinit var config: Config
+    lateinit var container: AppContainer
         private set
 
-    lateinit var meetingRepository: MeetingRepository
-        private set
+    /** Application-scoped coroutine scope for fire-and-forget background work. */
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onCreate() {
         super.onCreate()
-        config = Config(this)
-        meetingRepository = MeetingRepository(
-            File(
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
-                "Meetings",
-            ),
-        )
+        container = AppContainer(this)
 
-        // De-orphan recordings whose previous process died mid-recording or mid-processing, so their
-        // audio reappears in the library. Off the main thread — it touches the filesystem.
-        Thread { meetingRepository.recoverOrphanedRecordings() }.start()
+        // De-orphan recordings whose previous process died mid-recording or mid-processing, so
+        // their audio reappears in the library. On Dispatchers.IO — it touches the filesystem.
+        appScope.launch { container.meetingRepository.recoverOrphanedRecordings() }
     }
 }

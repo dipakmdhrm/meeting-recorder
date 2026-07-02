@@ -110,7 +110,7 @@ class RecordingService : Service() {
     // Suppresses notification/call sounds (not the recording itself) so they don't pull the user
     // away or bleed into the audio. Opt-in; no-ops without the one-time DND-access grant.
     private fun enableDndIfRequested() {
-        val config = (application as MeetingRecorderApp).config
+        val config = (application as MeetingRecorderApp).container.config
         if (!config.dndDuringRecordingEnabled) return
         val nm = getSystemService(NotificationManager::class.java)
         if (!nm.isNotificationPolicyAccessGranted) return
