@@ -79,7 +79,13 @@ python3 -m venv "$VENV_DIR" --system-site-packages
 # ── 5. Python dependencies ───────────────────────────────────────────────────
 info "Installing Python dependencies…"
 "$VENV_DIR/bin/pip" install --quiet --upgrade pip
-"$VENV_DIR/bin/pip" install --quiet -r "$SCRIPT_DIR/requirements.txt"
+# Prefer the pinned lock file for reproducible installs; requirements.txt
+# stays as the human-readable, loosely-pinned source of truth.
+if [[ -f "$SCRIPT_DIR/requirements.lock" ]]; then
+    "$VENV_DIR/bin/pip" install --quiet -r "$SCRIPT_DIR/requirements.lock"
+else
+    "$VENV_DIR/bin/pip" install --quiet -r "$SCRIPT_DIR/requirements.txt"
+fi
 
 # ── 6. Copy source ───────────────────────────────────────────────────────────
 info "Copying application source…"
