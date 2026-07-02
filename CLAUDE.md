@@ -106,9 +106,9 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 **Entry:** `__main__.py` → `app.py` starts the GLib main loop and wires the tray icon, main window, and call detector together.
 
 **Audio recording** (`audio/`):
-- `recorder.py` spawns `parec` (raw s16le PCM) into named pipes, then `ffmpeg amix` to mix mic + system audio into MP3. `parec` is started before `ffmpeg` to avoid a deadlock on pipe open.
-- Pause/resume uses `SIGSTOP`/`SIGCONT` on the `parec` processes.
-- Two modes: mic+system (`Record (Headphones)`) and mic-only (`Record (Speaker)`).
+- `recorder.py` runs a single `ffmpeg` subprocess reading PulseAudio/PipeWire sources directly (`-f pulse`); `mixer.py` builds the command — mic+system mode `amerge`s mic (left channel) and sink monitor (right channel) into a true-stereo MP3 with a `highpass=f=80` filter, preserving speaker separation for transcription. Device names are resolved once in `start()` via `devices.py` (`pactl`).
+- Pause/resume works via **segments**: pause terminates ffmpeg cleanly (saving the current segment), resume spawns a new ffmpeg writing the next segment, and stop concatenates all segments with ffmpeg's concat demuxer so paused intervals are excluded. `stop()` blocks until ffmpeg exits and segments are merged; a monitor thread reports unexpected ffmpeg death via `on_error`.
+- Two modes: mic+system (`Record (Headphones)`) and mic-only (`Record (Speaker)` — the monitor is skipped to avoid echo).
 
 **AI processing** (`processing/`):
 - `Pipeline` runs transcription then summarization as separate calls (a single dual-prompt call was removed because the model would cut transcription short to save output budget for notes).
