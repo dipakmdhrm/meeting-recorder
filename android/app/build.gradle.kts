@@ -28,7 +28,7 @@ tasks.register<JacocoReport>("jacocoDebugUnitTestReport") {
             )
         },
     )
-    sourceDirectories.setFrom(files("src/main/java"))
+    sourceDirectories.setFrom(files("src/main/java", "src/main/kotlin"))
     executionData.setFrom(layout.buildDirectory.files("jacoco/testDebugUnitTest.exec"))
 }
 

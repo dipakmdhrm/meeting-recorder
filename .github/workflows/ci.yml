@@ -147,6 +147,7 @@ jobs:
           dpkg --info meeting-recorder.deb
           dpkg --contents meeting-recorder.deb | grep -q "usr/bin/meeting-recorder"
           dpkg --contents meeting-recorder.deb | grep -q "opt/meeting-recorder/linux/src"
+          dpkg --contents meeting-recorder.deb | grep -q "opt/meeting-recorder/requirements.lock"
           dpkg --contents meeting-recorder.deb | grep -q "usr/share/applications/io.github.dipakmdhrm.MeetingRecorder.desktop"
           dpkg --contents meeting-recorder.deb | grep -q "usr/share/icons/hicolor/256x256/apps/meeting-recorder.png"
           echo "All required paths present in .deb"
@@ -202,6 +203,7 @@ jobs:
         run: |
           rpm -qlp rpmbuild/RPMS/noarch/*.rpm | grep -q /usr/bin/meeting-recorder
           rpm -qlp rpmbuild/RPMS/noarch/*.rpm | grep -q /opt/meeting-recorder/linux/src
+          rpm -qlp rpmbuild/RPMS/noarch/*.rpm | grep -q /opt/meeting-recorder/requirements.lock
           rpm -qlp rpmbuild/RPMS/noarch/*.rpm | grep -q /usr/share/applications/io.github.dipakmdhrm.MeetingRecorder.desktop
           rpm -qlp rpmbuild/RPMS/noarch/*.rpm | grep -q /usr/share/icons/hicolor/256x256/apps/meeting-recorder.png
           echo "All required paths present in .rpm"
@@ -238,6 +240,7 @@ jobs:
         run: |
           bsdtar -tf arch-build/*.pkg.tar.zst | grep -q usr/bin/meeting-recorder
           bsdtar -tf arch-build/*.pkg.tar.zst | grep -q opt/meeting-recorder/linux/src
+          bsdtar -tf arch-build/*.pkg.tar.zst | grep -q opt/meeting-recorder/requirements.lock
           bsdtar -tf arch-build/*.pkg.tar.zst | grep -q usr/share/applications/io.github.dipakmdhrm.MeetingRecorder.desktop
           bsdtar -tf arch-build/*.pkg.tar.zst | grep -q usr/share/icons/hicolor/256x256/apps/meeting-recorder.png
           echo "All required paths present in pacman package"
