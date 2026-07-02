@@ -12,7 +12,10 @@ Requires:       python3-gobject
 Requires:       gtk4
 Requires:       libadwaita
 Requires:       libnotify
-Requires:       ffmpeg
+# Stock Fedora only ships ffmpeg-free (full ffmpeg lives in RPM Fusion);
+# either provides /usr/bin/ffmpeg with pulse input + amerge/highpass +
+# libmp3lame, which is all the recorder uses.
+Requires:       (ffmpeg or ffmpeg-free)
 Requires:       pulseaudio-utils
 Requires:       curl
 

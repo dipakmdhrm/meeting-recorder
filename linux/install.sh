@@ -31,7 +31,10 @@ install_deps_apt() {
 
 install_deps_dnf() {
     info "Installing system dependencies (dnf)..."
-    sudo dnf install -y python3 python3-devel python3-gobject gtk4 libadwaita libnotify pulseaudio-utils pipewire-pulseaudio ffmpeg curl
+    sudo dnf install -y python3 python3-devel python3-gobject gtk4 libadwaita libnotify pulseaudio-utils pipewire-pulseaudio curl
+    # Stock Fedora has no ffmpeg (RPM Fusion only); ffmpeg-free covers the
+    # recorder's needs (pulse input, amerge/highpass, libmp3lame).
+    sudo dnf install -y ffmpeg 2>/dev/null || sudo dnf install -y ffmpeg-free
 
 }
 
