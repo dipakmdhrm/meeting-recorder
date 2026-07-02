@@ -23,7 +23,8 @@ from meeting_recorder.config import settings
 from meeting_recorder.utils.filename import output_paths
 from meeting_recorder.utils.meeting_scanner import Meeting, find_audio_file
 
-from ..core.job import Job, JobStatus, actions_for_status
+from ..core.errors import error_presentation
+from ..core.job import Job, JobStatus
 from ..core.job_manager import JobManager
 from ..core.recording_controller import PendingRecording, RecordingController
 from ..core.state_machine import State
@@ -31,6 +32,7 @@ from ..core.task_runner import CancelToken, TaskRunner
 from ..utils.glib_bridge import assert_main_thread, idle_call
 from ..utils.gtk_compat import remove_all_children
 from ..utils.recording_import import resolve_existing_recording_target
+from .jobs_panel import JobsPanel
 from .meeting_explorer import MeetingExplorer
 
 logger = logging.getLogger(__name__)
@@ -86,7 +88,12 @@ class MainWindow(Adw.ApplicationWindow):
         # Jobs — owned by the JobManager (persisted to jobs.json so a crash
         # or quit mid-transcription re-offers the job on next start).
         self._job_manager = JobManager()
-        self._job_widgets: dict[int, dict] = {}
+        self._jobs_panel = JobsPanel(
+            on_cancel=self._on_cancel_job,
+            on_retry=self._on_retry_job,
+            on_open_folder=self._on_open_job_folder,
+            on_dismiss=self._dismiss_job,
+        )
 
         self._build_ui()
         self._restore_persisted_jobs()
@@ -102,8 +109,8 @@ class MainWindow(Adw.ApplicationWindow):
         mirrors the Android app's recoverOrphanedRecordings() convention.
         """
         for job in self._job_manager.load_persisted():
-            self._add_job_row(job)
-            self._update_job_row(job)
+            self._jobs_panel.add_job(job)
+            self._jobs_panel.update_job(job)
 
     # ------------------------------------------------------------------
     # UI construction
@@ -190,12 +197,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._output_box.append(self._open_folder_btn)
         vbox.append(self._output_box)
 
-        # Jobs section (hidden until there are jobs). Job rows are AdwActionRows
-        # added directly to the group's boxed list.
-        self._jobs_section = Adw.PreferencesGroup(title="Background Jobs")
-        self._jobs_section.set_visible(False)
-
-        vbox.append(self._jobs_section)
+        # Jobs section (hidden until there are jobs); rendering lives in
+        # ui/jobs_panel.py.
+        vbox.append(self._jobs_panel.widget)
         recorder_box.append(vbox)
 
         # Clamp keeps the recorder content centred at a comfortable width
@@ -459,7 +463,7 @@ class MainWindow(Adw.ApplicationWindow):
             notes_path=notes_path,
             label=Path(filename).name,
         )
-        self._add_job_row(job)
+        self._jobs_panel.add_job(job)
         self._notify_tray()
         self._submit_pipeline_job(job)
 
@@ -494,7 +498,7 @@ class MainWindow(Adw.ApplicationWindow):
             notes_path=notes_path,
             label=meeting.time_label,
         )
-        self._add_job_row(job)
+        self._jobs_panel.add_job(job)
         self._notify_tray()
 
         # Switch to the Record tab so the user sees job progress
@@ -524,7 +528,7 @@ class MainWindow(Adw.ApplicationWindow):
             notes_path=pending.notes_path,
             label=pending.label,
         )
-        self._add_job_row(job)
+        self._jobs_panel.add_job(job)
         self._notify_tray()
         self._submit_recorded_job(job)
 
@@ -639,14 +643,14 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_job_done(self, job: Job) -> None:
         assert_main_thread()
         self._job_manager.mark_done(job)
-        self._update_job_row(job)
+        self._jobs_panel.update_job(job)
         self._notify_tray()
         self._send_job_complete_notification(job)
 
     def _on_job_error(self, job: Job, msg: str) -> None:
         assert_main_thread()
         self._job_manager.mark_error(job, msg)
-        self._update_job_row(job)
+        self._jobs_panel.update_job(job)
         self._notify_tray()
 
     def _on_cancel_job(self, job: Job) -> None:
@@ -661,7 +665,7 @@ class MainWindow(Adw.ApplicationWindow):
         job.cancelled = False
         job.token = CancelToken()
         self._job_manager.mark_processing(job)
-        self._update_job_row(job)
+        self._jobs_panel.update_job(job)
         self._notify_tray()
         self._submit_pipeline_job(job)
 
@@ -673,123 +677,16 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _dismiss_job(self, job: Job) -> None:
         assert_main_thread()
-        widgets = self._job_widgets.pop(job.job_id, None)
-        if widgets:
-            row = widgets.get("row")
-            if row is not None:
-                self._jobs_section.remove(row)
+        self._jobs_panel.remove_job(job)
         self._job_manager.remove(job)
-        if not self._job_manager.jobs:
-            self._jobs_section.set_visible(False)
         self._notify_tray()
-
-    # ------------------------------------------------------------------
-    # Jobs panel UI
-    # ------------------------------------------------------------------
-
-    def _add_job_row(self, job: Job) -> None:
-        """Add a row for a new job to the jobs panel. Main thread only."""
-        assert_main_thread()
-
-        row = Adw.ActionRow(title=job.label, subtitle="Processing…")
-        row.set_title_lines(1)
-
-        spinner = Gtk.Spinner()
-        spinner.start()
-        spinner.set_valign(Gtk.Align.CENTER)
-        row.add_prefix(spinner)
-
-        status_icon = Gtk.Image.new_from_icon_name("system-run-symbolic")
-        status_icon.set_valign(Gtk.Align.CENTER)
-        status_icon.set_visible(False)
-        row.add_prefix(status_icon)
-
-        action_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        action_box.set_valign(Gtk.Align.CENTER)
-        row.add_suffix(action_box)
-
-        self._job_widgets[job.job_id] = {
-            "row": row,
-            "spinner": spinner,
-            "status_icon": status_icon,
-            "action_box": action_box,
-        }
-        self._rebuild_action_box(job)
-
-        self._jobs_section.add(row)
-        self._jobs_section.set_visible(True)
-
-    def _update_job_row(self, job: Job) -> None:
-        """Refresh icon, status text, and action buttons for a status change."""
-        assert_main_thread()
-        widgets = self._job_widgets.get(job.job_id)
-        if not widgets:
-            return
-
-        spinner: Gtk.Spinner = widgets["spinner"]
-        status_icon: Gtk.Image = widgets["status_icon"]
-        row: Adw.ActionRow = widgets["row"]
-
-        spinner.stop()
-        spinner.set_visible(False)
-        status_icon.set_visible(True)
-
-        if job.status is JobStatus.DONE:
-            status_icon.set_from_icon_name("emblem-ok-symbolic")
-            row.set_subtitle("Done")
-        elif job.status is JobStatus.ERROR:
-            status_icon.set_from_icon_name("dialog-error-symbolic")
-            err = (job.error_msg or "Error")[:60]
-            row.set_subtitle(f"Error: {err}")
-
-        self._rebuild_action_box(job)
-
-    def _rebuild_action_box(self, job: Job) -> None:
-        """Replace the action buttons in the job row for the current status.
-
-        Which buttons appear is decided by the pure actions_for_status()
-        policy in core/job.py; this method only renders them.
-        """
-        widgets = self._job_widgets.get(job.job_id)
-        if not widgets:
-            return
-        action_box: Gtk.Box = widgets["action_box"]
-        remove_all_children(action_box)
-
-        for action in actions_for_status(job.status):
-            if action == "cancel":
-                btn = Gtk.Button(label="Cancel")
-                btn.connect("clicked", lambda *_, j=job: self._on_cancel_job(j))
-            elif action == "open_folder":
-                btn = Gtk.Button(label="Open Folder")
-                btn.connect("clicked", lambda *_, j=job: self._on_open_job_folder(j))
-            elif action == "retry":
-                btn = Gtk.Button(label="Retry")
-                btn.connect("clicked", lambda *_, j=job: self._on_retry_job(j))
-            else:  # dismiss
-                btn = self._make_dismiss_btn(job)
-                action_box.append(btn)
-                continue
-            btn.add_css_class("flat")
-            action_box.append(btn)
-
-    def _make_dismiss_btn(self, job: Job) -> Gtk.Button:
-        btn = Gtk.Button(icon_name="window-close-symbolic")
-        btn.add_css_class("flat")
-        btn.set_tooltip_text("Dismiss")
-        btn.connect("clicked", lambda *_, j=job: self._dismiss_job(j))
-        return btn
-
-    def _update_job_status_text(self, job: Job, msg: str) -> None:
-        """Update the status text for a job (pipeline progress). Main thread only."""
-        assert_main_thread()
-        widgets = self._job_widgets.get(job.job_id)
-        if widgets:
-            widgets["row"].set_subtitle(msg)
 
     # ------------------------------------------------------------------
     # Recorder / pipeline callbacks (may arrive from background threads)
     # ------------------------------------------------------------------
+
+    def _update_job_status_text(self, job: Job, msg: str) -> None:
+        self._jobs_panel.set_status_text(job, msg)
 
     def _on_tick(self, elapsed: int) -> None:
         idle_call(self._update_timer, elapsed)
@@ -823,11 +720,20 @@ class MainWindow(Adw.ApplicationWindow):
     def _show_error(self, msg: str) -> None:
         assert_main_thread()
         logger.error("UI error shown: %s", msg)
-        # Recording/setup errors surface as an Adwaita toast (transient,
-        # dismissable). Pipeline errors still appear in their job row.
-        toast = Adw.Toast(title=msg)
-        toast.set_timeout(0)  # stays until dismissed or replaced
-        self._toast_overlay.add_toast(toast)
+        # One presentation policy for all errors (core/errors.py): actionable
+        # configuration problems get a modal alert; transient/runtime errors
+        # get a dismissable toast. Pipeline errors still appear in their row.
+        if error_presentation(msg) == "dialog":
+            alert = Gtk.AlertDialog()
+            alert.set_modal(True)
+            alert.set_message("Meeting Recorder")
+            alert.set_detail(msg)
+            alert.set_buttons(["OK"])
+            alert.show(self)
+        else:
+            toast = Adw.Toast(title=msg)
+            toast.set_timeout(0)  # stays until dismissed or replaced
+            self._toast_overlay.add_toast(toast)
 
     # ------------------------------------------------------------------
     # Settings
