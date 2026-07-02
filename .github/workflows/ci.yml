@@ -76,19 +76,42 @@ jobs:
   # artifact for each supported distro family.  Each job runs inside a
   # matching distro container so the native build tools are available.
   package-build:
-    name: Build ${{ matrix.pkg }} package
-    runs-on: ubuntu-latest
+    name: ${{ matrix.arch }} Build ${{ matrix.pkg }} package + install smoke test
+    runs-on: ${{ matrix.runner }}
     needs: unit-tests
     strategy:
       fail-fast: false
       matrix:
+        # Each package type is built AND install-smoke-tested on both
+        # architectures. arm64 rows run on GitHub's native arm runners
+        # (free for public repos) — no QEMU emulation needed. Arch Linux
+        # has no official arm64 image (ARM is the separate Arch Linux ARM
+        # project), so that row uses the community multi-arch image.
         include:
           - pkg: deb
             container: ubuntu:24.04
+            arch: X86_64
+            runner: ubuntu-latest
           - pkg: rpm
             container: fedora:41
+            arch: X86_64
+            runner: ubuntu-latest
           - pkg: pacman
             container: archlinux:latest
+            arch: X86_64
+            runner: ubuntu-latest
+          - pkg: deb
+            container: ubuntu:24.04
+            arch: arm64
+            runner: ubuntu-24.04-arm
+          - pkg: rpm
+            container: fedora:41
+            arch: arm64
+            runner: ubuntu-24.04-arm
+          - pkg: pacman
+            container: menci/archlinuxarm:latest
+            arch: arm64
+            runner: ubuntu-24.04-arm
     container: ${{ matrix.container }}
 
     steps:
@@ -280,61 +303,6 @@ jobs:
           import meeting_recorder
           print("GTK4 + Adw typelibs, venv deps, and app package all import OK")
           EOF
-
-  # ── arm64 install smoke test ────────────────────────────────────────────────
-  #
-  # The .deb is Architecture: all and the APT repo advertises arm64, but x86
-  # runners never prove it. Build the package natively, then install and
-  # import it inside a QEMU-emulated arm64 container.
-  deb-arm64-smoke:
-    name: .deb install smoke test (arm64)
-    runs-on: ubuntu-latest
-    needs: unit-tests
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Build .deb (arch-independent)
-        run: |
-          STAGING=$(mktemp -d)
-          mkdir -p "$STAGING/DEBIAN" "$STAGING/opt/meeting-recorder/linux/src" \
-                   "$STAGING/usr/bin" "$STAGING/usr/share/applications"
-          cp -r linux/src/. "$STAGING/opt/meeting-recorder/linux/src/"
-          cp linux/requirements.txt linux/requirements.lock "$STAGING/opt/meeting-recorder/"
-          cp linux/packaging/usr/bin/meeting-recorder "$STAGING/usr/bin/meeting-recorder"
-          chmod 755 "$STAGING/usr/bin/meeting-recorder"
-          cp linux/packaging/usr/share/applications/io.github.dipakmdhrm.MeetingRecorder.desktop \
-             "$STAGING/usr/share/applications/"
-          for f in postinst prerm postrm; do
-            cp "linux/packaging/DEBIAN/$f" "$STAGING/DEBIAN/$f"
-            chmod 755 "$STAGING/DEBIAN/$f"
-          done
-          sed "s/@VERSION@/0.0.0/" linux/packaging/DEBIAN/control.template \
-            > "$STAGING/DEBIAN/control"
-          dpkg-deb --build "$STAGING" meeting-recorder.deb
-
-      - uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-
-      - name: Install and import under arm64
-        run: |
-          docker run --rm --platform linux/arm64 \
-            -v "$PWD/meeting-recorder.deb:/tmp/meeting-recorder.deb:ro" \
-            ubuntu:24.04 bash -ec '
-              uname -m
-              apt-get update -qq
-              apt-get install -y /tmp/meeting-recorder.deb
-              PYTHONPATH=/opt/meeting-recorder/linux/src \
-                /opt/meeting-recorder/venv/bin/python -c "
-          import gi
-          gi.require_version(\"Gtk\", \"4.0\")
-          gi.require_version(\"Adw\", \"1\")
-          from gi.repository import Gtk, Adw
-          import google.genai
-          import meeting_recorder
-          print(\"arm64: GTK4 + Adw typelibs, venv deps, and app package import OK\")
-          "
-            '
 
   # ── Android unit tests + debug build ────────────────────────────────────────
   #
