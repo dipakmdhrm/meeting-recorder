@@ -59,6 +59,12 @@ class MeetingRecorderApp(Adw.Application):
         Adw.Application.do_startup(self)
         self._setup_logging()
         self._setup_app_icon()
+        # One-time: move a plaintext API key from config.json into the
+        # Secret Service keyring (no-op if none, or no keyring available).
+        try:
+            settings.migrate_key_to_keyring()
+        except Exception as exc:
+            logger.warning("API-key keyring migration failed: %s", exc)
         # Without hold(), GApplication exits as soon as the last window is hidden.
         # We hide to tray rather than closing, so we need to keep the app alive manually.
         # The matching release() is never called; we exit via quit() instead.

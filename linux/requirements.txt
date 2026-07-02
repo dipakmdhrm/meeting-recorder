@@ -1,2 +1,5 @@
 google-genai>=0.8.0
 setproctitle>=1.3.0
+# Secret Service keyring for the API key (optional at runtime — the app
+# falls back to chmod-600 config.json if the service is unavailable).
+secretstorage>=3.3
