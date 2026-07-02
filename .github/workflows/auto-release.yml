@@ -110,6 +110,9 @@ jobs:
     permissions:
       contents: write
       pages: write
+      # A called workflow may only request permissions its caller grants;
+      # release.yml's build-deb needs id-token for actions/deploy-pages.
+      id-token: write
 
   release-android:
     needs: auto-release
