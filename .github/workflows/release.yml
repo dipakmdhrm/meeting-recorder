@@ -55,6 +55,9 @@ jobs:
     permissions:
       contents: write
       pages: write
+      id-token: write
+    environment:
+      name: github-pages
     env:
       VERSION: ${{ needs.get-version.outputs.version }}
     steps:
@@ -155,6 +158,30 @@ jobs:
           git add -A
           git commit -m "Release v${VERSION}"
           git push origin gh-pages
+
+      # Deploy the apt repository to Pages from THIS workflow instead of the
+      # branch-triggered internal "pages build and deployment" workflow, whose
+      # action versions and polling timeout GitHub controls (it has been
+      # failing with deploy timeouts and emits punycode deprecation warnings
+      # we cannot patch). Requires the repo's Pages source to be set to
+      # "GitHub Actions". The gh-pages branch remains the reprepro state
+      # store; pushing it no longer triggers a deployment by itself.
+      - name: Stage Pages artifact (apt repo without .git)
+        run: |
+          mkdir pages-site
+          rsync -a --exclude=.git gh-pages-dir/ pages-site/
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: pages-site
+
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v5
+        env:
+          # The action's bundled deps still pull Node's deprecated punycode
+          # module; suppress the advisory DEP0040 warning in the logs.
+          NODE_OPTIONS: --no-deprecation
 
       - uses: actions/upload-artifact@v4
         with:
