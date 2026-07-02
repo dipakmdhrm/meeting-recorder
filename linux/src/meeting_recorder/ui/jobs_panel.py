@@ -100,7 +100,7 @@ class JobsPanel:
             if job.status is JobStatus.DONE:
                 status_icon.set_from_icon_name("emblem-ok-symbolic")
                 row.set_subtitle("Done")
-            else:
+            elif job.status is JobStatus.ERROR:
                 status_icon.set_from_icon_name("dialog-error-symbolic")
                 err = (job.error_msg or "Error")[:60]
                 row.set_subtitle(f"Error: {err}")

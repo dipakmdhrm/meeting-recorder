@@ -81,6 +81,13 @@ class MeetingDetailViewModel(
         // Cancel any in-flight generation from a previously loaded meeting so its background
         // writes can't clobber the meeting we're loading now.
         generationJob?.cancel()
+        // Reset playback state from the previous meeting: without this, a meeting
+        // that was playing leaves _isPlaying true and the timer running, so the
+        // newly loaded meeting shows as "playing" on a player that never started.
+        timeUpdaterJob?.cancel()
+        timeUpdaterJob = null
+        _isPlaying.value = false
+        _currentTime.value = "00:00"
         val dir = File(meetingPath)
         meetingDir = dir
         _genState.value = GenState.Idle
