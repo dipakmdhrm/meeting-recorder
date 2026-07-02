@@ -1,5 +1,7 @@
 """
-Provides utility functions to construct ffmpeg command-line arguments for audio capture. It supports mixing multiple PulseAudio sources (e.g., microphone and system output) into a single stereo stream, applying filters like highpass to improve voice clarity.
+Provides utility functions to construct ffmpeg command-line arguments for audio capture. It
+supports mixing multiple PulseAudio sources (e.g., microphone and system output) into a single
+stereo stream, applying filters like highpass to improve voice clarity.
 """
 
 from __future__ import annotations
@@ -31,19 +33,32 @@ def build_ffmpeg_command(
     return [
         "ffmpeg",
         "-hide_banner",
-        "-loglevel", "error",
+        "-loglevel",
+        "error",
         "-y",
         # thread_queue_size buffers packets between the PulseAudio input thread and
         # the filter/encode thread. Without it the queue fills up and ffmpeg silently
         # drops audio packets, producing a file shorter than the wall-clock recording.
-        "-thread_queue_size", "4096",
-        "-f", "pulse", "-i", source,
-        "-thread_queue_size", "4096",
-        "-f", "pulse", "-i", monitor,
-        "-filter_complex", filter_str,
-        "-map", "[out]",
-        "-acodec", "libmp3lame",
-        "-q:a", quality,
+        "-thread_queue_size",
+        "4096",
+        "-f",
+        "pulse",
+        "-i",
+        source,
+        "-thread_queue_size",
+        "4096",
+        "-f",
+        "pulse",
+        "-i",
+        monitor,
+        "-filter_complex",
+        filter_str,
+        "-map",
+        "[out]",
+        "-acodec",
+        "libmp3lame",
+        "-q:a",
+        quality,
         str(output_path),
     ]
 
@@ -61,14 +76,20 @@ def build_ffmpeg_command_mic_only(
     return [
         "ffmpeg",
         "-hide_banner",
-        "-loglevel", "error",
+        "-loglevel",
+        "error",
         "-y",
-        "-thread_queue_size", "4096",
-        "-f", "pulse", "-i", source,
-        "-af", "highpass=f=80",
-        "-acodec", "libmp3lame",
-        "-q:a", quality,
+        "-thread_queue_size",
+        "4096",
+        "-f",
+        "pulse",
+        "-i",
+        source,
+        "-af",
+        "highpass=f=80",
+        "-acodec",
+        "libmp3lame",
+        "-q:a",
+        quality,
         str(output_path),
     ]
-
-

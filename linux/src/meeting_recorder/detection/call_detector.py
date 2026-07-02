@@ -1,5 +1,7 @@
 """
-Orchestrates call detection by leveraging the AudioWatcher to monitor microphone usage. It includes a deduplication mechanism to ensure that the user is notified only once per call start, even if multiple audio streams are initialized simultaneously.
+Orchestrates call detection by leveraging the AudioWatcher to monitor microphone usage. It includes
+a deduplication mechanism to ensure that the user is notified only once per call start, even if
+multiple audio streams are initialized simultaneously.
 """
 
 from __future__ import annotations
@@ -7,9 +9,10 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Callable
+from collections.abc import Callable
 
 from meeting_recorder.config.defaults import CALL_DETECTION_DEDUP_WINDOW
+
 from .audio_watcher import AudioWatcher
 
 logger = logging.getLogger(__name__)
@@ -26,9 +29,7 @@ class CallDetector:
         self._last_notified: float = 0.0
         self._lock = threading.Lock()
 
-        self._audio_watcher = AudioWatcher(
-            on_detected=self._handle_detection
-        )
+        self._audio_watcher = AudioWatcher(on_detected=self._handle_detection)
 
     def start(self) -> None:
         logger.info("Call detector started")

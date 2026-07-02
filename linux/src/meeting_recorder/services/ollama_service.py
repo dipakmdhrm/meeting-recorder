@@ -12,7 +12,8 @@ from __future__ import annotations
 import json
 import logging
 import urllib.request
-from typing import Callable
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ STREAM_READ_TIMEOUT = 300
 class OllamaClient:
     """HTTP client for the Ollama local API."""
 
-    def __init__(self, http_open: Callable | None = None) -> None:
+    def __init__(self, http_open: Callable[..., Any] | None = None) -> None:
         self._http_open = http_open or urllib.request.urlopen
 
     def get_installed_models(self, host: str) -> list[str] | None:
@@ -72,9 +73,7 @@ class OllamaClient:
                 except json.JSONDecodeError:
                     continue
                 if data.get("error"):
-                    raise RuntimeError(
-                        f"Ollama failed to pull {model!r}: {data['error']}"
-                    )
+                    raise RuntimeError(f"Ollama failed to pull {model!r}: {data['error']}")
                 status_text = data.get("status", "")
                 total = data.get("total", 0)
                 completed = data.get("completed", 0)

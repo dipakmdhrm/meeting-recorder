@@ -62,19 +62,23 @@ def build_menu_model(recording_state: str, jobs: list) -> list[dict]:
     # Background-jobs section (only when jobs are active).
     if jobs:
         items.append({"type": "separator"})
-        items.append({
-            "type": "label",
-            "label": f"Processing ({len(jobs)} active)",
-            "enabled": False,
-        })
+        items.append(
+            {
+                "type": "label",
+                "label": f"Processing ({len(jobs)} active)",
+                "enabled": False,
+            }
+        )
         for i, (label, _cancel_fn) in enumerate(jobs):
-            items.append({
-                "type": "action",
-                "label": f"  Cancel: {label}",
-                "action": "cancel_job",
-                "job_index": i,
-                "enabled": True,
-            })
+            items.append(
+                {
+                    "type": "action",
+                    "label": f"  Cancel: {label}",
+                    "action": "cancel_job",
+                    "job_index": i,
+                    "enabled": True,
+                }
+            )
 
     # Footer.
     items.append({"type": "separator"})

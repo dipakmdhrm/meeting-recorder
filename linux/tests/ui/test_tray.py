@@ -38,9 +38,7 @@ class TestIconForState:
 class TestBuildMenuModel:
     def test_idle_controls(self):
         items = build_menu_model("idle", [])
-        assert _actions(items)[:3] == [
-            "record_headphones", "record_speaker", "use_existing"
-        ]
+        assert _actions(items)[:3] == ["record_headphones", "record_speaker", "use_existing"]
         # Footer is always present.
         assert "show" in _actions(items)
         assert "quit" in _actions(items)

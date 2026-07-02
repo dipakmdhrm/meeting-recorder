@@ -1,24 +1,22 @@
 """Meeting Explorer — browse, manage, and AI-title recorded meetings."""
+
 from __future__ import annotations
 
 import logging
-import os
 import subprocess
 import threading
 from datetime import datetime
-from pathlib import Path
 
 import gi
+
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Pango", "1.0")
-from gi.repository import Gdk, Gtk, GLib, Pango, Adw
+from gi.repository import Adw, Gdk, GLib, Gtk, Pango
 
 from meeting_recorder.config import settings
 from meeting_recorder.config.defaults import TITLE_PROMPT
-from ..utils.glib_bridge import idle_call
-from ..utils.gtk_compat import remove_all_children
 from meeting_recorder.utils.meeting_scanner import (
     Meeting,
     delete_meetings,
@@ -26,6 +24,9 @@ from meeting_recorder.utils.meeting_scanner import (
     scan_meetings,
     write_metadata,
 )
+
+from ..utils.glib_bridge import idle_call
+from ..utils.gtk_compat import remove_all_children
 
 logger = logging.getLogger(__name__)
 
@@ -192,9 +193,7 @@ class MeetingExplorer(Gtk.Box):
         title_gesture = Gtk.GestureClick()
         title_gesture.connect(
             "pressed",
-            lambda gesture, n_press, x, y, rd=row_data: self._on_title_double_click(
-                n_press, rd
-            ),
+            lambda gesture, n_press, x, y, rd=row_data: self._on_title_double_click(n_press, rd),
         )
         primary_label.add_controller(title_gesture)
 
@@ -325,9 +324,12 @@ class MeetingExplorer(Gtk.Box):
             # Rename in background
             def _bg():
                 try:
-                    write_metadata(meeting.path, {
-                        "title": new_title,
-                    })
+                    write_metadata(
+                        meeting.path,
+                        {
+                            "title": new_title,
+                        },
+                    )
                     new_path = rename_meeting_dir(meeting, new_title)
                     meeting.path = new_path
                     meeting.title = new_title
@@ -424,8 +426,9 @@ class MeetingExplorer(Gtk.Box):
                         self._meeting_rows.remove(rd)
                 if failures:
                     msgs = [f"{m.time_label}: {err}" for m, err in failures]
+                    escaped = GLib.markup_escape_text("; ".join(msgs))
                     self._error_label.set_markup(
-                        f'<span foreground="red">Failed to delete: {GLib.markup_escape_text("; ".join(msgs))}</span>'
+                        f'<span foreground="red">Failed to delete: {escaped}</span>'
                     )
                     self._error_label.set_visible(True)
                 self._update_delete_sensitivity()
@@ -472,10 +475,13 @@ class MeetingExplorer(Gtk.Box):
                     raise RuntimeError("LLM returned empty title")
 
                 # Write metadata BEFORE rename (path must still be valid)
-                write_metadata(meeting.path, {
-                    "title": title,
-                    "generated_at": datetime.now().isoformat(),
-                })
+                write_metadata(
+                    meeting.path,
+                    {
+                        "title": title,
+                        "generated_at": datetime.now().isoformat(),
+                    },
+                )
 
                 # Rename folder on disk
                 new_path = rename_meeting_dir(meeting, title)
@@ -495,8 +501,9 @@ class MeetingExplorer(Gtk.Box):
                 row_data["primary_label"].set_text(title)
             else:
                 # Show error and restore AI button
+                escaped = GLib.markup_escape_text(error or "Unknown error")
                 row_data["secondary_label"].set_markup(
-                    f'<span size="small" foreground="red">{GLib.markup_escape_text(error or "Unknown error")}</span>'
+                    f'<span size="small" foreground="red">{escaped}</span>'
                 )
                 ai_box.append(row_data["ai_btn"])
 
@@ -506,7 +513,10 @@ class MeetingExplorer(Gtk.Box):
     def _build_title_provider(config: dict):
         """Construct a summarization provider with the title-generation prompt."""
         from meeting_recorder.processing.summarization import create_summarization_provider
-        return create_summarization_provider({
-            **config,
-            "summarization_prompt": config.get("title_prompt") or TITLE_PROMPT,
-        })
+
+        return create_summarization_provider(
+            {
+                **config,
+                "summarization_prompt": config.get("title_prompt") or TITLE_PROMPT,
+            }
+        )

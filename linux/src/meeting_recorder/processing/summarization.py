@@ -1,10 +1,13 @@
 """
-Defines the SummarizationProvider protocol and a factory function to instantiate configured summarization services. This abstraction allows the application to support multiple AI backends for generating meeting notes.
+Defines the SummarizationProvider protocol and a factory function to instantiate configured
+summarization services. This abstraction allows the application to support multiple AI backends for
+generating meeting notes.
 """
 
 from __future__ import annotations
 
-from typing import Callable, Protocol, runtime_checkable
+from collections.abc import Callable
+from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -18,12 +21,13 @@ class SummarizationProvider(Protocol):
         ...
 
 
-def create_summarization_provider(config: dict) -> SummarizationProvider:
+def create_summarization_provider(config: dict[str, Any]) -> SummarizationProvider:
     """Factory: return the configured summarization provider."""
     service = config.get("summarization_service", "gemini")
 
     if service == "gemini":
         from .providers.gemini import GeminiProvider
+
         return GeminiProvider(
             api_key=config["gemini_api_key"],
             model=config.get("gemini_summarization_model", "gemini-2.5-flash"),
@@ -33,6 +37,7 @@ def create_summarization_provider(config: dict) -> SummarizationProvider:
 
     if service == "ollama":
         from .providers.ollama import OllamaProvider
+
         return OllamaProvider(
             model=config.get("ollama_model", "phi4-mini"),
             host=config.get("ollama_host", "http://localhost:11434"),

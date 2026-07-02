@@ -17,9 +17,16 @@ import os
 import shutil
 import subprocess
 import sys
-from typing import Callable
+from collections.abc import Callable
+from typing import Protocol
 
 logger = logging.getLogger(__name__)
+
+
+class ReadableProcess(Protocol):
+    """Structural type for os.popen's return value (read the command's stdout)."""
+
+    def read(self) -> str: ...
 
 
 def detect_gpu_vendor(
@@ -107,7 +114,7 @@ class CudaInstaller:
         self,
         which_fn: Callable[[str], str | None] = shutil.which,
         shell_fn: Callable[[str], int] = os.system,
-        popen_fn: Callable[[str], object] = os.popen,
+        popen_fn: Callable[[str], ReadableProcess] = os.popen,
     ) -> None:
         self._which = which_fn
         self._shell = shell_fn

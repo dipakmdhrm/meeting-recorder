@@ -1,13 +1,16 @@
 """
-Implementation of the Google Gemini AI provider. It handles the specific requirements of the Gemini API, including uploading audio files, polling for processing status, and executing both transcription and summarization prompts with appropriate model configurations.
+Implementation of the Google Gemini AI provider. It handles the specific requirements of the Gemini
+API, including uploading audio files, polling for processing status, and executing both
+transcription and summarization prompts with appropriate model configurations.
 """
 
 from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
+from typing import Any
 
 from ...config.defaults import (
     GEMINI_TRANSCRIPTION_PROMPT,
@@ -29,7 +32,7 @@ _TRANSCRIPTION_TEMPERATURE = 0
 _MAX_OUTPUT_TOKENS = 65_536
 
 
-def _require_text(response, context: str) -> str:
+def _require_text(response: Any, context: str) -> str:
     """Extract text from a GenerateContentResponse, raising clearly if empty or truncated."""
     # Log token usage and finish_reason for diagnostics
     _truncation_error = None
@@ -49,9 +52,11 @@ def _require_text(response, context: str) -> str:
             logger.info("%s finish_reason: %s", context, finish_reason)
             try:
                 from google.genai import types
+
                 if finish_reason == types.FinishReason.MAX_TOKENS:
                     _truncation_error = RuntimeError(
-                        f"Gemini output was truncated ({context}): the response hit the token limit. "
+                        f"Gemini output was truncated ({context}): "
+                        "the response hit the token limit. "
                         "Try a shorter recording, or switch to gemini-2.5-flash / gemini-2.5-pro "
                         "which support up to 65,536 output tokens."
                     )
@@ -64,8 +69,10 @@ def _require_text(response, context: str) -> str:
                 if out_tokens >= 8000:
                     logger.warning(
                         "%s: output tokens (%d) near 8192 limit — transcript may be truncated. "
-                        "Consider using gemini-2.5-flash which supports up to 65,536 output tokens.",
-                        context, out_tokens,
+                        "Consider using gemini-2.5-flash which supports up to "
+                        "65,536 output tokens.",
+                        context,
+                        out_tokens,
                     )
     except Exception:
         pass
@@ -75,11 +82,8 @@ def _require_text(response, context: str) -> str:
     text = response.text
     if not text:
         feedback = getattr(response, "prompt_feedback", None)
-        raise RuntimeError(
-            f"Gemini returned no text for {context}. "
-            f"prompt_feedback={feedback}"
-        )
-    return text.strip()
+        raise RuntimeError(f"Gemini returned no text for {context}. prompt_feedback={feedback}")
+    return str(text).strip()
 
 
 def _wrap_timeout(exc: Exception, context: str, timeout_ms: int) -> Exception:
@@ -118,17 +122,16 @@ class GeminiProvider:
         self._transcription_prompt = transcription_prompt or GEMINI_TRANSCRIPTION_PROMPT
         self._summarization_prompt = summarization_prompt or SUMMARIZATION_PROMPT
         self._generate_timeout_ms = timeout_minutes * 60_000
-        self._client = None
+        self._client: Any = None
 
-    def _get_client(self):
+    def _get_client(self) -> Any:
         if self._client is None:
             try:
                 from google import genai
             except ImportError:
                 raise ImportError(
-                    "google-genai is not installed. "
-                    "Run: pip install google-genai"
-                )
+                    "google-genai is not installed. Run: pip install google-genai"
+                ) from None
             self._client = genai.Client(api_key=self._api_key)
         return self._client
 
@@ -213,7 +216,9 @@ class GeminiProvider:
     # Helpers
     # ------------------------------------------------------------------
 
-    def _wait_for_active(self, client, file_obj, on_status):
+    def _wait_for_active(
+        self, client: Any, file_obj: Any, on_status: Callable[[str], None] | None
+    ) -> Any:
         """Poll until the uploaded file reaches ACTIVE state."""
         from google.genai import types
 
@@ -224,9 +229,7 @@ class GeminiProvider:
             if state == types.FileState.ACTIVE:
                 return file_obj
             if state in (types.FileState.FAILED, types.FileState.STATE_UNSPECIFIED):
-                raise RuntimeError(
-                    f"Gemini file processing failed (state={state})"
-                )
+                raise RuntimeError(f"Gemini file processing failed (state={state})")
 
             if time.time() > deadline:
                 raise TimeoutError("Timed out waiting for Gemini file to become active")
@@ -237,4 +240,3 @@ class GeminiProvider:
 
             time.sleep(_POLL_INTERVAL)
             file_obj = client.files.get(name=file_obj.name)
-

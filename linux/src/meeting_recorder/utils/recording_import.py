@@ -29,9 +29,8 @@ def resolve_existing_recording_target(
     """
     selected = selected.resolve()
     output_folder = output_folder.resolve()
-    inside_subdir = (
-        selected.parent != output_folder
-        and str(selected).startswith(str(output_folder) + os.sep)
+    inside_subdir = selected.parent != output_folder and str(selected).startswith(
+        str(output_folder) + os.sep
     )
     if inside_subdir:
         session_dir = selected.parent

@@ -23,7 +23,7 @@ class TestSectionVisibility:
         vis = compute_section_visibility("whisper", "gemini")
         assert vis["gemini"] is True
         assert vis["whisper"] is True
-        assert vis["gpu"] is True            # GPU section follows a local STT engine
+        assert vis["gpu"] is True  # GPU section follows a local STT engine
         assert vis["wcpp"] is False
         assert vis["ollama"] is False
 
@@ -37,7 +37,7 @@ class TestSectionVisibility:
         vis = compute_section_visibility("gemini", "ollama")
         assert vis["gemini"] is True
         assert vis["ollama"] is True
-        assert vis["gpu"] is False           # Ollama is summarization, not local STT
+        assert vis["gpu"] is False  # Ollama is summarization, not local STT
 
     def test_separator_only_when_later_section_visible(self):
         # gemini (transcription) + ollama (summarization): gemini and ollama
@@ -47,7 +47,7 @@ class TestSectionVisibility:
         assert vis["gemini_sep"] is True
         assert vis["whisper_sep"] is False
         assert vis["wcpp_sep"] is False
-        assert vis["ollama_sep"] is False    # gpu after it is hidden
+        assert vis["ollama_sep"] is False  # gpu after it is hidden
 
     def test_whisper_with_ollama_chain(self):
         # whisper transcription + ollama summarization → gemini hidden,
@@ -60,7 +60,7 @@ class TestSectionVisibility:
         # whisper_sep True (ollama/gpu later are visible); ollama_sep True (gpu later).
         assert vis["whisper_sep"] is True
         assert vis["ollama_sep"] is True
-        assert vis["gemini_sep"] is False    # gemini section itself hidden
+        assert vis["gemini_sep"] is False  # gemini section itself hidden
 
     def test_all_keys_present(self):
         vis = compute_section_visibility("gemini", "gemini")
@@ -68,4 +68,4 @@ class TestSectionVisibility:
             assert name in vis
         for name in ("gemini", "whisper", "wcpp", "ollama"):
             assert f"{name}_sep" in vis
-        assert "gpu_sep" not in vis          # last section has no trailing separator
+        assert "gpu_sep" not in vis  # last section has no trailing separator

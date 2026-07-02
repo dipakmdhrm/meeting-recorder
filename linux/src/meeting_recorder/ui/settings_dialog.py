@@ -21,12 +21,13 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from typing import Callable
+from collections.abc import Callable
 
 import gi
+
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import GLib, Gio, Gtk, Adw
+from gi.repository import Adw, Gio, GLib, Gtk
 
 from meeting_recorder.config import settings
 from meeting_recorder.config.defaults import (
@@ -47,6 +48,7 @@ from meeting_recorder.config.defaults import (
     WHISPER_MODEL_INFO,
     WHISPER_MODELS,
 )
+
 from ..services.ollama_service import OllamaClient
 from ..services.system_installer import (
     CudaInstaller,
@@ -70,16 +72,16 @@ from .settings_visibility import compute_section_visibility
 logger = logging.getLogger(__name__)
 
 _SERVICE_LABELS = {
-    "gemini":      "Google Gemini",
-    "whisper":     "Whisper (local)",
+    "gemini": "Google Gemini",
+    "whisper": "Whisper (local)",
     "whisper_cpp": "whisper.cpp (local, GPU)",
-    "ollama":      "Ollama (local)",
+    "ollama": "Ollama (local)",
 }
 
 _PROMPT_DEFAULTS = {
     "transcription": GEMINI_TRANSCRIPTION_PROMPT,
     "summarization": SUMMARIZATION_PROMPT,
-    "title":         TITLE_PROMPT,
+    "title": TITLE_PROMPT,
 }
 
 
@@ -111,6 +113,7 @@ class IdComboRow(Adw.ComboRow):
 # Dialog
 # ---------------------------------------------------------------------------
 
+
 class SettingsDialog(Adw.Window):
     def __init__(
         self,
@@ -140,22 +143,22 @@ class SettingsDialog(Adw.Window):
         self._on_saved = on_saved
 
         # --- injected dependencies (real defaults for production) ---
-        self._store           = store
-        self._cfg             = store.load()
-        self._dispatch        = dispatcher
-        self._whisper_checker = whisper_checker    or WhisperStatusChecker()
-        self._whisper_dl      = whisper_downloader or WhisperDownloader()
-        self._ollama          = ollama_client      or OllamaClient()
-        self._ollama_inst     = ollama_installer   or OllamaInstaller()
-        self._cuda_inst       = cuda_installer     or CudaInstaller()
-        self._rocm_inst       = rocm_installer     or RocmInstaller()
+        self._store = store
+        self._cfg = store.load()
+        self._dispatch = dispatcher
+        self._whisper_checker = whisper_checker or WhisperStatusChecker()
+        self._whisper_dl = whisper_downloader or WhisperDownloader()
+        self._ollama = ollama_client or OllamaClient()
+        self._ollama_inst = ollama_installer or OllamaInstaller()
+        self._cuda_inst = cuda_installer or CudaInstaller()
+        self._rocm_inst = rocm_installer or RocmInstaller()
         # Maps a detected GPU vendor to the runtime installer that serves it.
-        self._gpu_installers  = {"nvidia": self._cuda_inst, "amd": self._rocm_inst}
+        self._gpu_installers = {"nvidia": self._cuda_inst, "amd": self._rocm_inst}
         self._whisper_eng_inst = whisper_engine_installer or WhisperEngineInstaller()
-        self._wcpp_builder    = whisper_cpp_builder    or WhisperCppBuilder()
-        self._wcpp_checker    = whisper_cpp_checker    or WhisperCppStatusChecker()
-        self._wcpp_dl         = whisper_cpp_downloader or WhisperCppModelDownloader()
-        self._gpu_vendor      = gpu_vendor if gpu_vendor is not None else detect_gpu_vendor()
+        self._wcpp_builder = whisper_cpp_builder or WhisperCppBuilder()
+        self._wcpp_checker = whisper_cpp_checker or WhisperCppStatusChecker()
+        self._wcpp_dl = whisper_cpp_downloader or WhisperCppModelDownloader()
+        self._gpu_vendor = gpu_vendor if gpu_vendor is not None else detect_gpu_vendor()
 
         # --- widget references populated during build ---
         self._whisper_grid: ModelRowGrid | None = None
@@ -163,7 +166,7 @@ class SettingsDialog(Adw.Window):
         self._wcpp_grid: ModelRowGrid | None = None
         self._wcpp_model_combo: IdComboRow | None = None
         self._wcpp_backend_combo: IdComboRow | None = None
-        self._ollama_grid:  ModelRowGrid | None = None
+        self._ollama_grid: ModelRowGrid | None = None
         self._ollama_status_row: Adw.ActionRow | None = None
         self._prompt_views: dict[str, Gtk.TextView] = {}
 
@@ -280,7 +283,9 @@ class SettingsDialog(Adw.Window):
         q_ids = list(RECORDING_QUALITIES.keys())
         q_labels = [label for label, _ in RECORDING_QUALITIES.values()]
         self._quality_combo = IdComboRow(
-            "Recording quality", q_ids, q_labels,
+            "Recording quality",
+            q_ids,
+            q_labels,
             self._cfg.get("recording_quality", "high"),
         )
         recording.add(self._quality_combo)
@@ -307,14 +312,16 @@ class SettingsDialog(Adw.Window):
 
         services = Adw.PreferencesGroup(title="Services")
         self._ts_combo = self._make_service_combo(
-            "Transcription service", TRANSCRIPTION_SERVICES,
+            "Transcription service",
+            TRANSCRIPTION_SERVICES,
             self._cfg.get("transcription_service", "gemini"),
         )
         self._ts_combo.connect("notify::selected", lambda *_: self._update_models_visibility())
         services.add(self._ts_combo)
 
         self._ss_combo = self._make_service_combo(
-            "Summarization service", SUMMARIZATION_SERVICES,
+            "Summarization service",
+            SUMMARIZATION_SERVICES,
             self._cfg.get("summarization_service", "gemini"),
         )
         self._ss_combo.connect("notify::selected", lambda *_: self._update_models_visibility())
@@ -340,9 +347,7 @@ class SettingsDialog(Adw.Window):
         return scroll
 
     def _make_service_combo(self, title: str, items: list[str], active: str) -> IdComboRow:
-        return IdComboRow(
-            title, items, [_SERVICE_LABELS.get(i, i) for i in items], active
-        )
+        return IdComboRow(title, items, [_SERVICE_LABELS.get(i, i) for i in items], active)
 
     def _update_models_visibility(self) -> None:
         ts = self._ts_combo.get_active_id() or "gemini"
@@ -365,20 +370,26 @@ class SettingsDialog(Adw.Window):
         group.add(self._gemini_key_entry)
 
         self._gemini_ts_model_combo = IdComboRow(
-            "Transcription model", GEMINI_MODELS, GEMINI_MODELS,
+            "Transcription model",
+            GEMINI_MODELS,
+            GEMINI_MODELS,
             self._cfg.get("gemini_transcription_model", GEMINI_MODELS[0]),
         )
         group.add(self._gemini_ts_model_combo)
 
         self._gemini_ss_model_combo = IdComboRow(
-            "Summarization model", GEMINI_MODELS, GEMINI_MODELS,
+            "Summarization model",
+            GEMINI_MODELS,
+            GEMINI_MODELS,
             self._cfg.get("gemini_summarization_model", GEMINI_MODELS[0]),
         )
         group.add(self._gemini_ss_model_combo)
 
         t_ids = [str(m) for m in LLM_TIMEOUT_OPTIONS]
         self._timeout_combo = IdComboRow(
-            "Processing timeout", t_ids, [f"{m} min" for m in LLM_TIMEOUT_OPTIONS],
+            "Processing timeout",
+            t_ids,
+            [f"{m} min" for m in LLM_TIMEOUT_OPTIONS],
             str(self._cfg.get("llm_request_timeout_minutes", 3)),
         )
         group.add(self._timeout_combo)
@@ -406,8 +417,11 @@ class SettingsDialog(Adw.Window):
             )
             self._whisper_install_button = self._install_button("Install")
             self._whisper_install_button.connect("clicked", self._on_install_whisper_engine)
-            group.add(self._action_row("faster-whisper engine", "Not installed",
-                                       self._whisper_install_button))
+            group.add(
+                self._action_row(
+                    "faster-whisper engine", "Not installed", self._whisper_install_button
+                )
+            )
             self._whisper_box.append(group)
         else:
             group = Adw.PreferencesGroup(
@@ -415,14 +429,18 @@ class SettingsDialog(Adw.Window):
                 description="Models are downloaded from HuggingFace and cached locally.",
             )
             self._whisper_model_combo = IdComboRow(
-                "Whisper model", WHISPER_MODELS, WHISPER_MODELS,
+                "Whisper model",
+                WHISPER_MODELS,
+                WHISPER_MODELS,
                 self._cfg.get("whisper_model", WHISPER_MODELS[0]),
             )
             group.add(self._whisper_model_combo)
             self._whisper_box.append(group)
 
             self._whisper_grid = ModelRowGrid(
-                WHISPER_MODELS, WHISPER_MODEL_INFO, self._start_whisper_download,
+                WHISPER_MODELS,
+                WHISPER_MODEL_INFO,
+                self._start_whisper_download,
                 title="Whisper models",
             )
             self._whisper_box.append(self._whisper_grid)
@@ -440,7 +458,9 @@ class SettingsDialog(Adw.Window):
         # Backend selector is always available — it drives both the build and
         # the runtime acceleration; "auto" detects the GPU.
         self._wcpp_backend_combo = IdComboRow(
-            "Acceleration backend", WHISPER_CPP_BACKENDS, WHISPER_CPP_BACKENDS,
+            "Acceleration backend",
+            WHISPER_CPP_BACKENDS,
+            WHISPER_CPP_BACKENDS,
             self._cfg.get("whisper_cpp_backend", "auto"),
         )
         self._wcpp_backend_combo.set_subtitle(f"Detected: {detected}")
@@ -458,22 +478,27 @@ class SettingsDialog(Adw.Window):
             )
             self._wcpp_install_button = self._install_button("Build")
             self._wcpp_install_button.connect("clicked", self._on_build_whisper_cpp)
-            install_group.add(self._action_row("whisper.cpp engine", "Not built",
-                                                self._wcpp_install_button))
+            install_group.add(
+                self._action_row("whisper.cpp engine", "Not built", self._wcpp_install_button)
+            )
             self._wcpp_box.append(install_group)
         else:
             cfg_group = Adw.PreferencesGroup(
                 description="GGML models are downloaded from HuggingFace and cached locally.",
             )
             self._wcpp_model_combo = IdComboRow(
-                "Model", WHISPER_CPP_MODELS, WHISPER_CPP_MODELS,
+                "Model",
+                WHISPER_CPP_MODELS,
+                WHISPER_CPP_MODELS,
                 self._cfg.get("whisper_cpp_model", WHISPER_CPP_MODELS[0]),
             )
             cfg_group.add(self._wcpp_model_combo)
             self._wcpp_box.append(cfg_group)
 
             self._wcpp_grid = ModelRowGrid(
-                WHISPER_CPP_MODELS, WHISPER_CPP_MODEL_INFO, self._start_wcpp_download,
+                WHISPER_CPP_MODELS,
+                WHISPER_CPP_MODEL_INFO,
+                self._start_wcpp_download,
                 title="whisper.cpp models",
             )
             self._wcpp_box.append(self._wcpp_grid)
@@ -493,8 +518,7 @@ class SettingsDialog(Adw.Window):
             )
             self._ollama_install_button = self._install_button("Install")
             self._ollama_install_button.connect("clicked", self._on_install_ollama)
-            group.add(self._action_row("Ollama", "Not installed",
-                                       self._ollama_install_button))
+            group.add(self._action_row("Ollama", "Not installed", self._ollama_install_button))
             self._ollama_box.append(group)
         else:
             group = Adw.PreferencesGroup(
@@ -502,7 +526,9 @@ class SettingsDialog(Adw.Window):
                 description="Requires Ollama to be installed and running (ollama serve).",
             )
             self._ollama_model_combo = IdComboRow(
-                "Ollama model", OLLAMA_MODELS, OLLAMA_MODELS,
+                "Ollama model",
+                OLLAMA_MODELS,
+                OLLAMA_MODELS,
                 self._cfg.get("ollama_model", OLLAMA_MODELS[0]),
             )
             group.add(self._ollama_model_combo)
@@ -518,7 +544,9 @@ class SettingsDialog(Adw.Window):
             self._ollama_box.append(group)
 
             self._ollama_grid = ModelRowGrid(
-                OLLAMA_MODELS, OLLAMA_MODEL_INFO, self._start_ollama_download,
+                OLLAMA_MODELS,
+                OLLAMA_MODEL_INFO,
+                self._start_ollama_download,
                 title="Ollama models",
             )
             self._ollama_box.append(self._ollama_grid)
@@ -546,8 +574,7 @@ class SettingsDialog(Adw.Window):
         elif self._gpu_vendor == "amd":
             if self._rocm_inst.is_available():
                 self._gpu_installed_group(
-                    "AMD ROCm detected. GPU acceleration is available "
-                    "(use the whisper.cpp engine)."
+                    "AMD ROCm detected. GPU acceleration is available (use the whisper.cpp engine)."
                 )
             else:
                 self._build_gpu_installer(
@@ -568,9 +595,7 @@ class SettingsDialog(Adw.Window):
             )
 
     def _gpu_installed_group(self, text: str) -> None:
-        self._gpu_box.append(
-            Adw.PreferencesGroup(title="GPU Acceleration", description=text)
-        )
+        self._gpu_box.append(Adw.PreferencesGroup(title="GPU Acceleration", description=text))
 
     def _build_gpu_installer(self, vendor: str, info_text: str, button_label: str) -> None:
         group = Adw.PreferencesGroup(title="GPU Acceleration", description=info_text)
@@ -649,9 +674,7 @@ class SettingsDialog(Adw.Window):
         backend = self._wcpp_backend_combo.get_active_id() or "auto"
         if backend == "auto":
             backend = detect_gpu_backend()
-        threading.Thread(
-            target=self._do_build_whisper_cpp, args=(backend,), daemon=True
-        ).start()
+        threading.Thread(target=self._do_build_whisper_cpp, args=(backend,), daemon=True).start()
 
     def _do_build_whisper_cpp(self, backend: str) -> None:
         success = self._wcpp_builder.build(backend)
@@ -669,9 +692,7 @@ class SettingsDialog(Adw.Window):
     def _on_install_gpu(self, button: Gtk.Button, vendor: str) -> None:
         button.set_sensitive(False)
         button.set_label("Installing…")
-        threading.Thread(
-            target=self._do_install_gpu, args=(vendor,), daemon=True
-        ).start()
+        threading.Thread(target=self._do_install_gpu, args=(vendor,), daemon=True).start()
 
     def _do_install_gpu(self, vendor: str) -> None:
         installer = self._gpu_installers.get(vendor)
@@ -699,26 +720,32 @@ class SettingsDialog(Adw.Window):
 
     def _build_prompts_tab(self) -> Gtk.Widget:
         scroll, box = self._make_scroll_page()
-        box.append(self._build_prompt_section(
-            key="transcription",
-            label="Transcription prompt",
-            note="Transcription prompts apply to Gemini only. Whisper does not use prompts.",
-            height=160,
-        ))
-        box.append(self._build_prompt_section(
-            key="summarization",
-            label="Summarization prompt",
-            height=160,
-        ))
-        box.append(self._build_prompt_section(
-            key="title",
-            label="Title prompt",
-            note=(
-                "Used for auto-titling recordings and the AI title button in the "
-                "Library. Must contain {transcript}."
-            ),
-            height=120,
-        ))
+        box.append(
+            self._build_prompt_section(
+                key="transcription",
+                label="Transcription prompt",
+                note="Transcription prompts apply to Gemini only. Whisper does not use prompts.",
+                height=160,
+            )
+        )
+        box.append(
+            self._build_prompt_section(
+                key="summarization",
+                label="Summarization prompt",
+                height=160,
+            )
+        )
+        box.append(
+            self._build_prompt_section(
+                key="title",
+                label="Title prompt",
+                note=(
+                    "Used for auto-titling recordings and the AI title button in the "
+                    "Library. Must contain {transcript}."
+                ),
+                height=120,
+            )
+        )
         return scroll
 
     def _build_prompt_section(
@@ -766,9 +793,9 @@ class SettingsDialog(Adw.Window):
     # ------------------------------------------------------------------
 
     def _refresh_local_model_statuses(self) -> None:
-        threading.Thread(target=self._check_whisper_statuses,     daemon=True).start()
+        threading.Thread(target=self._check_whisper_statuses, daemon=True).start()
         threading.Thread(target=self._check_whisper_cpp_statuses, daemon=True).start()
-        threading.Thread(target=self._check_ollama_statuses,      daemon=True).start()
+        threading.Thread(target=self._check_ollama_statuses, daemon=True).start()
 
     def _check_whisper_statuses(self) -> None:
         if self._whisper_grid is None:  # engine not installed yet
@@ -791,7 +818,7 @@ class SettingsDialog(Adw.Window):
     def _check_ollama_statuses(self) -> None:
         if not self._ollama_inst.is_available():
             return
-        host      = self._cfg.get("ollama_host", OLLAMA_DEFAULT_HOST)
+        host = self._cfg.get("ollama_host", OLLAMA_DEFAULT_HOST)
         installed = self._ollama.get_installed_models(host)
         if installed is None:
             self._dispatch(self._set_ollama_unreachable)
@@ -805,9 +832,7 @@ class SettingsDialog(Adw.Window):
 
     def _set_ollama_unreachable(self) -> None:
         if self._ollama_status_row:
-            self._ollama_status_row.set_subtitle(
-                "Not reachable. Start it with: ollama serve"
-            )
+            self._ollama_status_row.set_subtitle("Not reachable. Start it with: ollama serve")
         if self._ollama_grid:
             for model in OLLAMA_MODELS:
                 self._ollama_grid.set_status_text(model, "Ollama offline")
@@ -822,9 +847,7 @@ class SettingsDialog(Adw.Window):
 
     def _start_whisper_download(self, model: str) -> None:
         self._whisper_grid.set_progress(model, "Downloading…")
-        threading.Thread(
-            target=self._do_whisper_download, args=(model,), daemon=True
-        ).start()
+        threading.Thread(target=self._do_whisper_download, args=(model,), daemon=True).start()
 
     def _do_whisper_download(self, model: str) -> None:
         try:
@@ -835,9 +858,7 @@ class SettingsDialog(Adw.Window):
 
     def _start_wcpp_download(self, model: str) -> None:
         self._wcpp_grid.set_progress(model, "Downloading…")
-        threading.Thread(
-            target=self._do_wcpp_download, args=(model,), daemon=True
-        ).start()
+        threading.Thread(target=self._do_wcpp_download, args=(model,), daemon=True).start()
 
     def _do_wcpp_download(self, model: str) -> None:
         try:
@@ -849,9 +870,7 @@ class SettingsDialog(Adw.Window):
     def _start_ollama_download(self, model: str) -> None:
         host = self._ollama_host_entry.get_text().strip()
         self._ollama_grid.set_progress(model, "Starting…")
-        threading.Thread(
-            target=self._do_ollama_download, args=(model, host), daemon=True
-        ).start()
+        threading.Thread(target=self._do_ollama_download, args=(model, host), daemon=True).start()
 
     def _do_ollama_download(self, model: str, host: str) -> None:
         def on_progress(text: str) -> None:
@@ -898,18 +917,16 @@ class SettingsDialog(Adw.Window):
     def _save(self) -> None:
         cfg = self._store.load()
 
-        cfg["transcription_service"]    = self._ts_combo.get_active_id() or "gemini"
-        cfg["summarization_service"]    = self._ss_combo.get_active_id() or "gemini"
-        cfg["gemini_api_key"]           = self._gemini_key_entry.get_text().strip()
+        cfg["transcription_service"] = self._ts_combo.get_active_id() or "gemini"
+        cfg["summarization_service"] = self._ss_combo.get_active_id() or "gemini"
+        cfg["gemini_api_key"] = self._gemini_key_entry.get_text().strip()
         cfg["gemini_transcription_model"] = (
             self._gemini_ts_model_combo.get_active_id() or GEMINI_MODELS[0]
         )
         cfg["gemini_summarization_model"] = (
             self._gemini_ss_model_combo.get_active_id() or GEMINI_MODELS[0]
         )
-        cfg["llm_request_timeout_minutes"] = int(
-            self._timeout_combo.get_active_id() or "3"
-        )
+        cfg["llm_request_timeout_minutes"] = int(self._timeout_combo.get_active_id() or "3")
         # These combos only exist once the corresponding opt-in engine is
         # installed/built; preserve the stored value otherwise.
         if self._whisper_model_combo is not None:
@@ -920,18 +937,16 @@ class SettingsDialog(Adw.Window):
             )
         if self._wcpp_backend_combo is not None:
             cfg["whisper_cpp_backend"] = self._wcpp_backend_combo.get_active_id() or "auto"
-        cfg["output_folder"]    = self._folder_entry.get_text().strip() or "~/meetings"
+        cfg["output_folder"] = self._folder_entry.get_text().strip() or "~/meetings"
         cfg["recording_quality"] = self._quality_combo.get_active_id() or "high"
-        cfg["call_detection_enabled"]       = self._detection_switch.get_active()
-        cfg["start_at_startup"]             = self._startup_switch.get_active()
-        cfg["auto_title"]                   = self._auto_title_switch.get_active()
+        cfg["call_detection_enabled"] = self._detection_switch.get_active()
+        cfg["start_at_startup"] = self._startup_switch.get_active()
+        cfg["auto_title"] = self._auto_title_switch.get_active()
         cfg["processing_countdown_enabled"] = self._countdown_switch.get_active()
 
         if self._ollama_inst.is_available():
             cfg["ollama_model"] = self._ollama_model_combo.get_active_id() or OLLAMA_MODELS[0]
-            cfg["ollama_host"]  = (
-                self._ollama_host_entry.get_text().strip() or OLLAMA_DEFAULT_HOST
-            )
+            cfg["ollama_host"] = self._ollama_host_entry.get_text().strip() or OLLAMA_DEFAULT_HOST
 
         for key, default in _PROMPT_DEFAULTS.items():
             cfg[f"{key}_prompt"] = self._read_prompt(self._prompt_views[key], default)
@@ -943,6 +958,6 @@ class SettingsDialog(Adw.Window):
             logger.error("Failed to save settings: %s", exc)
 
     def _read_prompt(self, view: Gtk.TextView, default: str) -> str:
-        buf  = view.get_buffer()
+        buf = view.get_buffer()
         text = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False).strip()
         return "" if text == default.strip() else text

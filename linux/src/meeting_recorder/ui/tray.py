@@ -40,7 +40,7 @@ _TRAY_ICON_SIZES = (24, 32, 48, 64)
 _pixmap_cache: dict[str, list] = {}
 
 
-def _pixbuf_to_argb(pixbuf: "GdkPixbuf.Pixbuf") -> tuple:
+def _pixbuf_to_argb(pixbuf: GdkPixbuf.Pixbuf) -> tuple:
     """Convert a GdkPixbuf into an SNI pixmap tuple ``(width, height, bytes)``.
 
     StatusNotifierItem wants 32-bit ARGB in network (big-endian) byte order — each
@@ -59,7 +59,7 @@ def _pixbuf_to_argb(pixbuf: "GdkPixbuf.Pixbuf") -> tuple:
             p = row + x * n_channels
             a = pixels[p + 3] if n_channels == 4 else 255
             argb[out] = a
-            argb[out + 1] = pixels[p]      # R
+            argb[out + 1] = pixels[p]  # R
             argb[out + 2] = pixels[p + 1]  # G
             argb[out + 3] = pixels[p + 2]  # B
             out += 4
@@ -247,7 +247,9 @@ class TrayIcon:
         self._revision += 1
         self._emit_signal(_ITEM_PATH, _ITEM_IFACE, "NewIcon", None)
         self._emit_signal(
-            _MENU_PATH, _MENU_IFACE, "LayoutUpdated",
+            _MENU_PATH,
+            _MENU_IFACE,
+            "LayoutUpdated",
             GLib.Variant("(ui)", (self._revision, 0)),
         )
 
@@ -260,29 +262,41 @@ class TrayIcon:
 
         item_node = Gio.DBusNodeInfo.new_for_xml(_SNI_XML)
         self._item_reg_id = self._conn.register_object(
-            _ITEM_PATH, item_node.interfaces[0],
-            self._sni_method, self._sni_get_property, None,
+            _ITEM_PATH,
+            item_node.interfaces[0],
+            self._sni_method,
+            self._sni_get_property,
+            None,
         )
         menu_node = Gio.DBusNodeInfo.new_for_xml(_MENU_XML)
         self._menu_reg_id = self._conn.register_object(
-            _MENU_PATH, menu_node.interfaces[0],
-            self._menu_method, self._menu_get_property, None,
+            _MENU_PATH,
+            menu_node.interfaces[0],
+            self._menu_method,
+            self._menu_get_property,
+            None,
         )
 
         # Own a per-process well-known name (libappindicator convention) so the
         # watcher can address us by it. Registration is (re)attempted once the
         # name is actually acquired.
         self._owner_id = Gio.bus_own_name_on_connection(
-            self._conn, self._bus_name, Gio.BusNameOwnerFlags.NONE,
-            self._on_name_acquired, None,
+            self._conn,
+            self._bus_name,
+            Gio.BusNameOwnerFlags.NONE,
+            self._on_name_acquired,
+            None,
         )
         # Register whenever the watcher is/becomes present — fires immediately if
         # a host already exists, and again if the host (e.g. the GNOME extension)
         # restarts. Guarded on name acquisition so we never register a name we
         # don't yet own.
         self._watch_id = Gio.bus_watch_name_on_connection(
-            self._conn, _WATCHER_NAME, Gio.BusNameWatcherFlags.NONE,
-            lambda *_: self._register_with_watcher(), None,
+            self._conn,
+            _WATCHER_NAME,
+            Gio.BusNameWatcherFlags.NONE,
+            lambda *_: self._register_with_watcher(),
+            None,
         )
 
     def _on_name_acquired(self, _conn, _name) -> None:
@@ -301,10 +315,16 @@ class TrayIcon:
                 logger.info("Tray: no StatusNotifierWatcher available (%s)", exc)
 
         self._conn.call(
-            _WATCHER_NAME, _WATCHER_PATH, _WATCHER_NAME,
+            _WATCHER_NAME,
+            _WATCHER_PATH,
+            _WATCHER_NAME,
             "RegisterStatusNotifierItem",
             GLib.Variant("(s)", (self._bus_name,)),
-            None, Gio.DBusCallFlags.NONE, -1, None, _done,
+            None,
+            Gio.DBusCallFlags.NONE,
+            -1,
+            None,
+            _done,
         )
 
     def _emit_signal(self, path: str, iface: str, name: str, body) -> None:
@@ -339,9 +359,7 @@ class TrayIcon:
             "IconThemePath": GLib.Variant("s", ""),
             "ItemIsMenu": GLib.Variant("b", False),
             "Menu": GLib.Variant("o", _MENU_PATH),
-            "ToolTip": GLib.Variant(
-                "(sa(iiay)ss)", ("", [], "Meeting Recorder", "")
-            ),
+            "ToolTip": GLib.Variant("(sa(iiay)ss)", ("", [], "Meeting Recorder", "")),
         }
         return values.get(prop)
 
@@ -391,16 +409,14 @@ class TrayIcon:
             item_id, name = params.unpack()
             item = self._find_item(item_id)
             val = self._item_props(item).get(name) if item else None
-            invocation.return_value(
-                GLib.Variant("(v)", (val or GLib.Variant("s", ""),))
-            )
+            invocation.return_value(GLib.Variant("(v)", (val or GLib.Variant("s", ""),)))
         elif method == "Event":
             item_id, event_id, _data, _ts = params.unpack()
             if event_id == "clicked":
                 self._on_menu_clicked(item_id)
             invocation.return_value(None)
         elif method == "EventGroup":
-            events, = params.unpack()
+            (events,) = params.unpack()
             for item_id, event_id, _data, _ts in events:
                 if event_id == "clicked":
                     self._on_menu_clicked(item_id)
@@ -453,6 +469,7 @@ class TrayIcon:
 
     def _dispatch_action(self, action: str, job_index=None) -> None:
         from ..utils.glib_bridge import idle_call
+
         w = self._window
         handlers = {
             "record_headphones": w.on_record_headphones_clicked,

@@ -6,9 +6,11 @@ All tests inject which_fn / shell_fn / downloader / cache_root so no compiler,
 GPU, or network is touched.  The per-backend and cross-distro branch-isolation
 tests are the important regression guards.
 """
+
 import os
 
 import pytest
+
 from meeting_recorder.services.whisper_cpp_service import (
     WhisperCppBuilder,
     WhisperCppModelDownloader,
@@ -29,49 +31,64 @@ def _recording_shell(rc: int = 0):
 
 # ── detect_gpu_backend ────────────────────────────────────────────────────────
 
+
 class TestDetectGpuBackend:
     def test_metal_on_darwin(self):
-        assert detect_gpu_backend(
-            which_fn=lambda _: None, platform_fn=lambda: "darwin"
-        ) == "metal"
+        assert detect_gpu_backend(which_fn=lambda _: None, platform_fn=lambda: "darwin") == "metal"
 
     def test_cuda_when_nvidia_smi_present(self):
-        assert detect_gpu_backend(
-            which_fn=_which_only("nvidia-smi"),
-            platform_fn=lambda: "linux",
-            path_exists_fn=lambda _p: False,
-        ) == "cuda"
+        assert (
+            detect_gpu_backend(
+                which_fn=_which_only("nvidia-smi"),
+                platform_fn=lambda: "linux",
+                path_exists_fn=lambda _p: False,
+            )
+            == "cuda"
+        )
 
     def test_rocm_when_rocminfo_present(self):
-        assert detect_gpu_backend(
-            which_fn=_which_only("rocminfo"),
-            platform_fn=lambda: "linux",
-            path_exists_fn=lambda _p: False,
-        ) == "rocm"
+        assert (
+            detect_gpu_backend(
+                which_fn=_which_only("rocminfo"),
+                platform_fn=lambda: "linux",
+                path_exists_fn=lambda _p: False,
+            )
+            == "rocm"
+        )
 
     def test_rocm_when_kfd_device_present(self):
-        assert detect_gpu_backend(
-            which_fn=lambda _: None,
-            platform_fn=lambda: "linux",
-            path_exists_fn=lambda p: p == "/dev/kfd",
-        ) == "rocm"
+        assert (
+            detect_gpu_backend(
+                which_fn=lambda _: None,
+                platform_fn=lambda: "linux",
+                path_exists_fn=lambda p: p == "/dev/kfd",
+            )
+            == "rocm"
+        )
 
     def test_vulkan_when_vulkaninfo_present(self):
-        assert detect_gpu_backend(
-            which_fn=_which_only("vulkaninfo"),
-            platform_fn=lambda: "linux",
-            path_exists_fn=lambda _p: False,
-        ) == "vulkan"
+        assert (
+            detect_gpu_backend(
+                which_fn=_which_only("vulkaninfo"),
+                platform_fn=lambda: "linux",
+                path_exists_fn=lambda _p: False,
+            )
+            == "vulkan"
+        )
 
     def test_cpu_fallback(self):
-        assert detect_gpu_backend(
-            which_fn=lambda _: None,
-            platform_fn=lambda: "linux",
-            path_exists_fn=lambda _p: False,
-        ) == "cpu"
+        assert (
+            detect_gpu_backend(
+                which_fn=lambda _: None,
+                platform_fn=lambda: "linux",
+                path_exists_fn=lambda _p: False,
+            )
+            == "cpu"
+        )
 
 
 # ── build_cmake_command ───────────────────────────────────────────────────────
+
 
 class TestBuildCmakeCommand:
     def test_cuda_flag(self):
@@ -102,6 +119,7 @@ class TestBuildCmakeCommand:
 
 
 # ── WhisperCppBuilder ─────────────────────────────────────────────────────────
+
 
 class TestWhisperCppBuilderIsBuilt:
     def test_true_when_binary_exists(self, tmp_path):
@@ -157,9 +175,7 @@ class TestWhisperCppBuilderBuild:
 
     def test_returns_false_when_no_package_manager(self, tmp_path):
         cmds, shell = _recording_shell()
-        builder = WhisperCppBuilder(
-            home=tmp_path, which_fn=lambda _: None, shell_fn=shell
-        )
+        builder = WhisperCppBuilder(home=tmp_path, which_fn=lambda _: None, shell_fn=shell)
         assert builder.build("cpu") is False
         assert cmds == []
 
@@ -168,14 +184,15 @@ class TestWhisperCppBuilderBuild:
         assert builder.build("cpu") is False
 
     def test_returns_false_when_shell_raises(self, tmp_path):
-        def boom(_): raise RuntimeError("disk full")
-        builder = WhisperCppBuilder(
-            home=tmp_path, which_fn=_which_only("apt-get"), shell_fn=boom
-        )
+        def boom(_):
+            raise RuntimeError("disk full")
+
+        builder = WhisperCppBuilder(home=tmp_path, which_fn=_which_only("apt-get"), shell_fn=boom)
         assert builder.build("cpu") is False
 
 
 # ── WhisperCppStatusChecker / WhisperCppModelDownloader ───────────────────────
+
 
 class TestWhisperCppStatusChecker:
     def test_true_when_model_file_exists(self, tmp_path):
@@ -206,7 +223,9 @@ class TestWhisperCppModelDownloader:
         assert dest_name == "ggml-small.bin"
 
     def test_propagates_downloader_errors(self, tmp_path):
-        def boom(_url, _dest): raise OSError("network down")
+        def boom(_url, _dest):
+            raise OSError("network down")
+
         dl = WhisperCppModelDownloader(cache_root=tmp_path, downloader=boom)
         with pytest.raises(OSError):
             dl.download("small")

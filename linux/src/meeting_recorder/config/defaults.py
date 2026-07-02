@@ -1,8 +1,12 @@
 """
-Defines application-wide constants and default configuration settings. This includes app identification, supported Gemini models, default prompts for transcription and summarization, and audio quality presets.
+Defines application-wide constants and default configuration settings. This includes app
+identification, supported Gemini models, default prompts for transcription and summarization, and
+audio quality presets.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 APP_ID = "io.github.dipakmdhrm.MeetingRecorder"
 APP_NAME = "Meeting Recorder"
@@ -42,19 +46,19 @@ WHISPER_MODELS = [
 
 # Maps model name -> HuggingFace repo ID (used for cache-presence check)
 WHISPER_HF_REPOS = {
-    "small":           "Systran/faster-whisper-small",
-    "medium":          "Systran/faster-whisper-medium",
+    "small": "Systran/faster-whisper-small",
+    "medium": "Systran/faster-whisper-medium",
     "distil-large-v3": "Systran/faster-distil-whisper-large-v3",
-    "large-v3":        "Systran/faster-whisper-large-v3",
-    "large-v3-turbo":  "Systran/faster-whisper-large-v3-turbo",
+    "large-v3": "Systran/faster-whisper-large-v3",
+    "large-v3-turbo": "Systran/faster-whisper-large-v3-turbo",
 }
 
 WHISPER_MODEL_INFO = {
-    "small":           {"size": "~500 MB", "note": "Fast, lower accuracy"},
-    "medium":          {"size": "~1.5 GB", "note": "Good balance"},
+    "small": {"size": "~500 MB", "note": "Fast, lower accuracy"},
+    "medium": {"size": "~1.5 GB", "note": "Good balance"},
     "distil-large-v3": {"size": "~1.5 GB", "note": "Fast, near-large quality"},
-    "large-v3-turbo":  {"size": "~1.6 GB", "note": "High quality, 8× faster than large-v3"},
-    "large-v3":        {"size": "~3 GB",   "note": "Best accuracy, slow on CPU"},
+    "large-v3-turbo": {"size": "~1.6 GB", "note": "High quality, 8× faster than large-v3"},
+    "large-v3": {"size": "~3 GB", "note": "Best accuracy, slow on CPU"},
 }
 
 # whisper.cpp STT model list (GGML weights, for local transcription with GPU
@@ -68,21 +72,19 @@ WHISPER_CPP_MODELS = [
 
 # Maps model name -> ggml-*.bin filename in the HuggingFace ggerganov/whisper.cpp repo.
 WHISPER_CPP_GGML_FILES = {
-    "small":          "ggml-small.bin",
-    "medium":         "ggml-medium.bin",
-    "large-v3":       "ggml-large-v3.bin",
+    "small": "ggml-small.bin",
+    "medium": "ggml-medium.bin",
+    "large-v3": "ggml-large-v3.bin",
     "large-v3-turbo": "ggml-large-v3-turbo.bin",
 }
 
-WHISPER_CPP_GGML_BASE_URL = (
-    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/"
-)
+WHISPER_CPP_GGML_BASE_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/"
 
 WHISPER_CPP_MODEL_INFO = {
-    "small":          {"size": "~470 MB", "note": "Fast, lower accuracy"},
-    "medium":         {"size": "~1.5 GB", "note": "Good balance"},
+    "small": {"size": "~470 MB", "note": "Fast, lower accuracy"},
+    "medium": {"size": "~1.5 GB", "note": "Good balance"},
     "large-v3-turbo": {"size": "~1.6 GB", "note": "High quality, fast"},
-    "large-v3":       {"size": "~3 GB",   "note": "Best accuracy, slower"},
+    "large-v3": {"size": "~3 GB", "note": "Best accuracy, slower"},
 }
 
 # Acceleration backends the whisper.cpp engine can be built/run with.
@@ -99,37 +101,33 @@ OLLAMA_MODELS = [
 ]
 
 OLLAMA_MODEL_INFO = {
-    "phi4-mini":    {"size": "~3 GB", "note": "Lightest, good quality"},
-    "gemma3:4b":    {"size": "~4 GB", "note": "Good quality"},
-    "qwen2.5:7b":   {"size": "~5 GB", "note": "Very capable"},
-    "llama3.1:8b":  {"size": "~5 GB", "note": "Very capable"},
-    "gemma3:12b":   {"size": "~8 GB", "note": "Best quality, high RAM required"},
+    "phi4-mini": {"size": "~3 GB", "note": "Lightest, good quality"},
+    "gemma3:4b": {"size": "~4 GB", "note": "Good quality"},
+    "qwen2.5:7b": {"size": "~5 GB", "note": "Very capable"},
+    "llama3.1:8b": {"size": "~5 GB", "note": "Very capable"},
+    "gemma3:12b": {"size": "~8 GB", "note": "Best quality, high RAM required"},
 }
 
 OLLAMA_DEFAULT_HOST = "http://localhost:11434"
 
-DEFAULT_CONFIG: dict = {
+DEFAULT_CONFIG: dict[str, Any] = {
     "transcription_service": "gemini",
     "summarization_service": "gemini",
     "gemini_api_key": "",
     "gemini_transcription_model": "gemini-flash-latest",
     "gemini_summarization_model": "gemini-flash-latest",
-
     "output_folder": DEFAULT_OUTPUT_FOLDER,
     "recording_quality": "high",
     "call_detection_enabled": False,
     "start_at_startup": False,
     "auto_title": True,
     "processing_countdown_enabled": False,
-
     "llm_request_timeout_minutes": 5,
-
     "whisper_model": "large-v3-turbo",
     "whisper_cpp_model": "large-v3-turbo",
     "whisper_cpp_backend": "auto",
     "ollama_model": "phi4-mini",
     "ollama_host": "http://localhost:11434",
-
     # Empty string means "use the built-in default prompt".
     # Storing the prompt text directly lets the user revert to the default
     # by clearing the field, without needing a separate "use default" flag.
@@ -196,4 +194,3 @@ assigned in the order they first speak. Use the same label consistently for the 
 - Timestamps should be in [HH:MM:SS] format, incremented roughly every turn.
 - Transcribe faithfully in whatever language is spoken; do not translate.
 """
-

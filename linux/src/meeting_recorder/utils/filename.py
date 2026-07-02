@@ -1,5 +1,7 @@
 """
-Handles the generation of structured output paths for recording sessions. It includes logic for sanitizing user-provided titles and organizing files into a readable date-based directory hierarchy.
+Handles the generation of structured output paths for recording sessions. It includes logic for
+sanitizing user-provided titles and organizing files into a readable date-based directory
+hierarchy.
 """
 
 from __future__ import annotations
@@ -19,7 +21,6 @@ def sanitize_title(title: str) -> str:
     # 50 chars keeps the full path well under the 255-byte filename limit even
     # when prepended with a timestamp (e.g. "14-30_").
     return sanitized[:50]
-
 
 
 def output_paths(

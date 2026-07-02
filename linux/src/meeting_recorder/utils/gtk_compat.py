@@ -9,7 +9,7 @@ GTK3 idioms the UI relied on: iterating a widget's children and clearing a box.
 
 from __future__ import annotations
 
-from typing import Iterator
+from collections.abc import Iterator
 
 from gi.repository import Gtk
 

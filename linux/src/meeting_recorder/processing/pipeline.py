@@ -1,12 +1,15 @@
 """
-Manages the end-to-end AI processing workflow for recorded meetings. It coordinates the execution of transcription followed by summarization, ensuring that results are correctly saved to the designated output paths on disk.
+Manages the end-to-end AI processing workflow for recorded meetings. It coordinates the execution
+of transcription followed by summarization, ensuring that results are correctly saved to the
+designated output paths on disk.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +22,7 @@ class Pipeline:
 
     def __init__(
         self,
-        config: dict,
+        config: dict[str, Any],
         audio_path: Path | None,
         transcript_path: Path | None,
         notes_path: Path | None,
@@ -43,12 +46,17 @@ class Pipeline:
 
     def _run_separate(self) -> None:
         """Separate transcription and summarization calls."""
-        from .transcription import create_transcription_provider
-        from .summarization import create_summarization_provider
         from .providers.ollama import unload_all_models
+        from .summarization import create_summarization_provider
+        from .transcription import create_transcription_provider
+
+        # Fail fast with a clear message instead of a confusing error deep
+        # inside a provider (e.g. the Gemini upload opening a None path).
+        audio_path = self._audio_path
+        if audio_path is None:
+            raise ValueError("Pipeline requires an audio path to transcribe")
 
         ts_service = self._config.get("transcription_service", "gemini")
-        ss_service = self._config.get("summarization_service", "gemini")
         ollama_host = self._config.get("ollama_host", "http://localhost:11434")
 
         # Before GPU transcription, evict any ollama models that are occupying VRAM.
@@ -56,6 +64,7 @@ class Pipeline:
             loaded = []
             try:
                 from .providers.ollama import get_loaded_models
+
                 loaded = get_loaded_models(ollama_host)
             except Exception:
                 pass
@@ -67,7 +76,7 @@ class Pipeline:
         # Transcription
         ts_provider = create_transcription_provider(self._config)
         transcript = ts_provider.transcribe(
-            audio_path=self._audio_path,
+            audio_path=audio_path,
             on_status=self._on_status,
         )
 
@@ -104,6 +113,7 @@ class Pipeline:
 
         meeting_dir = self._audio_path.parent
         import re
+
         if not re.match(r"^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}(?:_\d+)?$", meeting_dir.name):
             # User likely provided a title already
             return
@@ -112,25 +122,31 @@ class Pipeline:
             self._on_status("Generating title…")
 
         try:
-            from .summarization import create_summarization_provider
-            from ..config.defaults import TITLE_PROMPT
-            from ..utils.meeting_scanner import rename_meeting_path, write_metadata
             from datetime import datetime
 
-            provider = create_summarization_provider({
-                **self._config,
-                "summarization_prompt": self._config.get("title_prompt") or TITLE_PROMPT,
-            })
+            from ..config.defaults import TITLE_PROMPT
+            from ..utils.meeting_scanner import rename_meeting_path, write_metadata
+            from .summarization import create_summarization_provider
+
+            provider = create_summarization_provider(
+                {
+                    **self._config,
+                    "summarization_prompt": self._config.get("title_prompt") or TITLE_PROMPT,
+                }
+            )
             title = provider.summarize(notes)
             title = title.strip().strip('"').strip("'").strip()
 
             if not title:
                 return
 
-            write_metadata(meeting_dir, {
-                "title": title,
-                "generated_at": datetime.now().isoformat(),
-            })
+            write_metadata(
+                meeting_dir,
+                {
+                    "title": title,
+                    "generated_at": datetime.now().isoformat(),
+                },
+            )
 
             new_path = rename_meeting_path(meeting_dir, title)
             logger.info("Auto-titled meeting: %s -> %s", meeting_dir.name, new_path.name)

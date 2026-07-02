@@ -10,9 +10,10 @@ label and a download/retry button in the row suffix.
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 import gi
+
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk
@@ -87,9 +88,7 @@ class ModelRowGrid(Adw.PreferencesGroup):
 
     # ------------------------------------------------------------------
 
-    def _update_row(
-        self, model: str, status: str, btn_label: str, sensitive: bool
-    ) -> None:
+    def _update_row(self, model: str, status: str, btn_label: str, sensitive: bool) -> None:
         row = self._rows.get(model)
         if row:
             row["status"].set_text(status)

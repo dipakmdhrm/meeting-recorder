@@ -5,8 +5,8 @@ It handles creating and removing the .desktop entry in the user's autostart dire
 
 from __future__ import annotations
 
-import os
 import logging
+import os
 import shutil
 from pathlib import Path
 

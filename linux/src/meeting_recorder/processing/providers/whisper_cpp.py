@@ -13,8 +13,8 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -76,10 +76,13 @@ class WhisperCppProvider:
 
         cmd = [
             str(binary),
-            "-m", str(model_file),
-            "-f", str(audio_path),
+            "-m",
+            str(model_file),
+            "-f",
+            str(audio_path),
             "--output-json-full",
-            "--output-file", "-",
+            "--output-file",
+            "-",
         ]
         logger.info("Running whisper.cpp: %s", " ".join(cmd))
         raw = self._runner(cmd)
@@ -89,12 +92,14 @@ class WhisperCppProvider:
         if self._binary is not None:
             return self._binary
         from ...services.whisper_cpp_service import WHISPER_CPP_BINARY  # noqa: PLC0415
+
         return WHISPER_CPP_BINARY
 
     def _resolve_model_path(self) -> Path:
         if self._model_path is not None:
             return self._model_path
         from ...services.whisper_cpp_service import WhisperCppStatusChecker  # noqa: PLC0415
+
         return WhisperCppStatusChecker().model_path(self._model_name)
 
 

@@ -1,5 +1,7 @@
 """
-Monitors system audio events using 'pactl subscribe' to detect when applications start capturing from the microphone. This allows the application to identify potential calls from browser-based tools and desktop applications.
+Monitors system audio events using 'pactl subscribe' to detect when applications start capturing
+from the microphone. This allows the application to identify potential calls from browser-based
+tools and desktop applications.
 """
 
 from __future__ import annotations
@@ -7,7 +9,7 @@ from __future__ import annotations
 import logging
 import subprocess
 import threading
-from typing import Callable
+from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 

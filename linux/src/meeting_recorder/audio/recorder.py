@@ -1,5 +1,7 @@
 """
-Manages the audio recording lifecycle using ffmpeg as a subprocess. It implements a robust pause/resume mechanism by recording into segments and concatenating them upon completion. It also handles audio device resolution and error monitoring during the recording process.
+Manages the audio recording lifecycle using ffmpeg as a subprocess. It implements a robust
+pause/resume mechanism by recording into segments and concatenating them upon completion. It also
+handles audio device resolution and error monitoring during the recording process.
 """
 
 from __future__ import annotations
@@ -8,10 +10,10 @@ import logging
 import subprocess
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
-from .devices import get_default_source, get_default_sink, get_monitor_source
+from .devices import get_default_sink, get_default_source, get_monitor_source
 from .mixer import build_ffmpeg_command, build_ffmpeg_command_mic_only
 
 logger = logging.getLogger(__name__)
@@ -91,9 +93,7 @@ class Recorder:
 
         self._start_ffmpeg_segment()
 
-        self._timer_thread = threading.Thread(
-            target=self._timer_loop, daemon=True
-        )
+        self._timer_thread = threading.Thread(target=self._timer_loop, daemon=True)
         self._timer_thread.start()
 
         logger.info("Recording started → %s", self._output_path)
@@ -164,7 +164,9 @@ class Recorder:
         if self._mode == "speaker":
             cmd = build_ffmpeg_command_mic_only(self._mic_source, seg_path, quality=self._quality)
         else:
-            cmd = build_ffmpeg_command(self._mic_source, self._monitor_source, seg_path, quality=self._quality)
+            cmd = build_ffmpeg_command(
+                self._mic_source, self._monitor_source, seg_path, quality=self._quality
+            )
 
         try:
             self._ffmpeg = subprocess.Popen(
@@ -173,7 +175,7 @@ class Recorder:
                 stderr=subprocess.PIPE,
             )
         except FileNotFoundError:
-            raise RecordingError("ffmpeg not found. Please install ffmpeg.")
+            raise RecordingError("ffmpeg not found. Please install ffmpeg.") from None
 
         threading.Thread(
             target=self._drain_stderr,
@@ -208,11 +210,19 @@ class Recorder:
 
             result = subprocess.run(
                 [
-                    "ffmpeg", "-y",
-                    "-hide_banner", "-loglevel", "error",
-                    "-f", "concat", "-safe", "0",
-                    "-i", str(concat_list),
-                    "-c", "copy",
+                    "ffmpeg",
+                    "-y",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-f",
+                    "concat",
+                    "-safe",
+                    "0",
+                    "-i",
+                    str(concat_list),
+                    "-c",
+                    "copy",
                     str(self._output_path),
                 ],
                 stdout=subprocess.DEVNULL,

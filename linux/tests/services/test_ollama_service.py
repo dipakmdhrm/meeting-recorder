@@ -4,15 +4,19 @@ Tests for OllamaClient.
 All network calls are replaced with fake context managers so no real HTTP
 requests are made.
 """
-import json
-import pytest
-from meeting_recorder.services.ollama_service import OllamaClient
 
+import json
+
+import pytest
+
+from meeting_recorder.services.ollama_service import OllamaClient
 
 # ── fake HTTP helpers ─────────────────────────────────────────────────────────
 
+
 class FakeReadResponse:
     """Simulates a urllib response whose body is read all at once."""
+
     def __init__(self, body: bytes):
         self._body = body
 
@@ -28,6 +32,7 @@ class FakeReadResponse:
 
 class FakeStreamResponse:
     """Simulates a streaming urllib response read line-by-line."""
+
     def __init__(self, lines: list[bytes]):
         self._iter = iter(lines)
 
@@ -48,6 +53,7 @@ def _tags_response(model_names: list[str]) -> FakeReadResponse:
 
 # ── get_installed_models ──────────────────────────────────────────────────────
 
+
 class TestGetInstalledModels:
     HOST = "http://localhost:11434"
 
@@ -60,7 +66,9 @@ class TestGetInstalledModels:
         assert client.get_installed_models(self.HOST) == []
 
     def test_returns_none_on_connection_error(self):
-        def fail(*a, **kw): raise OSError("connection refused")
+        def fail(*a, **kw):
+            raise OSError("connection refused")
+
         client = OllamaClient(http_open=fail)
         assert client.get_installed_models(self.HOST) is None
 
@@ -70,6 +78,7 @@ class TestGetInstalledModels:
 
 
 # ── is_model_installed ────────────────────────────────────────────────────────
+
 
 class TestIsModelInstalled:
     def _client(self):
@@ -91,6 +100,7 @@ class TestIsModelInstalled:
 
 
 # ── pull_model ────────────────────────────────────────────────────────────────
+
 
 class TestPullModel:
     HOST = "http://localhost:11434"
@@ -134,20 +144,24 @@ class TestPullModel:
     def test_fallback_true_when_model_appears_in_installed_list(self):
         # First call → pull stream with no "success"; second call → tags shows model present
         stream_lines = [json.dumps({"status": "done"}).encode() + b"\n"]
-        responses = iter([
-            FakeStreamResponse(stream_lines),
-            _tags_response(["phi4-mini"]),
-        ])
+        responses = iter(
+            [
+                FakeStreamResponse(stream_lines),
+                _tags_response(["phi4-mini"]),
+            ]
+        )
         client = OllamaClient(http_open=lambda *a, **kw: next(responses))
         result, _ = self._pull(client)
         assert result is True
 
     def test_fallback_false_when_model_absent_from_installed_list(self):
         stream_lines = [json.dumps({"status": "done"}).encode() + b"\n"]
-        responses = iter([
-            FakeStreamResponse(stream_lines),
-            _tags_response([]),
-        ])
+        responses = iter(
+            [
+                FakeStreamResponse(stream_lines),
+                _tags_response([]),
+            ]
+        )
         client = OllamaClient(http_open=lambda *a, **kw: next(responses))
         result, _ = self._pull(client)
         assert result is False
@@ -155,7 +169,9 @@ class TestPullModel:
     # ── error handling ────────────────────────────────────────────────────────
 
     def test_raises_on_network_error(self):
-        def fail(*a, **kw): raise OSError("network error")
+        def fail(*a, **kw):
+            raise OSError("network error")
+
         client = OllamaClient(http_open=fail)
         with pytest.raises(OSError):
             self._pull(client)

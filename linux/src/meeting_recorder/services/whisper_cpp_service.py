@@ -19,8 +19,8 @@ import logging
 import os
 import shutil
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -34,11 +34,11 @@ WHISPER_CPP_REPO = "https://github.com/ggerganov/whisper.cpp.git"
 
 # Maps an acceleration backend to the cmake flag that enables it.
 _BACKEND_CMAKE_FLAGS = {
-    "cuda":   "-DGGML_CUDA=1",
-    "rocm":   "-DGGML_HIPBLAS=1",
+    "cuda": "-DGGML_CUDA=1",
+    "rocm": "-DGGML_HIPBLAS=1",
     "vulkan": "-DGGML_VULKAN=1",
-    "metal":  "-DGGML_METAL=1",
-    "cpu":    "",
+    "metal": "-DGGML_METAL=1",
+    "cpu": "",
 }
 
 
@@ -152,6 +152,7 @@ class WhisperCppStatusChecker:
 
     def model_path(self, model: str) -> Path:
         from meeting_recorder.config.defaults import WHISPER_CPP_GGML_FILES  # noqa: PLC0415
+
         filename = WHISPER_CPP_GGML_FILES.get(model, f"ggml-{model}.bin")
         return self._cache_root / filename
 
@@ -176,6 +177,7 @@ class WhisperCppModelDownloader:
             WHISPER_CPP_GGML_BASE_URL,
             WHISPER_CPP_GGML_FILES,
         )
+
         filename = WHISPER_CPP_GGML_FILES.get(model, f"ggml-{model}.bin")
         url = WHISPER_CPP_GGML_BASE_URL + filename
         self._download(url, self._cache_root / filename)

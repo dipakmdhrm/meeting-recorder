@@ -3,6 +3,7 @@ Tests for the whisper.cpp transcription provider: the pure output parser and
 the provider's transcribe() flow (with an injected runner so no binary runs),
 plus the transcription factory wiring for the "whisper_cpp" service.
 """
+
 import json
 from pathlib import Path
 
@@ -19,12 +20,15 @@ def _wcpp_json(segments):
 
 # ── parse_whisper_cpp_output ──────────────────────────────────────────────────
 
+
 class TestParseWhisperCppOutput:
     def test_formats_timestamp_and_text(self):
-        raw = _wcpp_json([
-            {"offsets": {"from": 0, "to": 2000}, "text": " Hello there"},
-            {"offsets": {"from": 65000, "to": 67000}, "text": " Second line"},
-        ])
+        raw = _wcpp_json(
+            [
+                {"offsets": {"from": 0, "to": 2000}, "text": " Hello there"},
+                {"offsets": {"from": 65000, "to": 67000}, "text": " Second line"},
+            ]
+        )
         out = parse_whisper_cpp_output(raw)
         assert out == "[00:00:00] Hello there\n[00:01:05] Second line"
 
@@ -34,10 +38,12 @@ class TestParseWhisperCppOutput:
         assert parse_whisper_cpp_output(raw).startswith("[01:01:01]")
 
     def test_skips_empty_text_segments(self):
-        raw = _wcpp_json([
-            {"offsets": {"from": 0, "to": 1000}, "text": "   "},
-            {"offsets": {"from": 1000, "to": 2000}, "text": "kept"},
-        ])
+        raw = _wcpp_json(
+            [
+                {"offsets": {"from": 0, "to": 1000}, "text": "   "},
+                {"offsets": {"from": 1000, "to": 2000}, "text": "kept"},
+            ]
+        )
         assert parse_whisper_cpp_output(raw) == "[00:00:01] kept"
 
     def test_missing_offsets_default_to_zero(self):
@@ -52,6 +58,7 @@ class TestParseWhisperCppOutput:
 
 
 # ── WhisperCppProvider.transcribe ─────────────────────────────────────────────
+
 
 class TestWhisperCppProviderTranscribe:
     def test_runs_binary_and_parses_output(self):
@@ -89,6 +96,7 @@ class TestWhisperCppProviderTranscribe:
 
 
 # ── factory wiring ────────────────────────────────────────────────────────────
+
 
 class TestTranscriptionFactory:
     def test_returns_whisper_cpp_provider(self):

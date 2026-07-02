@@ -1,4 +1,5 @@
 """Scans the output folder for meetings, reads/writes metadata, handles deletion."""
+
 from __future__ import annotations
 
 import json
@@ -8,6 +9,7 @@ import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from .filename import sanitize_title
 
@@ -48,6 +50,7 @@ def scan_meetings(output_folder: str) -> list[Meeting]:
     Expects a flat structure: <output_folder>/<YYYY-MM-DD_HH-MM[_title]>/
     """
     import os
+
     root = Path(os.path.expanduser(output_folder))
     if not root.is_dir():
         return []
@@ -70,30 +73,31 @@ def scan_meetings(output_folder: str) -> list[Meeting]:
 
         meta = read_metadata(meeting_dir)
         audio_files = [
-            f for f in meeting_dir.iterdir()
-            if f.is_file() and f.suffix in _AUDIO_EXTENSIONS
+            f for f in meeting_dir.iterdir() if f.is_file() and f.suffix in _AUDIO_EXTENSIONS
         ]
         duration = meta.get("duration_seconds")
         if duration is None and audio_files:
             duration = _probe_audio_duration(audio_files[0])
             if duration is not None:
                 write_metadata(meeting_dir, {"duration_seconds": duration})
-        meetings.append(Meeting(
-            path=meeting_dir,
-            time_label=meeting_dir.name,
-            date=dt,
-            title=meta.get("title"),
-            has_notes=(meeting_dir / "notes.md").exists(),
-            has_transcript=(meeting_dir / "transcript.md").exists(),
-            has_audio=bool(audio_files),
-            duration_seconds=int(duration) if duration is not None else None,
-        ))
+        meetings.append(
+            Meeting(
+                path=meeting_dir,
+                time_label=meeting_dir.name,
+                date=dt,
+                title=meta.get("title"),
+                has_notes=(meeting_dir / "notes.md").exists(),
+                has_transcript=(meeting_dir / "transcript.md").exists(),
+                has_audio=bool(audio_files),
+                duration_seconds=int(duration) if duration is not None else None,
+            )
+        )
 
     meetings.sort(key=lambda m: m.date, reverse=True)
     return meetings
 
 
-def _iter_dirs(parent: Path):
+def _iter_dirs(parent: Path) -> list[Path]:
     """Yield subdirectories of parent, ignoring errors."""
     try:
         return [p for p in parent.iterdir() if p.is_dir()]
@@ -104,11 +108,22 @@ def _iter_dirs(parent: Path):
 def _probe_audio_duration(audio_path: Path) -> int | None:
     """Get audio duration in seconds using ffprobe. Returns None on failure."""
     import subprocess
+
     try:
         result = subprocess.run(
-            ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
-             "-of", "default=noprint_wrappers=1:nokey=1", str(audio_path)],
-            capture_output=True, text=True, timeout=5,
+            [
+                "ffprobe",
+                "-v",
+                "quiet",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(audio_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if result.returncode == 0 and result.stdout.strip():
             return int(float(result.stdout.strip()))
@@ -117,18 +132,19 @@ def _probe_audio_duration(audio_path: Path) -> int | None:
     return None
 
 
-def read_metadata(meeting_path: Path) -> dict:
+def read_metadata(meeting_path: Path) -> dict[str, Any]:
     """Read meeting.json from the meeting directory. Returns {} if missing/malformed."""
     meta_file = meeting_path / "meeting.json"
     if not meta_file.exists():
         return {}
     try:
-        return json.loads(meta_file.read_text(encoding="utf-8"))
+        data = json.loads(meta_file.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
     except (json.JSONDecodeError, OSError):
         return {}
 
 
-def write_metadata(meeting_path: Path, metadata: dict) -> None:
+def write_metadata(meeting_path: Path, metadata: dict[str, Any]) -> None:
     """Write/merge metadata into meeting.json."""
     existing = read_metadata(meeting_path)
     existing.update(metadata)
@@ -161,8 +177,7 @@ def rename_meeting_path(meeting_dir: Path, new_title: str) -> Path:
         raise ValueError(f"Cannot parse date-time from folder name: {meeting_dir.name}")
 
     date_time_part = (
-        f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
-        f"_{match.group(4)}-{match.group(5)}"
+        f"{match.group(1)}-{match.group(2)}-{match.group(3)}_{match.group(4)}-{match.group(5)}"
     )
     safe_title = sanitize_title(new_title)
     new_name = f"{date_time_part}_{safe_title}"

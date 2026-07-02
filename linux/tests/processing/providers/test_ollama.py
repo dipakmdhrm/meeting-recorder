@@ -4,6 +4,7 @@ Tests for OllamaProvider.summarize error handling.
 All network calls are replaced with fakes via the provider's injected
 ``http_open`` hook — no real HTTP requests are made.
 """
+
 import io
 import json
 import urllib.error
@@ -15,6 +16,7 @@ from meeting_recorder.processing.providers.ollama import OllamaProvider
 
 class FakeReadResponse:
     """Simulates a urllib response whose body is read all at once."""
+
     def __init__(self, body: bytes):
         self._body = body
 

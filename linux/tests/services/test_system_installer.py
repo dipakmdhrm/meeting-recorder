@@ -6,9 +6,9 @@ shell commands are executed.  The cross-distro branch isolation tests are the
 most important ones: they ensure that changing the apt-get path cannot
 silently break the dnf or pacman path and vice-versa.
 """
+
 import os
 
-import pytest
 from meeting_recorder.services.system_installer import (
     CudaInstaller,
     OllamaInstaller,
@@ -17,8 +17,8 @@ from meeting_recorder.services.system_installer import (
     detect_gpu_vendor,
 )
 
-
 # ── helpers ───────────────────────────────────────────────────────────────────
+
 
 def _which_only(pm: str):
     """Return a which_fn that only recognises one package manager."""
@@ -33,6 +33,7 @@ def _recording_shell(rc: int = 0):
 
 class FakePipe:
     """Simulates os.popen("rpm -E %fedora").read()."""
+
     def __init__(self, output: str = "41"):
         self._output = output
 
@@ -41,6 +42,7 @@ class FakePipe:
 
 
 # ── OllamaInstaller ───────────────────────────────────────────────────────────
+
 
 class TestOllamaInstallerIsAvailable:
     def test_true_when_ollama_found(self):
@@ -62,16 +64,21 @@ class TestOllamaInstallerInstall:
         assert inst.install() is False
 
     def test_returns_false_on_exception(self):
-        def boom(_): raise OSError("network error")
+        def boom(_):
+            raise OSError("network error")
+
         inst = OllamaInstaller(shell_fn=boom)
         assert inst.install() is False
 
 
 # ── CudaInstaller.is_available ────────────────────────────────────────────────
 
+
 class TestCudaInstallerIsAvailable:
     def test_true_when_nvidia_smi_present(self):
-        inst = CudaInstaller(which_fn=lambda cmd: "/usr/bin/nvidia-smi" if cmd == "nvidia-smi" else None)
+        inst = CudaInstaller(
+            which_fn=lambda cmd: "/usr/bin/nvidia-smi" if cmd == "nvidia-smi" else None
+        )
         assert inst.is_available() is True
 
     def test_false_when_nvidia_smi_absent(self):
@@ -80,6 +87,7 @@ class TestCudaInstallerIsAvailable:
 
 
 # ── CudaInstaller – apt-get branch ───────────────────────────────────────────
+
 
 class TestCudaInstallerAptBranch:
     def _make(self, rc: int = 0):
@@ -116,6 +124,7 @@ class TestCudaInstallerAptBranch:
 
 
 # ── CudaInstaller – dnf branch ────────────────────────────────────────────────
+
 
 class TestCudaInstallerDnfBranch:
     def _make(self, fedora_ver: str = "41", rc: int = 0):
@@ -163,6 +172,7 @@ class TestCudaInstallerDnfBranch:
 
 # ── CudaInstaller – pacman branch ─────────────────────────────────────────────
 
+
 class TestCudaInstallerPacmanBranch:
     def _make(self, rc: int = 0):
         cmds, shell = _recording_shell(rc)
@@ -194,6 +204,7 @@ class TestCudaInstallerPacmanBranch:
 
 # ── CudaInstaller – no supported PM ──────────────────────────────────────────
 
+
 class TestCudaInstallerNoPM:
     def test_returns_false_when_no_known_pm(self):
         inst = CudaInstaller(which_fn=lambda _: None)
@@ -211,6 +222,7 @@ class TestCudaInstallerNoPM:
 # These are the regression tests that prevent a change in one distro's path
 # from silently affecting another.  If someone edits the apt-get block and
 # accidentally references "dnf", these tests will catch it.
+
 
 class TestCudaInstallerBranchIsolation:
     def test_apt_branch_never_runs_dnf(self):
@@ -254,14 +266,19 @@ class TestCudaInstallerBranchIsolation:
 
 # ── CudaInstaller – exception handling ───────────────────────────────────────
 
+
 class TestCudaInstallerExceptionHandling:
     def test_returns_false_when_shell_raises(self):
-        def boom(_): raise RuntimeError("disk full")
+        def boom(_):
+            raise RuntimeError("disk full")
+
         inst = CudaInstaller(which_fn=_which_only("apt-get"), shell_fn=boom)
         assert inst.install() is False
 
     def test_returns_false_when_popen_raises(self):
-        def boom(_): raise OSError("popen failed")
+        def boom(_):
+            raise OSError("popen failed")
+
         inst = CudaInstaller(
             which_fn=_which_only("dnf"),
             shell_fn=lambda _: 0,
@@ -271,6 +288,7 @@ class TestCudaInstallerExceptionHandling:
 
 
 # ── RocmInstaller ─────────────────────────────────────────────────────────────
+
 
 class TestRocmInstallerIsAvailable:
     def test_true_when_rocminfo_present(self):
@@ -338,26 +356,31 @@ class TestRocmInstallerBranchIsolation:
 
 class TestRocmInstallerExceptionHandling:
     def test_returns_false_when_shell_raises(self):
-        def boom(_): raise RuntimeError("disk full")
+        def boom(_):
+            raise RuntimeError("disk full")
+
         inst = RocmInstaller(which_fn=_which_only("apt-get"), shell_fn=boom)
         assert inst.install() is False
 
 
 # ── detect_gpu_vendor ─────────────────────────────────────────────────────────
 
+
 class TestDetectGpuVendor:
     def test_apple_on_darwin(self):
         assert detect_gpu_vendor(which_fn=lambda _: None, platform_fn=lambda: "darwin") == "apple"
 
     def test_nvidia_when_nvidia_smi_present(self):
-        assert detect_gpu_vendor(
-            which_fn=_which_only("nvidia-smi"), platform_fn=lambda: "linux"
-        ) == "nvidia"
+        assert (
+            detect_gpu_vendor(which_fn=_which_only("nvidia-smi"), platform_fn=lambda: "linux")
+            == "nvidia"
+        )
 
     def test_amd_when_rocminfo_present(self):
-        assert detect_gpu_vendor(
-            which_fn=_which_only("rocminfo"), platform_fn=lambda: "linux"
-        ) == "amd"
+        assert (
+            detect_gpu_vendor(which_fn=_which_only("rocminfo"), platform_fn=lambda: "linux")
+            == "amd"
+        )
 
     def test_none_when_no_gpu(self, monkeypatch):
         monkeypatch.setattr(os.path, "exists", lambda _p: False)
@@ -365,11 +388,14 @@ class TestDetectGpuVendor:
 
     def test_nvidia_takes_precedence_over_amd(self):
         # A box with both probes present should report the NVIDIA path first.
-        which = lambda cmd: f"/usr/bin/{cmd}" if cmd in ("nvidia-smi", "rocminfo") else None
+        def which(cmd):
+            return f"/usr/bin/{cmd}" if cmd in ("nvidia-smi", "rocminfo") else None
+
         assert detect_gpu_vendor(which_fn=which, platform_fn=lambda: "linux") == "nvidia"
 
 
 # ── WhisperEngineInstaller ────────────────────────────────────────────────────
+
 
 class TestWhisperEngineInstaller:
     def test_available_when_spec_found(self):
@@ -381,7 +407,9 @@ class TestWhisperEngineInstaller:
         assert inst.is_available() is False
 
     def test_not_available_when_spec_raises(self):
-        def boom(_): raise ValueError("bad")
+        def boom(_):
+            raise ValueError("bad")
+
         inst = WhisperEngineInstaller(find_spec_fn=boom)
         assert inst.is_available() is False
 
@@ -397,6 +425,8 @@ class TestWhisperEngineInstaller:
         assert inst.install() is False
 
     def test_install_returns_false_on_exception(self):
-        def boom(_): raise OSError("no pip")
+        def boom(_):
+            raise OSError("no pip")
+
         inst = WhisperEngineInstaller(runner_fn=boom)
         assert inst.install() is False

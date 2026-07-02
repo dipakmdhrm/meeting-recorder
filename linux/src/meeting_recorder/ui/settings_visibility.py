@@ -23,10 +23,10 @@ def compute_section_visibility(ts: str, ss: str) -> dict[str, bool]:
     visible AND some later section is also visible.
     """
     sections = {
-        "gemini":  ts == "gemini" or ss == "gemini",
+        "gemini": ts == "gemini" or ss == "gemini",
         "whisper": ts == "whisper",
-        "wcpp":    ts == "whisper_cpp",
-        "ollama":  ts == "ollama" or ss == "ollama",
+        "wcpp": ts == "whisper_cpp",
+        "ollama": ts == "ollama" or ss == "ollama",
     }
     # The GPU-acceleration section is relevant to either local STT engine.
     sections["gpu"] = sections["whisper"] or sections["wcpp"]
@@ -34,8 +34,7 @@ def compute_section_visibility(ts: str, ss: str) -> dict[str, bool]:
     result = dict(sections)
     for i, name in enumerate(MODEL_SECTION_ORDER[:-1]):
         later_visible = any(
-            sections[MODEL_SECTION_ORDER[j]]
-            for j in range(i + 1, len(MODEL_SECTION_ORDER))
+            sections[MODEL_SECTION_ORDER[j]] for j in range(i + 1, len(MODEL_SECTION_ORDER))
         )
         result[f"{name}_sep"] = sections[name] and later_visible
     return result

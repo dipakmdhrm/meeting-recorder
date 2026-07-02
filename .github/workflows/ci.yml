@@ -5,6 +5,36 @@ on:
     branches: [main]
 
 jobs:
+  # ── Python lint + type check ────────────────────────────────────────────────
+  #
+  # ruff enforces lint + formatting repo-wide; mypy runs in strict mode on the
+  # headless packages (processing/, services/, config/ — see pyproject.toml).
+  lint-python:
+    name: Python lint + type check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff and mypy
+        run: pip install ruff mypy
+
+      - name: ruff lint
+        run: ruff check linux/
+
+      - name: ruff format check
+        run: ruff format --check linux/
+
+      - name: mypy (strict packages)
+        run: >-
+          mypy
+          linux/src/meeting_recorder/processing
+          linux/src/meeting_recorder/services
+          linux/src/meeting_recorder/config
+
   # ── Unit tests ──────────────────────────────────────────────────────────────
   #
   # Runs on every PR.  No system dependencies required — all shell/network

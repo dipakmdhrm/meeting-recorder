@@ -5,12 +5,13 @@ WhisperStatusChecker is tested with a tmp_path so no real HuggingFace cache
 is touched.  WhisperDownloader is tested with a no-op loader so no model
 weights are downloaded.
 """
+
 import pytest
-from pathlib import Path
+
 from meeting_recorder.services.whisper_service import WhisperDownloader, WhisperStatusChecker
 
-
 # ── WhisperStatusChecker ──────────────────────────────────────────────────────
+
 
 class TestWhisperStatusCheckerIsCached:
     def test_true_when_cache_directory_exists(self, tmp_path):
@@ -49,6 +50,7 @@ class TestWhisperStatusCheckerIsCached:
 
 # ── WhisperDownloader ─────────────────────────────────────────────────────────
 
+
 class TestWhisperDownloader:
     def test_calls_loader_with_model_name(self):
         loaded: list[str] = []
@@ -57,7 +59,9 @@ class TestWhisperDownloader:
         assert loaded == ["small"]
 
     def test_propagates_exception_from_loader(self):
-        def boom(m): raise RuntimeError("disk full")
+        def boom(m):
+            raise RuntimeError("disk full")
+
         downloader = WhisperDownloader(model_loader=boom)
         with pytest.raises(RuntimeError, match="disk full"):
             downloader.download("small")

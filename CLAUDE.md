@@ -76,9 +76,16 @@ pytest linux/tests/services/test_whisper_service.py
 
 # Single test
 pytest linux/tests/services/test_whisper_service.py::ClassName::test_name
+
+# Lint + format (CI enforces both; config in pyproject.toml)
+ruff check linux/
+ruff format linux/
+
+# Type check (CI enforces; strict on processing/, services/, config/)
+mypy linux/src/meeting_recorder/processing linux/src/meeting_recorder/services linux/src/meeting_recorder/config
 ```
 
-`pyproject.toml` sets `testpaths = ["linux/tests"]` and `pythonpath = ["linux/src"]`, so `pytest` works from the repo root.
+`pyproject.toml` sets `testpaths = ["linux/tests"]` and `pythonpath = ["linux/src"]`, so `pytest` works from the repo root. It also holds the ruff config (line length 100; `E402` ignored because PyGObject needs `gi.require_version()` before `gi.repository` imports) and the mypy config (strict mode on the headless `processing`/`services`/`config` packages — new code there must be fully annotated; GTK-bound `ui`/`audio`/`detection` are checked leniently).
 
 ### Android app
 

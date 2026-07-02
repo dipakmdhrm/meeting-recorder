@@ -1,5 +1,7 @@
 """
-Defines the MeetingRecorderApp class, a Gtk.Application subclass that manages the overall application lifecycle. It handles startup initialization, logging setup, system dependency validation, and coordinates the creation of the main window, tray icon, and call detector.
+Defines the MeetingRecorderApp class, a Gtk.Application subclass that manages the overall
+application lifecycle. It handles startup initialization, logging setup, system dependency
+validation, and coordinates the creation of the main window, tray icon, and call detector.
 """
 
 from __future__ import annotations
@@ -11,13 +13,14 @@ import sys
 from pathlib import Path
 
 import gi
+
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Gdk, GLib, Gio, Adw
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
-from meeting_recorder.config.defaults import APP_ID, APP_NAME
 from meeting_recorder.config import settings
+from meeting_recorder.config.defaults import APP_ID, APP_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -97,9 +100,7 @@ class MeetingRecorderApp(Adw.Application):
 
         root = logging.getLogger()
         root.setLevel(logging.DEBUG)
-        fmt = logging.Formatter(
-            "%(asctime)s %(name)s %(levelname)s %(message)s"
-        )
+        fmt = logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s")
 
         app_fh = logging.FileHandler(log_dir / "app.log", encoding="utf-8")
         app_fh.setLevel(logging.DEBUG)
@@ -119,9 +120,7 @@ class MeetingRecorderApp(Adw.Application):
             sh.setFormatter(fmt)
             root.addHandler(sh)
 
-        logging.getLogger(__name__).info(
-            "Logging to %s/{app,error}.log", log_dir
-        )
+        logging.getLogger(__name__).info("Logging to %s/{app,error}.log", log_dir)
 
     def do_activate(self) -> None:
         if self.window is None:
@@ -131,11 +130,13 @@ class MeetingRecorderApp(Adw.Application):
     # ------------------------------------------------------------------
     def _create_window(self) -> None:
         from .ui.main_window import MainWindow
+
         self.window = MainWindow(application=self)
 
         # System tray (best-effort)
         try:
             from .ui.tray import TrayIcon
+
             self._tray = TrayIcon(self.window)
         except Exception as exc:
             logger.info("Tray unavailable: %s", exc)
@@ -172,21 +173,22 @@ class MeetingRecorderApp(Adw.Application):
     def _start_call_detector(self) -> None:
         try:
             from .detection.call_detector import CallDetector
-            self._call_detector = CallDetector(
-                on_call_detected=self._on_call_detected
-            )
+
+            self._call_detector = CallDetector(on_call_detected=self._on_call_detected)
             self._call_detector.start()
         except Exception as exc:
             logger.warning("Failed to start call detector: %s", exc)
 
     def _on_call_detected(self, source: str) -> None:
         from .ui.main_window import State
+
         # Don't notify if we are already recording or processing — the user started
         # intentionally and a "call detected" popup would be disruptive/redundant.
         if self.window and self.window._state != State.IDLE:
             logger.debug("Call detected but app is already active — suppressing notification")
             return
         from .ui.notifications import notify
+
         notify(
             summary="Call Detected",
             body="A call may have started. Click to start recording.",

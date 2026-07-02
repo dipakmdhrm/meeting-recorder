@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import gc
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ def _detect_device() -> tuple[str, str]:
     # engine instead. So here we only probe for CUDA and otherwise fall to CPU.
     try:
         import ctranslate2
+
         if ctranslate2.get_supported_compute_types("cuda"):
             return "cuda", "float16"
     except Exception:
@@ -33,20 +35,22 @@ class WhisperProvider:
 
     def __init__(self, model: str = "large-v3-turbo") -> None:
         self._model_name = model
-        self._model = None
+        self._model: Any = None
 
-    def _load_model(self):
+    def _load_model(self) -> Any:
         if self._model is None:
             try:
                 from faster_whisper import WhisperModel
             except ImportError:
                 raise ImportError(
                     "faster-whisper is not installed. Run: pip install faster-whisper"
-                )
+                ) from None
             device, compute_type = _detect_device()
             logger.info(
                 "Loading Whisper model '%s' (device=%s, compute_type=%s)",
-                self._model_name, device, compute_type,
+                self._model_name,
+                device,
+                compute_type,
             )
             self._model = WhisperModel(
                 self._model_name,

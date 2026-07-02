@@ -1,5 +1,8 @@
 """
-The primary user interface and state coordinator for the Meeting Recorder application. It manages the recording lifecycle (IDLE, RECORDING, PAUSED, COUNTDOWN), handles user interactions for starting/stopping recordings, and monitors background processing jobs for transcription and summarization.
+The primary user interface and state coordinator for the Meeting Recorder application. It manages
+the recording lifecycle (IDLE, RECORDING, PAUSED, COUNTDOWN), handles user interactions for
+starting/stopping recordings, and monitors background processing jobs for transcription and
+summarization.
 """
 
 from __future__ import annotations
@@ -15,16 +18,18 @@ from enum import Enum, auto
 from pathlib import Path
 
 import gi
+
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, GLib, Gio, Adw
+from gi.repository import Adw, Gio, GLib, Gtk
 
 from meeting_recorder.config import settings
+from meeting_recorder.utils.filename import output_paths
+from meeting_recorder.utils.meeting_scanner import Meeting, find_audio_file
+
 from ..utils.glib_bridge import assert_main_thread, idle_call
 from ..utils.gtk_compat import remove_all_children
 from ..utils.recording_import import resolve_existing_recording_target
-from meeting_recorder.utils.filename import output_paths
-from meeting_recorder.utils.meeting_scanner import Meeting, find_audio_file
 from .meeting_explorer import MeetingExplorer
 
 logger = logging.getLogger(__name__)
@@ -44,7 +49,7 @@ class _Job:
     transcript_path: Path
     notes_path: Path
     label: str
-    status: str = "processing"   # "processing" | "done" | "error"
+    status: str = "processing"  # "processing" | "done" | "error"
     error_msg: str | None = None
     cancelled: bool = False
 
@@ -58,7 +63,7 @@ def _format_time(seconds: int) -> str:
     return f"{m:02d}:{s:02d}"
 
 
-def _icon_label_button(icon_name: str, label: str) -> "Gtk.Button":
+def _icon_label_button(icon_name: str, label: str) -> Gtk.Button:
     """Build a button showing both an icon and a label using Adw.ButtonContent
     (the libadwaita idiom for icon+label buttons)."""
     btn = Gtk.Button()
@@ -217,6 +222,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _make_timer_attrs(self):
         gi.require_version("Pango", "1.0")
         from gi.repository import Pango
+
         attrs = Pango.AttrList()
         attrs.insert(Pango.attr_size_new_absolute(48 * Pango.SCALE))
         return attrs
@@ -259,9 +265,7 @@ class MainWindow(Adw.ApplicationWindow):
             record_row.append(headphones_btn)
 
             speaker_btn = _icon_label_button("audio-input-microphone-symbolic", "Record (Speaker)")
-            speaker_btn.set_tooltip_text(
-                "Record mic only. Use when on speaker to avoid echo."
-            )
+            speaker_btn.set_tooltip_text("Record mic only. Use when on speaker to avoid echo.")
             speaker_btn.connect("clicked", lambda *_: self.on_record_speaker_clicked())
             speaker_btn.add_css_class("pill")
             speaker_btn.set_hexpand(True)
@@ -386,21 +390,21 @@ class MainWindow(Adw.ApplicationWindow):
             return
 
         from ..audio.devices import validate_devices
+
         ok, err = validate_devices()
         if not ok:
             self._show_error(f"Audio device error: {err}")
             return
 
         title = self._title_entry.get_text().strip() or None
-        audio, transcript, notes = output_paths(
-            cfg.get("output_folder", "~/meetings"), title
-        )
+        audio, transcript, notes = output_paths(cfg.get("output_folder", "~/meetings"), title)
         self._audio_path = audio
         self._transcript_path = transcript
         self._notes_path = notes
 
-        from ..audio.recorder import Recorder, RecordingError
         from meeting_recorder.config.defaults import RECORDING_QUALITIES
+
+        from ..audio.recorder import Recorder, RecordingError
 
         q_key = cfg.get("recording_quality", "high")
         _, q_val = RECORDING_QUALITIES.get(q_key, RECORDING_QUALITIES["high"])
@@ -464,9 +468,7 @@ class MainWindow(Adw.ApplicationWindow):
         # If the selected file is already inside a meeting subdirectory,
         # process it in-place instead of copying to a new directory.
         output_folder = Path(os.path.expanduser(cfg.get("output_folder", "~/meetings")))
-        reuse_in_place, paths = resolve_existing_recording_target(
-            Path(filename), output_folder
-        )
+        reuse_in_place, paths = resolve_existing_recording_target(Path(filename), output_folder)
         if reuse_in_place:
             audio_path, transcript_path, notes_path = paths
         else:
@@ -491,9 +493,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._jobs.append(job)
         self._add_job_row(job)
         self._notify_tray()
-        threading.Thread(
-            target=self._run_pipeline_for_job, args=(job,), daemon=True
-        ).start()
+        threading.Thread(target=self._run_pipeline_for_job, args=(job,), daemon=True).start()
 
     def _on_summarize_from_explorer(self, meeting: Meeting) -> None:
         """Handle a Summarize request from the meeting explorer."""
@@ -534,9 +534,7 @@ class MainWindow(Adw.ApplicationWindow):
         # Switch to the Record tab so the user sees job progress
         self._stack.set_visible_child_name("recorder")
 
-        threading.Thread(
-            target=self._run_pipeline_for_job, args=(job,), daemon=True
-        ).start()
+        threading.Thread(target=self._run_pipeline_for_job, args=(job,), daemon=True).start()
 
     def on_pause_clicked(self) -> None:
         assert_main_thread()
@@ -574,9 +572,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._next_job_id += 1
 
         self._recorder_done.clear()
-        threading.Thread(
-            target=self._stop_recorder_bg, args=(recorder,), daemon=True
-        ).start()
+        threading.Thread(target=self._stop_recorder_bg, args=(recorder,), daemon=True).start()
 
         cfg = settings.load()
         if cfg.get("processing_countdown_enabled", False):
@@ -595,9 +591,7 @@ class MainWindow(Adw.ApplicationWindow):
             self._transition(State.IDLE)
 
     def _make_job_label(self) -> str:
-        time_part = (
-            self._audio_path.parent.name if self._audio_path else "recording"
-        )
+        time_part = self._audio_path.parent.name if self._audio_path else "recording"
         title = self._title_entry.get_text().strip()
         return f"{time_part} {title}".strip() if title else time_part
 
@@ -616,9 +610,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._countdown_remaining -= 1
 
         if self._countdown_remaining > 0:
-            self._status_label.set_text(
-                f"Starting transcription in {self._countdown_remaining}s…"
-            )
+            self._status_label.set_text(f"Starting transcription in {self._countdown_remaining}s…")
             return GLib.SOURCE_CONTINUE
 
         # Countdown expired — commit the pending job and return to IDLE.
@@ -627,9 +619,7 @@ class MainWindow(Adw.ApplicationWindow):
         if job is not None:
             self._jobs.append(job)
             self._add_job_row(job)
-            threading.Thread(
-                target=self._wait_and_process_job, args=(job,), daemon=True
-            ).start()
+            threading.Thread(target=self._wait_and_process_job, args=(job,), daemon=True).start()
         self._transition(State.IDLE)
         return GLib.SOURCE_REMOVE
 
@@ -728,8 +718,7 @@ class MainWindow(Adw.ApplicationWindow):
             transcript_path=job.transcript_path,
             notes_path=job.notes_path,
             on_status=lambda msg: (
-                idle_call(self._update_job_status_text, job, msg)
-                if not job.cancelled else None
+                idle_call(self._update_job_status_text, job, msg) if not job.cancelled else None
             ),
         )
         try:
@@ -777,9 +766,7 @@ class MainWindow(Adw.ApplicationWindow):
         job.cancelled = False
         self._update_job_row(job)
         self._notify_tray()
-        threading.Thread(
-            target=self._run_pipeline_for_job, args=(job,), daemon=True
-        ).start()
+        threading.Thread(target=self._run_pipeline_for_job, args=(job,), daemon=True).start()
 
     def _on_open_job_folder(self, job: _Job) -> None:
         try:
@@ -918,6 +905,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _send_job_complete_notification(self, job: _Job) -> None:
         from .notifications import notify
+
         body_parts = []
         if job.transcript_path:
             body_parts.append(str(job.transcript_path))
@@ -949,6 +937,7 @@ class MainWindow(Adw.ApplicationWindow):
         # GTK4 has no blocking Gtk.Dialog.run(); the dialog is shown modeless and
         # the post-save reconfiguration happens in the on_saved callback.
         from .settings_dialog import SettingsDialog
+
         dialog = SettingsDialog(parent=self, on_saved=self._after_settings_saved)
         dialog.present()
 

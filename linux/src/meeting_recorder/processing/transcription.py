@@ -1,11 +1,14 @@
 """
-Defines the TranscriptionProvider protocol and a factory function to instantiate configured transcription services. This provides a consistent interface for converting audio recordings into text using different AI providers.
+Defines the TranscriptionProvider protocol and a factory function to instantiate configured
+transcription services. This provides a consistent interface for converting audio recordings into
+text using different AI providers.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -19,12 +22,13 @@ class TranscriptionProvider(Protocol):
         ...
 
 
-def create_transcription_provider(config: dict) -> TranscriptionProvider:
+def create_transcription_provider(config: dict[str, Any]) -> TranscriptionProvider:
     """Factory: return the configured transcription provider."""
     service = config.get("transcription_service", "gemini")
 
     if service == "gemini":
         from .providers.gemini import GeminiProvider
+
         return GeminiProvider(
             api_key=config["gemini_api_key"],
             model=config.get("gemini_transcription_model", "gemini-2.5-flash"),
@@ -34,12 +38,14 @@ def create_transcription_provider(config: dict) -> TranscriptionProvider:
 
     if service == "whisper":
         from .providers.whisper import WhisperProvider
+
         return WhisperProvider(
             model=config.get("whisper_model", "large-v3-turbo"),
         )
 
     if service == "whisper_cpp":
         from .providers.whisper_cpp import WhisperCppProvider
+
         return WhisperCppProvider(
             model=config.get("whisper_cpp_model", "large-v3-turbo"),
         )

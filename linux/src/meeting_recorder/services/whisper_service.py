@@ -11,8 +11,8 @@ filesystem or the network:
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 def _default_whisper_loader(model: str) -> None:
     """Load (and cache) a Whisper model via faster-whisper."""
     from faster_whisper import WhisperModel  # noqa: PLC0415
+
     WhisperModel(model, device="cpu", compute_type="int8")
 
 
@@ -27,12 +28,11 @@ class WhisperStatusChecker:
     """Checks whether a Whisper model is already cached on disk."""
 
     def __init__(self, cache_root: Path | None = None) -> None:
-        self._cache_root = cache_root or (
-            Path.home() / ".cache" / "huggingface" / "hub"
-        )
+        self._cache_root = cache_root or (Path.home() / ".cache" / "huggingface" / "hub")
 
     def is_cached(self, model: str) -> bool:
         from meeting_recorder.config.defaults import WHISPER_HF_REPOS  # noqa: PLC0415
+
         repo = WHISPER_HF_REPOS.get(model, f"Systran/faster-whisper-{model}")
         cache_dir = self._cache_root / f"models--{repo.replace('/', '--')}"
         return cache_dir.exists()
