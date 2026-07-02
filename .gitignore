@@ -42,3 +42,6 @@ android/.kotlin/
 android/build/
 android/app/build/
 android/captures/
+
+# Claude Code session worktrees
+.claude/worktrees/

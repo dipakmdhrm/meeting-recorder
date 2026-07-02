@@ -11,7 +11,6 @@ import logging
 import os
 import shutil
 import subprocess
-import threading
 from pathlib import Path
 
 import gi
@@ -26,7 +25,8 @@ from meeting_recorder.utils.meeting_scanner import Meeting, find_audio_file
 
 from ..core.job import Job, JobStatus, actions_for_status
 from ..core.job_manager import JobManager
-from ..core.state_machine import State, can_transition
+from ..core.recording_controller import PendingRecording, RecordingController
+from ..core.state_machine import State
 from ..core.task_runner import CancelToken, TaskRunner
 from ..utils.glib_bridge import assert_main_thread, idle_call
 from ..utils.gtk_compat import remove_all_children
@@ -67,28 +67,30 @@ class MainWindow(Adw.ApplicationWindow):
         # All background work goes through the app-wide TaskRunner (results
         # and errors are routed back to the main thread; joined on exit).
         self._runner = runner
-
-        self._state = State.IDLE
-        self._recorder = None
         self._recording_mode: str = "headphones"
-        self._audio_path: Path | None = None
-        self._transcript_path: Path | None = None
-        self._notes_path: Path | None = None
 
-        # Used only for countdown cancellation.
-        self._pipeline_gen = 0
-        self._countdown_remaining: int = 0
-        self._recorder_done = threading.Event()
+        # The recording lifecycle (recorder, countdown, state) lives in the
+        # headless controller; this window renders its state changes.
+        self._controller = RecordingController(
+            runner,
+            on_state=self._apply_state,
+            on_error=self._show_error,
+            on_commit=self._on_recording_committed,
+            on_saved=self._on_recording_saved,
+            on_discarded=lambda: None,
+            on_countdown=self._on_countdown_tick,
+            on_timer=self._on_tick,
+            on_recorder_error=self._on_recording_error,
+        )
 
         # Jobs — owned by the JobManager (persisted to jobs.json so a crash
         # or quit mid-transcription re-offers the job on next start).
         self._job_manager = JobManager()
-        self._pending_job: Job | None = None
         self._job_widgets: dict[int, dict] = {}
 
         self._build_ui()
         self._restore_persisted_jobs()
-        self._transition(State.IDLE)
+        self._apply_state(State.IDLE, "")
         # GTK4 replaced the "delete-event" signal with "close-request"; the
         # handler still vetoes the close (returns True) and hides to the tray.
         self.connect("close-request", self._on_close_request)
@@ -230,17 +232,17 @@ class MainWindow(Adw.ApplicationWindow):
         return attrs
 
     # ------------------------------------------------------------------
-    # State machine
+    # State rendering (the controller owns the state machine)
     # ------------------------------------------------------------------
 
-    def _transition(self, new_state: State, **kwargs) -> None:
+    @property
+    def _state(self) -> State:
+        # app.py and the tray read the lifecycle state through this window.
+        return self._controller.state
+
+    def _apply_state(self, state: State, status: str) -> None:
         assert_main_thread()
-        if not can_transition(self._state, new_state):
-            # Log loudly but keep the UI consistent — an illegal jump is a
-            # programming error, not something to crash the session over.
-            logger.error("Illegal state transition %s -> %s", self._state.name, new_state.name)
-        self._state = new_state
-        self._update_ui(**kwargs)
+        self._update_ui(status=status)
         self._notify_tray()
 
     def _update_ui(self, status: str = "", **kwargs) -> None:
@@ -388,48 +390,13 @@ class MainWindow(Adw.ApplicationWindow):
             return
 
         cfg = settings.load()
-        ts = cfg.get("transcription_service", "gemini")
-        ss = cfg.get("summarization_service", "gemini")
-        key_missing = self._check_api_keys(cfg, ts, ss)
+        key_missing = settings.api_key_error(cfg)
         if key_missing:
             self._show_error(key_missing)
             return
 
-        from ..audio.devices import validate_devices
-
-        ok, err = validate_devices()
-        if not ok:
-            self._show_error(f"Audio device error: {err}")
-            return
-
         title = self._title_entry.get_text().strip() or None
-        audio, transcript, notes = output_paths(cfg.get("output_folder", "~/meetings"), title)
-        self._audio_path = audio
-        self._transcript_path = transcript
-        self._notes_path = notes
-
-        from meeting_recorder.config.defaults import RECORDING_QUALITIES
-
-        from ..audio.recorder import Recorder, RecordingError
-
-        q_key = cfg.get("recording_quality", "high")
-        _, q_val = RECORDING_QUALITIES.get(q_key, RECORDING_QUALITIES["high"])
-
-        self._recorder = Recorder(
-            output_path=audio,
-            mode=self._recording_mode,
-            quality=q_val,
-            on_tick=self._on_tick,
-            on_error=self._on_recording_error,
-        )
-        try:
-            self._recorder.start()
-        except RecordingError as exc:
-            self._show_error(str(exc))
-            return
-
-        mode_label = "headphones" if self._recording_mode == "headphones" else "speaker"
-        self._transition(State.RECORDING, status=f"Recording… ({mode_label} mode)")
+        self._controller.start(cfg, self._recording_mode, title)
 
     def on_use_existing_clicked(self) -> None:
         assert_main_thread()
@@ -437,9 +404,7 @@ class MainWindow(Adw.ApplicationWindow):
             return
 
         cfg = settings.load()
-        ts = cfg.get("transcription_service", "gemini")
-        ss = cfg.get("summarization_service", "gemini")
-        key_missing = self._check_api_keys(cfg, ts, ss)
+        key_missing = settings.api_key_error(cfg)
         if key_missing:
             self._show_error(key_missing)
             return
@@ -503,9 +468,7 @@ class MainWindow(Adw.ApplicationWindow):
         assert_main_thread()
 
         cfg = settings.load()
-        ts = cfg.get("transcription_service", "gemini")
-        ss = cfg.get("summarization_service", "gemini")
-        key_missing = self._check_api_keys(cfg, ts, ss)
+        key_missing = settings.api_key_error(cfg)
         if key_missing:
             self._show_error(key_missing)
             return
@@ -541,156 +504,59 @@ class MainWindow(Adw.ApplicationWindow):
 
     def on_pause_clicked(self) -> None:
         assert_main_thread()
-        if self._state != State.RECORDING or not self._recorder:
-            return
-        self._recorder.pause()
-        self._transition(State.PAUSED)
+        self._controller.pause()
 
     def on_resume_clicked(self) -> None:
         assert_main_thread()
-        if self._state != State.PAUSED or not self._recorder:
-            return
-        self._recorder.resume()
-        self._transition(State.RECORDING)
+        self._controller.resume()
 
     def on_stop_clicked(self) -> None:
         assert_main_thread()
-        if self._state not in (State.RECORDING, State.PAUSED) or not self._recorder:
-            return
-
-        self._pipeline_gen += 1
-        gen_id = self._pipeline_gen
-        recorder = self._recorder
-        self._recorder = None
-
-        # Create a pending job — added to the list only after the countdown
-        # expires so it can be cleanly discarded if the user cancels.
-        self._pending_job = Job(
-            job_id=self._job_manager.allocate_id(),
-            audio_path=self._audio_path,
-            transcript_path=self._transcript_path,
-            notes_path=self._notes_path,
-            label=self._make_job_label(),
-        )
-
-        self._recorder_done.clear()
-        self._runner.submit(self._stop_recorder_bg, recorder, description="stop recorder")
-
         cfg = settings.load()
-        if cfg.get("processing_countdown_enabled", False):
-            self._countdown_remaining = 5
-            self._transition(State.COUNTDOWN, status="Starting transcription in 5s…")
-            GLib.timeout_add(1000, self._countdown_tick, gen_id)
-        else:
-            job = self._pending_job
-            self._pending_job = None
-            if job is not None:
-                self._job_manager.add(job)
-                self._add_job_row(job)
-                self._submit_recorded_job(job)
-            self._transition(State.IDLE)
+        self._controller.stop(cfg.get("processing_countdown_enabled", False))
 
-    def _make_job_label(self) -> str:
-        time_part = self._audio_path.parent.name if self._audio_path else "recording"
-        title = self._title_entry.get_text().strip()
-        return f"{time_part} {title}".strip() if title else time_part
+    def _on_recording_committed(self, pending: PendingRecording) -> None:
+        """Controller callback: the stopped recording should be processed."""
+        assert_main_thread()
+        job = self._job_manager.create(
+            audio_path=pending.audio_path,
+            transcript_path=pending.transcript_path,
+            notes_path=pending.notes_path,
+            label=pending.label,
+        )
+        self._add_job_row(job)
+        self._notify_tray()
+        self._submit_recorded_job(job)
 
-    def _stop_recorder_bg(self, recorder) -> None:
-        try:
-            recorder.stop()
-        except Exception as exc:
-            logger.error("Error stopping recorder: %s", exc)
-        finally:
-            self._recorder_done.set()
+    def _on_recording_saved(self, pending: PendingRecording) -> None:
+        """Controller callback: recording kept without transcription."""
+        assert_main_thread()
+        paths = []
+        if pending.transcript_path and pending.transcript_path.exists():
+            paths.append(f"Transcript: {pending.transcript_path}")
+        if pending.notes_path and pending.notes_path.exists():
+            paths.append(f"Notes: {pending.notes_path}")
+        if pending.audio_path and pending.audio_path.exists():
+            paths.append(f"Audio: {pending.audio_path}")
+        if paths:
+            self._output_label.set_text("\n".join(paths))
+            self._output_box.set_visible(True)
 
-    def _countdown_tick(self, gen_id: int) -> bool:
-        if gen_id != self._pipeline_gen:
-            return GLib.SOURCE_REMOVE  # cancelled
-
-        self._countdown_remaining -= 1
-
-        if self._countdown_remaining > 0:
-            self._status_label.set_text(f"Starting transcription in {self._countdown_remaining}s…")
-            return GLib.SOURCE_CONTINUE
-
-        # Countdown expired — commit the pending job and return to IDLE.
-        job = self._pending_job
-        self._pending_job = None
-        if job is not None:
-            self._job_manager.add(job)
-            self._add_job_row(job)
-            self._submit_recorded_job(job)
-        self._transition(State.IDLE)
-        return GLib.SOURCE_REMOVE
+    def _on_countdown_tick(self, remaining: int) -> None:
+        assert_main_thread()
+        self._status_label.set_text(f"Starting transcription in {remaining}s…")
 
     def on_cancel_countdown_clicked(self) -> None:
         assert_main_thread()
-        if self._state != State.COUNTDOWN:
-            return
-        self._pipeline_gen += 1
-        self._pending_job = None
-        self._transition(State.IDLE, status="Transcription cancelled.")
-        logger.info("Transcription cancelled during countdown.")
+        self._controller.cancel_countdown()
 
     def on_cancel_save_clicked(self) -> None:
         assert_main_thread()
-        if self._state not in (State.RECORDING, State.PAUSED) or not self._recorder:
-            return
-        recorder = self._recorder
-        audio_path = self._audio_path
-        transcript_path = self._transcript_path
-        notes_path = self._notes_path
-        self._recorder = None
-        self._transition(State.IDLE, status="Stopping recording…")
-
-        def _done(_result) -> None:
-            self._transition(State.IDLE, status="Recording saved (no transcription).")
-            paths = []
-            if transcript_path and transcript_path.exists():
-                paths.append(f"Transcript: {transcript_path}")
-            if notes_path and notes_path.exists():
-                paths.append(f"Notes: {notes_path}")
-            if audio_path and audio_path.exists():
-                paths.append(f"Audio: {audio_path}")
-            if paths:
-                self._output_label.set_text("\n".join(paths))
-                self._output_box.set_visible(True)
-
-        self._runner.submit(
-            recorder.stop,
-            on_done=_done,
-            on_error=lambda exc: self._show_error(f"Failed to stop recording: {exc}"),
-            description="stop recorder (cancel + save)",
-        )
+        self._controller.cancel_and_save()
 
     def on_cancel_clicked(self) -> None:
         assert_main_thread()
-        if self._state not in (State.RECORDING, State.PAUSED) or not self._recorder:
-            return
-        recorder = self._recorder
-        audio_path = self._audio_path
-        self._recorder = None
-        self._transition(State.IDLE, status="Cancelling…")
-
-        def _stop_and_discard() -> None:
-            recorder.stop()
-            if audio_path and audio_path.exists():
-                try:
-                    audio_path.unlink()
-                except Exception as exc:
-                    logger.warning("Could not delete audio file: %s", exc)
-            if audio_path:
-                try:
-                    audio_path.parent.rmdir()
-                except OSError:
-                    pass  # directory not empty (other files) — leave it
-
-        self._runner.submit(
-            _stop_and_discard,
-            on_done=lambda _r: self._transition(State.IDLE),
-            on_error=lambda exc: self._show_error(f"Failed to stop recording: {exc}"),
-            description="stop recorder (discard)",
-        )
+        self._controller.cancel_and_discard()
 
     # ------------------------------------------------------------------
     # Pipeline / job management
@@ -722,7 +588,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _recorded_job_worker(self, job: Job):
         """Worker: wait for recorder.stop() to complete, then run the pipeline."""
-        self._recorder_done.wait(timeout=35)
+        self._controller.wait_until_stopped()
         if job.cancelled:
             return None
         idle_call(self._update_job_status_text, job, "Transcribing…")
@@ -933,7 +799,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._timer_label.set_text(_format_time(elapsed))
 
     def _on_recording_error(self, msg: str) -> None:
-        idle_call(self._transition, State.IDLE)
+        # Called from the recorder's monitor thread — hop to the main thread.
+        idle_call(self._controller.abort_to_idle)
         idle_call(self._show_error, msg)
 
     def _send_job_complete_notification(self, job: Job) -> None:
@@ -988,13 +855,6 @@ class MainWindow(Adw.ApplicationWindow):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
-
-    def _check_api_keys(self, cfg: dict, ts: str, ss: str) -> str | None:
-        if ts == "gemini" and not cfg.get("gemini_api_key"):
-            return "Gemini API key is not configured. Please open Settings."
-        if ss == "gemini" and not cfg.get("gemini_api_key"):
-            return "Gemini API key is not configured. Please open Settings."
-        return None
 
     def _on_open_folder(self, *_) -> None:
         cfg = settings.load()

@@ -54,7 +54,7 @@ class Recorder:
         self._on_tick = on_tick
         self._on_error = on_error
 
-        self._ffmpeg: subprocess.Popen | None = None
+        self._ffmpeg: subprocess.Popen[bytes] | None = None
 
         self._segments: list[Path] = []
         self._segment_index: int = 0
@@ -161,9 +161,12 @@ class Recorder:
         seg_path.parent.mkdir(parents=True, exist_ok=True)
         self._segments.append(seg_path)
 
+        if self._mic_source is None or (self._mode != "speaker" and self._monitor_source is None):
+            raise RecordingError("Audio devices are not resolved — cannot start a segment")
         if self._mode == "speaker":
             cmd = build_ffmpeg_command_mic_only(self._mic_source, seg_path, quality=self._quality)
         else:
+            assert self._monitor_source is not None
             cmd = build_ffmpeg_command(
                 self._mic_source, self._monitor_source, seg_path, quality=self._quality
             )
@@ -261,13 +264,14 @@ class Recorder:
                     if self._on_tick:
                         self._on_tick(self._elapsed)
 
-    def _drain_stderr(self, proc: subprocess.Popen, seg_index: int) -> None:
+    def _drain_stderr(self, proc: subprocess.Popen[bytes], seg_index: int) -> None:
+        assert proc.stderr is not None  # opened with stderr=PIPE
         for line in proc.stderr:
             text = line.decode("utf-8", errors="replace").rstrip()
             if text:
                 logger.debug("ffmpeg[seg%d]: %s", seg_index, text)
 
-    def _monitor_ffmpeg(self, proc: subprocess.Popen, seg_index: int) -> None:
+    def _monitor_ffmpeg(self, proc: subprocess.Popen[bytes], seg_index: int) -> None:
         """Watch for unexpected ffmpeg exit and report error."""
         retcode = proc.wait()
         # Ignore intentional exits: stop sets _stop_event, pause sets _paused.

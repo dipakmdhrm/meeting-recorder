@@ -149,6 +149,17 @@ def get(key: str, default: Any = None) -> Any:
     return load().get(key, default)
 
 
+def api_key_error(config: dict[str, Any]) -> str | None:
+    """Hard pre-flight check: a Gemini service is selected but no key is set."""
+    uses_gemini = "gemini" in (
+        config.get("transcription_service", "gemini"),
+        config.get("summarization_service", "gemini"),
+    )
+    if uses_gemini and not config.get("gemini_api_key"):
+        return "Gemini API key is not configured. Please open Settings."
+    return None
+
+
 def gemini_key_warning(config: dict[str, Any]) -> str | None:
     """Return a human-readable warning if the configured Gemini key looks wrong.
 
