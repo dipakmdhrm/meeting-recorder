@@ -497,8 +497,9 @@ class TrayIcon:
         from ..utils.glib_bridge import idle_call
 
         def _do_quit():
-            if self._window._recorder:
-                self._window._recorder.stop()
+            # Finalize any active recording via the window's public API (the
+            # recorder itself now lives in core.RecordingController).
+            self._window.prepare_quit()
             self._window.get_application().quit()
 
         idle_call(_do_quit)

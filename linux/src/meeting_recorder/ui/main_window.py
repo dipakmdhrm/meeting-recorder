@@ -770,6 +770,15 @@ class MainWindow(Adw.ApplicationWindow):
         except Exception:
             pass
 
+    def prepare_quit(self) -> None:
+        """Stop any active recording (keeping the audio) before the app quits.
+
+        cancel_and_save() is a no-op unless recording/paused; the stop runs on
+        the TaskRunner, and app.do_shutdown()'s bounded-grace join makes sure
+        the segments are concatenated before the process exits.
+        """
+        self._controller.cancel_and_save()
+
     def present_window(self) -> None:
         """Show, raise and focus the window — used by the tray (left-click and
         the "Show Window" menu item). Re-shows the window if it was hidden to
