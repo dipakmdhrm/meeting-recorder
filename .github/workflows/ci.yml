@@ -53,10 +53,22 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install pytest
-        run: pip install pytest
+        run: pip install pytest pytest-cov
 
-      - name: Run tests
-        run: pytest --tb=short
+      - name: Run tests (with coverage)
+        run: >-
+          pytest --tb=short
+          --cov=meeting_recorder
+          --cov-report=term
+          --cov-report=xml:coverage.xml
+
+      # Report-only for now — no threshold gate. The artifact makes coverage
+      # visible per PR so regressions in the extracted core/ modules show up.
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-coverage-${{ matrix.python-version }}
+          path: coverage.xml
 
   # ── Package build smoke tests ───────────────────────────────────────────────
   #
@@ -100,6 +112,8 @@ jobs:
 
           cp -r linux/src/. "$STAGING/opt/meeting-recorder/linux/src/"
           cp linux/requirements.txt "$STAGING/opt/meeting-recorder/"
+          # Ship the pinned lock file; postinst prefers it for reproducible venvs.
+          cp linux/requirements.lock "$STAGING/opt/meeting-recorder/"
           cp linux/packaging/usr/bin/meeting-recorder "$STAGING/usr/bin/meeting-recorder"
           chmod 755 "$STAGING/usr/bin/meeting-recorder"
           cp linux/packaging/usr/share/applications/io.github.dipakmdhrm.MeetingRecorder.desktop \
@@ -228,6 +242,61 @@ jobs:
           bsdtar -tf arch-build/*.pkg.tar.zst | grep -q usr/share/icons/hicolor/256x256/apps/meeting-recorder.png
           echo "All required paths present in pacman package"
 
+  # ── arm64 install smoke test ────────────────────────────────────────────────
+  #
+  # The .deb is Architecture: all and the APT repo advertises arm64, but x86
+  # runners never prove it. Build the package natively, then install and
+  # import it inside a QEMU-emulated arm64 container.
+  deb-arm64-smoke:
+    name: .deb install smoke test (arm64)
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build .deb (arch-independent)
+        run: |
+          STAGING=$(mktemp -d)
+          mkdir -p "$STAGING/DEBIAN" "$STAGING/opt/meeting-recorder/linux/src" \
+                   "$STAGING/usr/bin" "$STAGING/usr/share/applications"
+          cp -r linux/src/. "$STAGING/opt/meeting-recorder/linux/src/"
+          cp linux/requirements.txt linux/requirements.lock "$STAGING/opt/meeting-recorder/"
+          cp linux/packaging/usr/bin/meeting-recorder "$STAGING/usr/bin/meeting-recorder"
+          chmod 755 "$STAGING/usr/bin/meeting-recorder"
+          cp linux/packaging/usr/share/applications/io.github.dipakmdhrm.MeetingRecorder.desktop \
+             "$STAGING/usr/share/applications/"
+          for f in postinst prerm postrm; do
+            cp "linux/packaging/DEBIAN/$f" "$STAGING/DEBIAN/$f"
+            chmod 755 "$STAGING/DEBIAN/$f"
+          done
+          sed "s/@VERSION@/0.0.0/" linux/packaging/DEBIAN/control.template \
+            > "$STAGING/DEBIAN/control"
+          dpkg-deb --build "$STAGING" meeting-recorder.deb
+
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Install and import under arm64
+        run: |
+          docker run --rm --platform linux/arm64 \
+            -v "$PWD/meeting-recorder.deb:/tmp/meeting-recorder.deb:ro" \
+            ubuntu:24.04 bash -ec '
+              uname -m
+              apt-get update -qq
+              apt-get install -y /tmp/meeting-recorder.deb
+              PYTHONPATH=/opt/meeting-recorder/linux/src \
+                /opt/meeting-recorder/venv/bin/python -c "
+          import gi
+          gi.require_version(\"Gtk\", \"4.0\")
+          gi.require_version(\"Adw\", \"1\")
+          from gi.repository import Gtk, Adw
+          import google.genai
+          import meeting_recorder
+          print(\"arm64: GTK4 + Adw typelibs, venv deps, and app package import OK\")
+          "
+            '
+
   # ── Android unit tests + debug build ────────────────────────────────────────
   #
   # Unit tests run on the JVM — no emulator or device required.
@@ -248,9 +317,23 @@ jobs:
           yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager \
             "platforms;android-35" "build-tools;35.0.0"
 
+      - name: Kotlin lint (ktlint)
+        working-directory: android
+        run: ./gradlew ktlintCheck --no-daemon
+
       - name: Run unit tests
         working-directory: android
         run: ./gradlew test --no-daemon
+
+      - name: Coverage report (Jacoco, report-only)
+        working-directory: android
+        run: ./gradlew jacocoDebugUnitTestReport --no-daemon
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-coverage
+          path: android/app/build/reports/jacoco/jacocoDebugUnitTestReport/
 
       - name: Build debug APK
         working-directory: android

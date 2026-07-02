@@ -4,6 +4,32 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
     id("org.jlleitschuh.gradle.ktlint")
+    jacoco
+}
+
+// Coverage report for the JVM unit tests (report-only; CI uploads it as an
+// artifact). The jacoco plugin instruments the testDebugUnitTest task
+// automatically; this task just renders the .exec data into XML/HTML.
+tasks.register<JacocoReport>("jacocoDebugUnitTestReport") {
+    dependsOn("testDebugUnitTest")
+    reports {
+        xml.required = true
+        html.required = true
+    }
+    classDirectories.setFrom(
+        fileTree(layout.buildDirectory.dir("tmp/kotlin-classes/debug")) {
+            exclude(
+                "**/R.class",
+                "**/R$*.class",
+                "**/BuildConfig.*",
+                "**/Manifest*.*",
+                // Compose UI and generated code are outside the JVM-test boundary
+                "**/ui/theme/**",
+            )
+        },
+    )
+    sourceDirectories.setFrom(files("src/main/java"))
+    executionData.setFrom(layout.buildDirectory.files("jacoco/testDebugUnitTest.exec"))
 }
 
 android {

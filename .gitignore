@@ -45,3 +45,7 @@ android/captures/
 
 # Claude Code session worktrees
 .claude/worktrees/
+
+# Coverage artifacts
+.coverage
+coverage.xml

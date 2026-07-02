@@ -83,6 +83,8 @@ jobs:
 
           cp -r linux/src/. "$STAGING/opt/meeting-recorder/linux/src/"
           cp linux/requirements.txt "$STAGING/opt/meeting-recorder/"
+          # Ship the pinned lock file; postinst prefers it for reproducible venvs.
+          cp linux/requirements.lock "$STAGING/opt/meeting-recorder/"
           cp linux/packaging/usr/bin/meeting-recorder "$STAGING/usr/bin/meeting-recorder"
           chmod 755 "$STAGING/usr/bin/meeting-recorder"
           cp linux/packaging/usr/share/applications/io.github.dipakmdhrm.MeetingRecorder.desktop \
