@@ -208,6 +208,24 @@ jobs:
           rpm -qlp rpmbuild/RPMS/noarch/*.rpm | grep -q /usr/share/icons/hicolor/256x256/apps/meeting-recorder.png
           echo "All required paths present in .rpm"
 
+      # Same guard as the .deb: install with the real Requires list (dnf
+      # resolves them from the Fedora repos), which runs %post (venv + pip
+      # from the lock), then import the app the way the launcher does.
+      - name: Install .rpm and import smoke test
+        if: matrix.pkg == 'rpm'
+        run: |
+          dnf install -y rpmbuild/RPMS/noarch/*.rpm
+          PYTHONPATH=/opt/meeting-recorder/linux/src \
+            /opt/meeting-recorder/venv/bin/python - <<'EOF'
+          import gi
+          gi.require_version("Gtk", "4.0")
+          gi.require_version("Adw", "1")
+          from gi.repository import Gtk, Adw
+          import google.genai
+          import meeting_recorder
+          print("GTK4 + Adw typelibs, venv deps, and app package all import OK")
+          EOF
+
       # ── pacman ─────────────────────────────────────────────────────────────
 
       - name: Install pacman build tools
@@ -244,6 +262,24 @@ jobs:
           bsdtar -tf arch-build/*.pkg.tar.zst | grep -q usr/share/applications/io.github.dipakmdhrm.MeetingRecorder.desktop
           bsdtar -tf arch-build/*.pkg.tar.zst | grep -q usr/share/icons/hicolor/256x256/apps/meeting-recorder.png
           echo "All required paths present in pacman package"
+
+      # Same guard as the .deb/.rpm: install with the real depends array
+      # (pacman -U resolves them), which runs post_install (venv + pip from
+      # the lock), then import the app the way the launcher does.
+      - name: Install pacman package and import smoke test
+        if: matrix.pkg == 'pacman'
+        run: |
+          pacman -U --noconfirm arch-build/*.pkg.tar.zst
+          PYTHONPATH=/opt/meeting-recorder/linux/src \
+            /opt/meeting-recorder/venv/bin/python - <<'EOF'
+          import gi
+          gi.require_version("Gtk", "4.0")
+          gi.require_version("Adw", "1")
+          from gi.repository import Gtk, Adw
+          import google.genai
+          import meeting_recorder
+          print("GTK4 + Adw typelibs, venv deps, and app package all import OK")
+          EOF
 
   # ── arm64 install smoke test ────────────────────────────────────────────────
   #
