@@ -910,6 +910,15 @@ class SettingsDialog(Adw.Window):
 
     def _on_save_clicked(self, *_) -> None:
         self._save()
+        # Cheap format check so a pasted-wrong API key surfaces now instead of
+        # as a failed job at the end of a meeting. Non-blocking: still saves.
+        warning = settings.gemini_key_warning(self._store.load())
+        if warning:
+            alert = Gtk.AlertDialog()
+            alert.set_message("API Key Warning")
+            alert.set_detail(warning)
+            alert.set_buttons(["OK"])
+            alert.show(self.get_transient_for())
         if self._on_saved is not None:
             self._on_saved()
         self.close()

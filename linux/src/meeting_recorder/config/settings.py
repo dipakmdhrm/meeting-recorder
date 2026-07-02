@@ -78,3 +78,27 @@ def save(config: dict[str, Any]) -> None:
 def get(key: str, default: Any = None) -> Any:
     """Convenience: load config and return a single key."""
     return load().get(key, default)
+
+
+def gemini_key_warning(config: dict[str, Any]) -> str | None:
+    """Return a human-readable warning if the configured Gemini key looks wrong.
+
+    Pure (unit-testable). Only a *format* check — no network call. Google API
+    keys start with "AIza"; a mismatch almost always means a paste error, and
+    catching it at save time beats a failed job at the end of a meeting.
+    """
+    uses_gemini = "gemini" in (
+        config.get("transcription_service", "gemini"),
+        config.get("summarization_service", "gemini"),
+    )
+    if not uses_gemini:
+        return None
+    key = (config.get("gemini_api_key") or "").strip()
+    if not key:
+        return "Gemini is selected as a service but no API key is set."
+    if not key.startswith("AIza") or len(key) < 35:
+        return (
+            "The Gemini API key does not look like a Google API key "
+            '(expected to start with "AIza"). Double-check it in Settings.'
+        )
+    return None

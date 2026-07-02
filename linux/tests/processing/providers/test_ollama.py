@@ -97,3 +97,40 @@ class TestSummarize:
         provider = _provider(lambda *a, **kw: FakeReadResponse(body))
         with pytest.raises(RuntimeError, match="empty response"):
             provider.summarize("transcript")
+
+    def test_retries_transient_5xx_then_succeeds(self):
+        # First attempt gets a 503; the retry succeeds — the job must not fail.
+        ok_body = json.dumps({"response": "notes"}).encode()
+        responses = iter(
+            [
+                _http_error(503, json.dumps({"error": "overloaded"}).encode()),
+                FakeReadResponse(ok_body),
+            ]
+        )
+        slept: list[float] = []
+
+        def http_open(*a, **kw):
+            item = next(responses)
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+        provider = OllamaProvider(
+            model="phi4-mini", http_open=http_open, retry_sleep_fn=slept.append
+        )
+        assert provider.summarize("transcript") == "notes"
+        assert len(slept) == 1  # exactly one backoff sleep
+
+    def test_permanent_404_is_not_retried(self):
+        calls: list[int] = []
+
+        def http_open(*a, **kw):
+            calls.append(1)
+            raise _http_error(404, json.dumps({"error": "model not found"}).encode())
+
+        provider = OllamaProvider(
+            model="phi4-mini", http_open=http_open, retry_sleep_fn=lambda _: None
+        )
+        with pytest.raises(RuntimeError, match="model not found"):
+            provider.summarize("transcript")
+        assert len(calls) == 1

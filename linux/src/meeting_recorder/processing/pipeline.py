@@ -11,7 +11,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from ..core.task_runner import CancelToken
+
 logger = logging.getLogger(__name__)
+
+
+class PipelineCancelled(Exception):
+    """Raised when the job's CancelToken is set between pipeline stages."""
 
 
 class Pipeline:
@@ -34,17 +40,35 @@ class Pipeline:
         self._notes_path = notes_path
         self._on_status = on_status
 
-    def run(self) -> None:
-        """Execute the pipeline. Raises on failure."""
+    def run(self, cancel_token: CancelToken | None = None) -> None:
+        """Execute the pipeline. Raises on failure, PipelineCancelled on cancel.
+
+        Cancellation is cooperative: the token is checked between stages
+        (an in-flight network call still completes, but no further stage
+        starts and no results are written).
+        """
         # A previous optimisation ran both transcription and summarisation in a single
         # Gemini call (GEMINI_DUAL_PROMPT). It was removed because the model would stop
         # transcribing early (finish_reason=STOP, not MAX_TOKENS) to conserve output
         # budget for the notes section. Separate calls give each task its full quota.
-        self._run_separate()
+        self._run_separate(cancel_token)
 
     # ------------------------------------------------------------------
 
-    def _run_separate(self) -> None:
+    @staticmethod
+    def _check_cancelled(cancel_token: CancelToken | None) -> None:
+        if cancel_token is not None and cancel_token.cancelled:
+            raise PipelineCancelled()
+
+    def _maybe_unload(self, provider: object, label: str) -> None:
+        """Free the provider's model from GPU/CPU memory if it supports it."""
+        unload = getattr(provider, "unload", None)
+        if callable(unload):
+            if self._on_status:
+                self._on_status(f"Freeing GPU memory (unloading {label} model)…")
+            unload()
+
+    def _run_separate(self, cancel_token: CancelToken | None = None) -> None:
         """Separate transcription and summarization calls."""
         from .providers.ollama import unload_all_models
         from .summarization import create_summarization_provider
@@ -55,6 +79,8 @@ class Pipeline:
         audio_path = self._audio_path
         if audio_path is None:
             raise ValueError("Pipeline requires an audio path to transcribe")
+
+        self._check_cancelled(cancel_token)
 
         ts_service = self._config.get("transcription_service", "gemini")
         ollama_host = self._config.get("ollama_host", "http://localhost:11434")
@@ -81,20 +107,18 @@ class Pipeline:
         )
 
         # Free transcription model from memory before loading summarization model.
-        if hasattr(ts_provider, "unload"):
-            if self._on_status:
-                self._on_status("Freeing GPU memory (unloading transcription model)…")
-            ts_provider.unload()
+        self._maybe_unload(ts_provider, "transcription")
+
+        self._check_cancelled(cancel_token)
 
         # Summarization
         ss_provider = create_summarization_provider(self._config)
         notes = ss_provider.summarize(transcript, on_status=self._on_status)
 
         # Free summarization model from memory once done.
-        if hasattr(ss_provider, "unload"):
-            if self._on_status:
-                self._on_status("Freeing GPU memory (unloading summarization model)…")
-            ss_provider.unload()
+        self._maybe_unload(ss_provider, "summarization")
+
+        self._check_cancelled(cancel_token)
 
         self._write_results(transcript, notes)
 

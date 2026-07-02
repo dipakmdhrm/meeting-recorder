@@ -16,6 +16,7 @@ from ...config.defaults import (
     GEMINI_TRANSCRIPTION_PROMPT,
     SUMMARIZATION_PROMPT,
 )
+from ...core.retry import retry_on_transient
 
 logger = logging.getLogger(__name__)
 
@@ -151,11 +152,14 @@ class GeminiProvider:
             on_status("Uploading audio to Gemini…")
 
         logger.info("Uploading %s to Gemini Files API", audio_path)
-        uploaded = client.files.upload(
-            file=str(audio_path),
-            # mime_type must be specified explicitly; the SDK does not infer it from
-            # the file extension for audio files, and omitting it causes a 400 error.
-            config={"mime_type": "audio/mpeg"},
+        uploaded = retry_on_transient(
+            lambda: client.files.upload(
+                file=str(audio_path),
+                # mime_type must be specified explicitly; the SDK does not infer it from
+                # the file extension for audio files, and omitting it causes a 400 error.
+                config={"mime_type": "audio/mpeg"},
+            ),
+            description="Gemini file upload",
         )
 
         # After upload, Google's servers transcode and analyse the audio. The file
@@ -166,14 +170,17 @@ class GeminiProvider:
             on_status("Transcribing with Gemini…")
 
         try:
-            response = client.models.generate_content(
-                model=self._model,
-                contents=[uploaded, self._transcription_prompt],
-                config={
-                    "temperature": _TRANSCRIPTION_TEMPERATURE,
-                    "max_output_tokens": _MAX_OUTPUT_TOKENS,
-                    "http_options": {"timeout": self._generate_timeout_ms},
-                },
+            response = retry_on_transient(
+                lambda: client.models.generate_content(
+                    model=self._model,
+                    contents=[uploaded, self._transcription_prompt],
+                    config={
+                        "temperature": _TRANSCRIPTION_TEMPERATURE,
+                        "max_output_tokens": _MAX_OUTPUT_TOKENS,
+                        "http_options": {"timeout": self._generate_timeout_ms},
+                    },
+                ),
+                description="Gemini transcription",
             )
         except Exception as exc:
             raise _wrap_timeout(exc, "transcription", self._generate_timeout_ms) from exc
@@ -200,13 +207,16 @@ class GeminiProvider:
             # User removed {transcript} from their custom prompt — append it manually.
             prompt = self._summarization_prompt + f"\n\nTRANSCRIPT:\n{transcript}"
         try:
-            response = client.models.generate_content(
-                model=self._model,
-                contents=[prompt],
-                config={
-                    "max_output_tokens": _MAX_OUTPUT_TOKENS,
-                    "http_options": {"timeout": self._generate_timeout_ms},
-                },
+            response = retry_on_transient(
+                lambda: client.models.generate_content(
+                    model=self._model,
+                    contents=[prompt],
+                    config={
+                        "max_output_tokens": _MAX_OUTPUT_TOKENS,
+                        "http_options": {"timeout": self._generate_timeout_ms},
+                    },
+                ),
+                description="Gemini summarization",
             )
         except Exception as exc:
             raise _wrap_timeout(exc, "summarization", self._generate_timeout_ms) from exc

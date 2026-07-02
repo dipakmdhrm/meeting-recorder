@@ -12,7 +12,7 @@ import os
 import shutil
 import subprocess
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
 
@@ -26,7 +26,7 @@ from meeting_recorder.config import settings
 from meeting_recorder.utils.filename import output_paths
 from meeting_recorder.utils.meeting_scanner import Meeting, find_audio_file
 
-from ..core.task_runner import TaskRunner
+from ..core.task_runner import CancelToken, TaskRunner
 from ..utils.glib_bridge import assert_main_thread, idle_call
 from ..utils.gtk_compat import remove_all_children
 from ..utils.recording_import import resolve_existing_recording_target
@@ -52,6 +52,9 @@ class _Job:
     status: str = "processing"  # "processing" | "done" | "error"
     error_msg: str | None = None
     cancelled: bool = False
+    # Cooperative cancellation for the pipeline worker: checked between
+    # stages so a cancelled job stops instead of burning API quota.
+    token: CancelToken = field(default_factory=CancelToken)
 
 
 def _format_time(seconds: int) -> str:
@@ -731,8 +734,9 @@ class MainWindow(Adw.ApplicationWindow):
         return self._pipeline_worker(job)
 
     def _pipeline_worker(self, job: _Job):
-        """Worker: run transcription + summarisation. Returns final output paths."""
-        from meeting_recorder.processing.pipeline import Pipeline
+        """Worker: run transcription + summarisation. Returns final output paths,
+        or None if the job was cancelled between stages."""
+        from meeting_recorder.processing.pipeline import Pipeline, PipelineCancelled
 
         cfg = settings.load()
         pipeline = Pipeline(
@@ -744,7 +748,11 @@ class MainWindow(Adw.ApplicationWindow):
                 idle_call(self._update_job_status_text, job, msg) if not job.cancelled else None
             ),
         )
-        pipeline.run()
+        try:
+            pipeline.run(cancel_token=job.token)
+        except PipelineCancelled:
+            logger.info("Pipeline for job %d stopped after cancellation", job.job_id)
+            return None
         return pipeline.output_paths
 
     def _on_pipeline_finished(self, job: _Job, paths) -> None:
@@ -783,6 +791,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_cancel_job(self, job: _Job) -> None:
         assert_main_thread()
         job.cancelled = True
+        job.token.cancel()
         self._dismiss_job(job)
         logger.info("Job %d cancelled by user", job.job_id)
 
@@ -791,6 +800,7 @@ class MainWindow(Adw.ApplicationWindow):
         job.status = "processing"
         job.error_msg = None
         job.cancelled = False
+        job.token = CancelToken()
         self._update_job_row(job)
         self._notify_tray()
         self._submit_pipeline_job(job)

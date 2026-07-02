@@ -7,12 +7,14 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
 from typing import Any
 
 from ...config.defaults import OLLAMA_DEFAULT_HOST, SUMMARIZATION_PROMPT
+from ...core.retry import retry_on_transient
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +69,7 @@ class OllamaProvider:
         summarization_prompt: str = "",
         timeout_minutes: int = 10,
         http_open: Callable[..., Any] | None = None,
+        retry_sleep_fn: Callable[[float], None] | None = None,
     ) -> None:
         self._model = model
         self._host = host.rstrip("/")
@@ -74,6 +77,7 @@ class OllamaProvider:
         self._timeout = timeout_minutes * 60
         # Injectable for tests, mirroring services.ollama_service.OllamaClient.
         self._http_open = http_open or urllib.request.urlopen
+        self._retry_sleep = retry_sleep_fn or time.sleep
 
     def summarize(
         self,
@@ -102,9 +106,17 @@ class OllamaProvider:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        try:
+
+        def _do_request() -> Any:
             with self._http_open(req, timeout=self._timeout) as resp:
-                data = json.loads(resp.read())
+                return json.loads(resp.read())
+
+        try:
+            data = retry_on_transient(
+                _do_request,
+                description="Ollama summarization",
+                sleep_fn=self._retry_sleep,
+            )
         except urllib.error.HTTPError as exc:
             # The server answered but refused the request (e.g. model not
             # pulled).  Surface its "error" field instead of the misleading
