@@ -1,32 +1,78 @@
 """
-Testable services for installing Ollama and NVIDIA CUDA on the host system.
+Testable services for installing Ollama and GPU runtimes on the host system.
 
-Inject ``which_fn`` / ``shell_fn`` in tests to avoid executing real shell
-commands:
+Security posture (see audit P1-L9):
+
+- No ``os.system``: every command is an argv list executed without a shell,
+  logged verbatim before it runs. Where a package manager genuinely needs a
+  compound command it is a *fixed string* handed to ``sh -c`` with no user
+  input interpolated (the Fedora version is validated as numeric first).
+- No bare ``sudo``: privilege elevation goes through ``pkexec`` so a polkit
+  authentication dialog appears — correct for a GUI app, where ``sudo``
+  would fail silently without a terminal. ``sudo`` remains a fallback for
+  systems without polkit.
+- No ``curl | sh``: the Ollama install script is downloaded over HTTPS to a
+  temp file, its SHA-256 is logged for auditability, and only then executed.
+  (The hash cannot be pinned — upstream updates the script — so HTTPS to
+  ollama.com remains the trust anchor, but partial-execution and
+  pipe-injection hazards are gone.)
+
+Inject ``which_fn`` / ``run_fn`` / ``capture_fn`` / ``fetch_fn`` in tests to
+avoid executing real commands:
 
     installer = OllamaInstaller(
         which_fn=lambda _: "/usr/bin/ollama",   # pretend it's installed
-        shell_fn=lambda _: 0,                   # pretend install succeeded
+        run_fn=lambda _cmd: 0,                  # pretend install succeeded
     )
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
+import platform
 import shutil
 import subprocess
 import sys
+import tempfile
+import urllib.request
 from collections.abc import Callable
-from typing import Protocol
 
 logger = logging.getLogger(__name__)
 
+OLLAMA_INSTALL_URL = "https://ollama.com/install.sh"
 
-class ReadableProcess(Protocol):
-    """Structural type for os.popen's return value (read the command's stdout)."""
 
-    def read(self) -> str: ...
+def _run_command(cmd: list[str]) -> int:
+    """Default runner: execute an argv list without a shell, logging it first."""
+    logger.info("Running: %s", " ".join(cmd))
+    return subprocess.call(cmd)
+
+
+def _capture_output(cmd: list[str]) -> str:
+    """Default capture: run an argv list and return its stdout."""
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=30).stdout
+
+
+def _fetch_url(url: str) -> bytes:
+    """Default fetch: download *url* over HTTPS with a bounded timeout."""
+    with urllib.request.urlopen(url, timeout=60) as resp:
+        return bytes(resp.read())
+
+
+def build_privileged_command(
+    shell_snippet: str,
+    which_fn: Callable[[str], str | None] = shutil.which,
+) -> list[str]:
+    """Wrap a fixed shell snippet for privilege elevation.
+
+    Uses ``pkexec`` (polkit authentication dialog — works from a GUI with no
+    terminal attached) when available, falling back to ``sudo`` otherwise.
+    The snippet must be a constant or fully validated — nothing user-supplied.
+    """
+    elevate = "pkexec" if which_fn("pkexec") else "sudo"
+    return [elevate, "sh", "-c", shell_snippet]
 
 
 def detect_gpu_vendor(
@@ -66,7 +112,7 @@ class WhisperEngineInstaller:
 
             find_spec_fn = importlib.util.find_spec
         self._find_spec = find_spec_fn
-        self._runner = runner_fn or (lambda cmd: subprocess.call(cmd))
+        self._runner = runner_fn or _run_command
 
     def is_available(self) -> bool:
         try:
@@ -85,23 +131,46 @@ class WhisperEngineInstaller:
 
 
 class OllamaInstaller:
-    """Checks for and installs Ollama via the official install script."""
+    """Checks for and installs Ollama via the official install script.
+
+    The script is downloaded to a temp file (SHA-256 logged) and executed
+    from disk — never piped from the network into a shell.
+    """
 
     def __init__(
         self,
         which_fn: Callable[[str], str | None] = shutil.which,
-        shell_fn: Callable[[str], int] = os.system,
+        run_fn: Callable[[list[str]], int] = _run_command,
+        fetch_fn: Callable[[str], bytes] = _fetch_url,
     ) -> None:
         self._which = which_fn
-        self._shell = shell_fn
+        self._run = run_fn
+        self._fetch = fetch_fn
 
     def is_available(self) -> bool:
         return self._which("ollama") is not None
 
     def install(self) -> bool:
-        """Run the Ollama install script.  Returns ``True`` on success."""
+        """Download and run the Ollama install script. Returns ``True`` on success."""
         try:
-            return self._shell("curl -fsSL https://ollama.com/install.sh | sh") == 0
+            script = self._fetch(OLLAMA_INSTALL_URL)
+            digest = hashlib.sha256(script).hexdigest()
+            logger.info(
+                "Fetched Ollama install script (%d bytes, sha256=%s) from %s",
+                len(script),
+                digest,
+                OLLAMA_INSTALL_URL,
+            )
+            fd, path = tempfile.mkstemp(suffix=".sh", prefix="ollama-install-")
+            try:
+                with os.fdopen(fd, "wb") as f:
+                    f.write(script)
+                return self._run(["sh", path]) == 0
+            finally:
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
         except Exception as exc:
             logger.error("Failed to install Ollama: %s", exc)
             return False
@@ -113,12 +182,12 @@ class CudaInstaller:
     def __init__(
         self,
         which_fn: Callable[[str], str | None] = shutil.which,
-        shell_fn: Callable[[str], int] = os.system,
-        popen_fn: Callable[[str], ReadableProcess] = os.popen,
+        run_fn: Callable[[list[str]], int] = _run_command,
+        capture_fn: Callable[[list[str]], str] = _capture_output,
     ) -> None:
         self._which = which_fn
-        self._shell = shell_fn
-        self._popen = popen_fn
+        self._run = run_fn
+        self._capture = capture_fn
 
     def is_available(self) -> bool:
         return self._which("nvidia-smi") is not None
@@ -127,19 +196,36 @@ class CudaInstaller:
         """Install CUDA libraries for the detected package manager.  Returns ``True`` on success."""
         try:
             if self._which("apt-get"):
-                code = self._shell(
-                    "sudo apt-get update -qq && sudo apt-get install -y libcublas12 libcudart12"
+                code = self._run(
+                    build_privileged_command(
+                        "apt-get update -qq && apt-get install -y libcublas12 libcudart12",
+                        self._which,
+                    )
                 )
             elif self._which("dnf"):
-                fedora_version = self._popen("rpm -E %fedora").read().strip()
-                code = self._shell(
-                    f"sudo dnf config-manager --add-repo https://developer.download.nvidia.com/"
-                    f"compute/cuda/repos/fedora{fedora_version}/$(uname -m)/"
-                    f"cuda-fedora{fedora_version}.repo"
-                    f" && sudo dnf install -y libcublas-12-x cuda-cudart-12-x"
+                fedora_version = self._capture(["rpm", "-E", "%fedora"]).strip()
+                if not fedora_version.isdigit():
+                    logger.error(
+                        "Could not determine Fedora version (rpm -E %%fedora returned %r)",
+                        fedora_version,
+                    )
+                    return False
+                arch = platform.machine()
+                repo_url = (
+                    "https://developer.download.nvidia.com/compute/cuda/repos/"
+                    f"fedora{fedora_version}/{arch}/cuda-fedora{fedora_version}.repo"
+                )
+                code = self._run(
+                    build_privileged_command(
+                        f"dnf config-manager --add-repo {repo_url}"
+                        " && dnf install -y libcublas-12-x cuda-cudart-12-x",
+                        self._which,
+                    )
                 )
             elif self._which("pacman"):
-                code = self._shell("sudo pacman -Syu --noconfirm cuda")
+                code = self._run(
+                    build_privileged_command("pacman -Syu --noconfirm cuda", self._which)
+                )
             else:
                 logger.warning("No supported package manager found for CUDA installation")
                 return False
@@ -159,10 +245,10 @@ class RocmInstaller:
     def __init__(
         self,
         which_fn: Callable[[str], str | None] = shutil.which,
-        shell_fn: Callable[[str], int] = os.system,
+        run_fn: Callable[[list[str]], int] = _run_command,
     ) -> None:
         self._which = which_fn
-        self._shell = shell_fn
+        self._run = run_fn
 
     def is_available(self) -> bool:
         return self._which("rocminfo") is not None or os.path.exists("/dev/kfd")
@@ -171,13 +257,22 @@ class RocmInstaller:
         """Install ROCm runtime libraries for the detected package manager."""
         try:
             if self._which("apt-get"):
-                code = self._shell(
-                    "sudo apt-get update -qq && sudo apt-get install -y rocm-hip-runtime rocblas"
+                code = self._run(
+                    build_privileged_command(
+                        "apt-get update -qq && apt-get install -y rocm-hip-runtime rocblas",
+                        self._which,
+                    )
                 )
             elif self._which("dnf"):
-                code = self._shell("sudo dnf install -y rocm-hip rocblas")
+                code = self._run(
+                    build_privileged_command("dnf install -y rocm-hip rocblas", self._which)
+                )
             elif self._which("pacman"):
-                code = self._shell("sudo pacman -Syu --noconfirm rocm-hip-runtime rocblas")
+                code = self._run(
+                    build_privileged_command(
+                        "pacman -Syu --noconfirm rocm-hip-runtime rocblas", self._which
+                    )
+                )
             else:
                 logger.warning("No supported package manager found for ROCm installation")
                 return False

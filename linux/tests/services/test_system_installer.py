@@ -1,10 +1,14 @@
 """
-Tests for OllamaInstaller and CudaInstaller.
+Tests for OllamaInstaller, CudaInstaller, and RocmInstaller.
 
-All tests use the injected which_fn / shell_fn / popen_fn hooks so no real
-shell commands are executed.  The cross-distro branch isolation tests are the
-most important ones: they ensure that changing the apt-get path cannot
+All tests use the injected which_fn / run_fn / capture_fn / fetch_fn hooks so
+no real commands are executed.  The cross-distro branch isolation tests are
+the most important ones: they ensure that changing the apt-get path cannot
 silently break the dnf or pacman path and vice-versa.
+
+Commands are argv lists; the recording helper joins them to strings so the
+assertions can check for package names regardless of elevation prefix
+(pkexec/sudo sh -c ...).
 """
 
 import os
@@ -14,6 +18,7 @@ from meeting_recorder.services.system_installer import (
     OllamaInstaller,
     RocmInstaller,
     WhisperEngineInstaller,
+    build_privileged_command,
     detect_gpu_vendor,
 )
 
@@ -25,20 +30,29 @@ def _which_only(pm: str):
     return lambda cmd: f"/usr/bin/{cmd}" if cmd == pm else None
 
 
-def _recording_shell(rc: int = 0):
-    """Return (commands_list, shell_fn) that records every command run."""
+def _recording_run(rc: int = 0):
+    """Return (commands_list, run_fn) that records every command as a string."""
     commands: list[str] = []
-    return commands, lambda cmd: commands.append(cmd) or rc
+    return commands, lambda cmd: commands.append(" ".join(cmd)) or rc
 
 
-class FakePipe:
-    """Simulates os.popen("rpm -E %fedora").read()."""
+# ── build_privileged_command ──────────────────────────────────────────────────
 
-    def __init__(self, output: str = "41"):
-        self._output = output
 
-    def read(self) -> str:
-        return self._output
+class TestBuildPrivilegedCommand:
+    def test_uses_pkexec_when_available(self):
+        cmd = build_privileged_command("apt-get install -y foo", which_fn=_which_only("pkexec"))
+        assert cmd == ["pkexec", "sh", "-c", "apt-get install -y foo"]
+
+    def test_falls_back_to_sudo_without_polkit(self):
+        cmd = build_privileged_command("apt-get install -y foo", which_fn=lambda _: None)
+        assert cmd == ["sudo", "sh", "-c", "apt-get install -y foo"]
+
+    def test_snippet_is_single_argv_element(self):
+        # The snippet must never be split/interpolated into separate args.
+        cmd = build_privileged_command("a && b; c", which_fn=lambda _: None)
+        assert cmd[-1] == "a && b; c"
+        assert len(cmd) == 4  # elevate, sh, -c, snippet
 
 
 # ── OllamaInstaller ───────────────────────────────────────────────────────────
@@ -55,20 +69,48 @@ class TestOllamaInstallerIsAvailable:
 
 
 class TestOllamaInstallerInstall:
-    def test_returns_true_on_zero_exit(self):
-        inst = OllamaInstaller(shell_fn=lambda _: 0)
-        assert inst.install() is True
+    SCRIPT = b"#!/bin/sh\necho installing\n"
+
+    def _install(self, rc: int = 0, fetch=None):
+        ran: list[list[str]] = []
+        seen_content: list[bytes] = []
+
+        def run(cmd):
+            ran.append(cmd)
+            # The script file must exist and hold the fetched bytes at run time.
+            with open(cmd[1], "rb") as f:
+                seen_content.append(f.read())
+            return rc
+
+        inst = OllamaInstaller(
+            fetch_fn=fetch or (lambda _url: self.SCRIPT),
+            run_fn=run,
+        )
+        return inst.install(), ran, seen_content
+
+    def test_runs_downloaded_script_from_disk_not_a_pipe(self):
+        ok, ran, seen = self._install(rc=0)
+        assert ok is True
+        assert len(ran) == 1
+        assert ran[0][0] == "sh"  # ["sh", "/tmp/ollama-install-....sh"]
+        assert "curl" not in " ".join(ran[0])
+        assert seen == [self.SCRIPT]
+
+    def test_temp_script_removed_after_run(self):
+        _ok, ran, _seen = self._install(rc=0)
+        assert not os.path.exists(ran[0][1])
 
     def test_returns_false_on_nonzero_exit(self):
-        inst = OllamaInstaller(shell_fn=lambda _: 1)
-        assert inst.install() is False
+        ok, _ran, _seen = self._install(rc=1)
+        assert ok is False
 
-    def test_returns_false_on_exception(self):
-        def boom(_):
+    def test_returns_false_when_fetch_fails(self):
+        def fetch_boom(_url):
             raise OSError("network error")
 
-        inst = OllamaInstaller(shell_fn=boom)
-        assert inst.install() is False
+        ok, ran, _seen = self._install(fetch=fetch_boom)
+        assert ok is False
+        assert ran == []  # nothing executed if the download failed
 
 
 # ── CudaInstaller.is_available ────────────────────────────────────────────────
@@ -91,8 +133,8 @@ class TestCudaInstallerIsAvailable:
 
 class TestCudaInstallerAptBranch:
     def _make(self, rc: int = 0):
-        cmds, shell = _recording_shell(rc)
-        return CudaInstaller(which_fn=_which_only("apt-get"), shell_fn=shell), cmds
+        cmds, run = _recording_run(rc)
+        return CudaInstaller(which_fn=_which_only("apt-get"), run_fn=run), cmds
 
     def test_runs_exactly_one_command(self):
         inst, cmds = self._make()
@@ -103,6 +145,11 @@ class TestCudaInstallerAptBranch:
         inst, cmds = self._make()
         inst.install()
         assert "apt-get" in cmds[0]
+
+    def test_command_is_privilege_elevated(self):
+        inst, cmds = self._make()
+        inst.install()
+        assert cmds[0].startswith(("pkexec ", "sudo "))
 
     def test_installs_libcublas12(self):
         inst, cmds = self._make()
@@ -128,11 +175,11 @@ class TestCudaInstallerAptBranch:
 
 class TestCudaInstallerDnfBranch:
     def _make(self, fedora_ver: str = "41", rc: int = 0):
-        cmds, shell = _recording_shell(rc)
+        cmds, run = _recording_run(rc)
         inst = CudaInstaller(
             which_fn=_which_only("dnf"),
-            shell_fn=shell,
-            popen_fn=lambda _: FakePipe(fedora_ver),
+            run_fn=run,
+            capture_fn=lambda _cmd: fedora_ver + "\n",
         )
         return inst, cmds
 
@@ -169,14 +216,20 @@ class TestCudaInstallerDnfBranch:
         inst, _ = self._make(rc=1)
         assert inst.install() is False
 
+    def test_rejects_non_numeric_fedora_version(self):
+        # A garbage rpm answer must not be interpolated into the repo URL.
+        inst, cmds = self._make(fedora_ver="41; rm -rf /")
+        assert inst.install() is False
+        assert cmds == []
+
 
 # ── CudaInstaller – pacman branch ─────────────────────────────────────────────
 
 
 class TestCudaInstallerPacmanBranch:
     def _make(self, rc: int = 0):
-        cmds, shell = _recording_shell(rc)
-        return CudaInstaller(which_fn=_which_only("pacman"), shell_fn=shell), cmds
+        cmds, run = _recording_run(rc)
+        return CudaInstaller(which_fn=_which_only("pacman"), run_fn=run), cmds
 
     def test_runs_exactly_one_command(self):
         inst, cmds = self._make()
@@ -210,9 +263,9 @@ class TestCudaInstallerNoPM:
         inst = CudaInstaller(which_fn=lambda _: None)
         assert inst.install() is False
 
-    def test_runs_no_shell_command(self):
-        cmds, shell = _recording_shell()
-        inst = CudaInstaller(which_fn=lambda _: None, shell_fn=shell)
+    def test_runs_no_command(self):
+        cmds, run = _recording_run()
+        inst = CudaInstaller(which_fn=lambda _: None, run_fn=run)
         inst.install()
         assert cmds == []
 
@@ -226,41 +279,41 @@ class TestCudaInstallerNoPM:
 
 class TestCudaInstallerBranchIsolation:
     def test_apt_branch_never_runs_dnf(self):
-        cmds, shell = _recording_shell()
-        CudaInstaller(which_fn=_which_only("apt-get"), shell_fn=shell).install()
+        cmds, run = _recording_run()
+        CudaInstaller(which_fn=_which_only("apt-get"), run_fn=run).install()
         assert not any("dnf" in c for c in cmds)
 
     def test_apt_branch_never_runs_pacman(self):
-        cmds, shell = _recording_shell()
-        CudaInstaller(which_fn=_which_only("apt-get"), shell_fn=shell).install()
+        cmds, run = _recording_run()
+        CudaInstaller(which_fn=_which_only("apt-get"), run_fn=run).install()
         assert not any("pacman" in c for c in cmds)
 
     def test_dnf_branch_never_runs_apt_get(self):
-        cmds, shell = _recording_shell()
+        cmds, run = _recording_run()
         CudaInstaller(
             which_fn=_which_only("dnf"),
-            shell_fn=shell,
-            popen_fn=lambda _: FakePipe("41"),
+            run_fn=run,
+            capture_fn=lambda _cmd: "41",
         ).install()
         assert not any("apt-get" in c for c in cmds)
 
     def test_dnf_branch_never_runs_pacman(self):
-        cmds, shell = _recording_shell()
+        cmds, run = _recording_run()
         CudaInstaller(
             which_fn=_which_only("dnf"),
-            shell_fn=shell,
-            popen_fn=lambda _: FakePipe("41"),
+            run_fn=run,
+            capture_fn=lambda _cmd: "41",
         ).install()
         assert not any("pacman" in c for c in cmds)
 
     def test_pacman_branch_never_runs_apt_get(self):
-        cmds, shell = _recording_shell()
-        CudaInstaller(which_fn=_which_only("pacman"), shell_fn=shell).install()
+        cmds, run = _recording_run()
+        CudaInstaller(which_fn=_which_only("pacman"), run_fn=run).install()
         assert not any("apt-get" in c for c in cmds)
 
     def test_pacman_branch_never_runs_dnf(self):
-        cmds, shell = _recording_shell()
-        CudaInstaller(which_fn=_which_only("pacman"), shell_fn=shell).install()
+        cmds, run = _recording_run()
+        CudaInstaller(which_fn=_which_only("pacman"), run_fn=run).install()
         assert not any("dnf" in c for c in cmds)
 
 
@@ -268,21 +321,21 @@ class TestCudaInstallerBranchIsolation:
 
 
 class TestCudaInstallerExceptionHandling:
-    def test_returns_false_when_shell_raises(self):
+    def test_returns_false_when_run_raises(self):
         def boom(_):
             raise RuntimeError("disk full")
 
-        inst = CudaInstaller(which_fn=_which_only("apt-get"), shell_fn=boom)
+        inst = CudaInstaller(which_fn=_which_only("apt-get"), run_fn=boom)
         assert inst.install() is False
 
-    def test_returns_false_when_popen_raises(self):
+    def test_returns_false_when_capture_raises(self):
         def boom(_):
-            raise OSError("popen failed")
+            raise OSError("rpm failed")
 
         inst = CudaInstaller(
             which_fn=_which_only("dnf"),
-            shell_fn=lambda _: 0,
-            popen_fn=boom,
+            run_fn=lambda _: 0,
+            capture_fn=boom,
         )
         assert inst.install() is False
 
@@ -303,8 +356,8 @@ class TestRocmInstallerIsAvailable:
 
 class TestRocmInstallerAptBranch:
     def _make(self, rc: int = 0):
-        cmds, shell = _recording_shell(rc)
-        return RocmInstaller(which_fn=_which_only("apt-get"), shell_fn=shell), cmds
+        cmds, run = _recording_run(rc)
+        return RocmInstaller(which_fn=_which_only("apt-get"), run_fn=run), cmds
 
     def test_runs_exactly_one_command(self):
         inst, cmds = self._make()
@@ -315,6 +368,11 @@ class TestRocmInstallerAptBranch:
         inst, cmds = self._make()
         inst.install()
         assert "apt-get" in cmds[0]
+
+    def test_command_is_privilege_elevated(self):
+        inst, cmds = self._make()
+        inst.install()
+        assert cmds[0].startswith(("pkexec ", "sudo "))
 
     def test_installs_rocm_runtime(self):
         inst, cmds = self._make()
@@ -334,32 +392,32 @@ class TestRocmInstallerNoPM:
 
 class TestRocmInstallerBranchIsolation:
     def test_apt_branch_never_runs_dnf_or_pacman(self):
-        cmds, shell = _recording_shell()
-        RocmInstaller(which_fn=_which_only("apt-get"), shell_fn=shell).install()
+        cmds, run = _recording_run()
+        RocmInstaller(which_fn=_which_only("apt-get"), run_fn=run).install()
         assert not any("dnf" in c or "pacman" in c for c in cmds)
 
     def test_dnf_branch_never_runs_apt_get_or_pacman(self):
-        cmds, shell = _recording_shell()
-        RocmInstaller(which_fn=_which_only("dnf"), shell_fn=shell).install()
+        cmds, run = _recording_run()
+        RocmInstaller(which_fn=_which_only("dnf"), run_fn=run).install()
         assert not any("apt-get" in c or "pacman" in c for c in cmds)
 
     def test_pacman_branch_never_runs_apt_get_or_dnf(self):
-        cmds, shell = _recording_shell()
-        RocmInstaller(which_fn=_which_only("pacman"), shell_fn=shell).install()
+        cmds, run = _recording_run()
+        RocmInstaller(which_fn=_which_only("pacman"), run_fn=run).install()
         assert not any("apt-get" in c or "dnf" in c for c in cmds)
 
     def test_rocm_apt_branch_never_installs_cuda_libs(self):
-        cmds, shell = _recording_shell()
-        RocmInstaller(which_fn=_which_only("apt-get"), shell_fn=shell).install()
+        cmds, run = _recording_run()
+        RocmInstaller(which_fn=_which_only("apt-get"), run_fn=run).install()
         assert not any("libcublas" in c or "libcudart" in c for c in cmds)
 
 
 class TestRocmInstallerExceptionHandling:
-    def test_returns_false_when_shell_raises(self):
+    def test_returns_false_when_run_raises(self):
         def boom(_):
             raise RuntimeError("disk full")
 
-        inst = RocmInstaller(which_fn=_which_only("apt-get"), shell_fn=boom)
+        inst = RocmInstaller(which_fn=_which_only("apt-get"), run_fn=boom)
         assert inst.install() is False
 
 

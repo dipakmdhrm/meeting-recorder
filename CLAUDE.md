@@ -127,6 +127,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 - `whisper` (faster-whisper) — installed via `WhisperEngineInstaller` (pip into the app venv). CTranslate2-backed, so **NVIDIA/CPU only**. `providers/whisper.py:_detect_device()` probes CUDA, else CPU.
 - `whisper_cpp` — a from-source whisper.cpp build for **AMD (ROCm/Vulkan), Apple (Metal), NVIDIA (CUDA), or CPU**. `services/whisper_cpp_service.py` holds the pure helpers `detect_gpu_backend()` and `build_cmake_command(backend)`, the `WhisperCppBuilder` (toolchain + clone + cmake), and `WhisperCppStatusChecker`/`WhisperCppModelDownloader` (GGML files). The provider parses `whisper-cli` JSON via the pure `parse_whisper_cpp_output()`.
 - GPU runtime installs are vendor-aware: `services/system_installer.py` has `detect_gpu_vendor()`, `CudaInstaller` (NVIDIA), and `RocmInstaller` (AMD); the Settings "GPU Acceleration" section picks the right one.
+- **Installer security conventions** (`services/system_installer.py`): no `os.system` — commands are argv lists run without a shell and logged before execution; privilege elevation via `build_privileged_command()` (`pkexec` polkit dialog, `sudo` fallback) with only fixed/validated shell snippets; the Ollama install script is downloaded over HTTPS to a temp file with its SHA-256 logged, then executed from disk — never `curl | sh`. Test seams are `which_fn`/`run_fn`/`capture_fn`/`fetch_fn`.
 
 **Config:** `~/.config/meeting-recorder/config.json`, `chmod 600`. Empty string for any prompt key = use built-in default (defined in `config/defaults.py`).
 

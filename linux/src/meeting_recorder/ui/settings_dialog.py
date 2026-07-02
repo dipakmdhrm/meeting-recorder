@@ -10,8 +10,8 @@ filesystem, network, or GTK main loop:
         store=FakeStore({}),
         whisper_checker=WhisperStatusChecker(cache_root=tmp_path),
         ollama_client=OllamaClient(http_open=fake_http),
-        ollama_installer=OllamaInstaller(which_fn=lambda _: None, shell_fn=lambda _: 0),
-        cuda_installer=CudaInstaller(which_fn=lambda _: None, shell_fn=lambda _: 0),
+        ollama_installer=OllamaInstaller(which_fn=lambda _: None, run_fn=lambda _: 0),
+        cuda_installer=CudaInstaller(which_fn=lambda _: None, run_fn=lambda _: 0),
         dispatcher=lambda fn, *a: fn(*a),   # synchronous — no GTK loop needed
     )
 """
