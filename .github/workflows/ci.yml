@@ -253,7 +253,13 @@ jobs:
 
       - name: Install pacman build tools
         if: matrix.pkg == 'pacman'
-        run: pacman -Syu --noconfirm git base-devel
+        run: |
+          # pacman 7's Landlock download sandbox cannot be applied inside
+          # Docker containers. The official x86 archlinux image ships with it
+          # disabled; the community ALARM image does not, so disable it here
+          # (it broke dependency downloads during pacman -U).
+          sed -i '/^\[options\]/a DisableSandbox' /etc/pacman.conf
+          pacman -Syu --noconfirm git base-devel
 
       - uses: actions/checkout@v6
         if: matrix.pkg == 'pacman'
