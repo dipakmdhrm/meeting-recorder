@@ -20,8 +20,8 @@ class MeetingRecorderApp : Application() {
         meetingRepository = MeetingRepository(
             File(
                 Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
-                "Meetings"
-            )
+                "Meetings",
+            ),
         )
 
         // De-orphan recordings whose previous process died mid-recording or mid-processing, so their

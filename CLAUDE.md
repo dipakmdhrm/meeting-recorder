@@ -95,6 +95,11 @@ cd android
 # Single test class
 ./gradlew test --tests "com.github.meetingrecorder.MeetingRepositoryTest"
 
+# Kotlin lint (CI enforces; config in android/.editorconfig — intellij_idea
+# style, @Composable functions exempt from function-naming)
+./gradlew ktlintCheck
+./gradlew ktlintFormat   # autofix
+
 # Install to connected emulator / device
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```

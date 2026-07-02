@@ -10,38 +10,54 @@ class Config(context: Context) {
 
     var apiKey: String
         get() = prefs.getString("api_key", "") ?: ""
-        set(value) { prefs.edit().putString("api_key", value).apply() }
+        set(value) {
+            prefs.edit().putString("api_key", value).apply()
+        }
 
     var model: String
         get() = prefs.getString("model", DEFAULT_MODEL) ?: DEFAULT_MODEL
-        set(value) { prefs.edit().putString("model", value).apply() }
+        set(value) {
+            prefs.edit().putString("model", value).apply()
+        }
 
     var audioQuality: AudioQuality
         get() = AudioQuality.entries.find {
             it.name == prefs.getString("audio_quality", AudioQuality.LOW.name)
         } ?: AudioQuality.LOW
-        set(value) { prefs.edit().putString("audio_quality", value.name).apply() }
+        set(value) {
+            prefs.edit().putString("audio_quality", value.name).apply()
+        }
 
     // Empty string means "use the built-in default prompt"
     var transcriptionPrompt: String
         get() = prefs.getString("transcription_prompt", "") ?: ""
-        set(value) { prefs.edit().putString("transcription_prompt", value).apply() }
+        set(value) {
+            prefs.edit().putString("transcription_prompt", value).apply()
+        }
 
     var summarizationPrompt: String
         get() = prefs.getString("summarization_prompt", "") ?: ""
-        set(value) { prefs.edit().putString("summarization_prompt", value).apply() }
+        set(value) {
+            prefs.edit().putString("summarization_prompt", value).apply()
+        }
 
     var titlePrompt: String
         get() = prefs.getString("title_prompt", "") ?: ""
-        set(value) { prefs.edit().putString("title_prompt", value).apply() }
+        set(value) {
+            prefs.edit().putString("title_prompt", value).apply()
+        }
 
     var processingCountdownEnabled: Boolean
         get() = prefs.getBoolean("processing_countdown_enabled", false)
-        set(value) { prefs.edit().putBoolean("processing_countdown_enabled", value).apply() }
+        set(value) {
+            prefs.edit().putBoolean("processing_countdown_enabled", value).apply()
+        }
 
     var dndDuringRecordingEnabled: Boolean
         get() = prefs.getBoolean("dnd_during_recording_enabled", false)
-        set(value) { prefs.edit().putBoolean("dnd_during_recording_enabled", value).apply() }
+        set(value) {
+            prefs.edit().putBoolean("dnd_during_recording_enabled", value).apply()
+        }
 
     companion object {
         const val DEFAULT_MODEL = "gemini-flash-latest"

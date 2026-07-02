@@ -50,7 +50,7 @@ class GeminiClientTest {
     fun `transcribe succeeds through full upload-poll-generate flow`() = runTest {
         server.enqueue(uploadInitResponse())
         server.enqueue(uploadBytesResponse("files/abc123"))
-        server.enqueue(pollResponse("ACTIVE"))           // flat JSON — regression guard
+        server.enqueue(pollResponse("ACTIVE")) // flat JSON — regression guard
         server.enqueue(contentResponse("Hello transcript."))
 
         val result = client.transcribe(audioFile())
@@ -83,8 +83,9 @@ class GeminiClientTest {
         server.enqueue(uploadInitResponse())
         server.enqueue(uploadBytesResponse("files/flat"))
         server.enqueue(
+            // no "file" wrapper
             MockResponse().setResponseCode(200)
-                .setBody("""{"name":"files/flat","state":"ACTIVE"}""")  // no "file" wrapper
+                .setBody("""{"name":"files/flat","state":"ACTIVE"}"""),
         )
         server.enqueue(contentResponse("Regression passes."))
 
@@ -112,7 +113,7 @@ class GeminiClientTest {
         server.enqueue(uploadInitResponse())
         server.enqueue(
             MockResponse().setResponseCode(200)
-                .setBody("""{"error":{"code":400,"message":"Invalid audio format"}}""")
+                .setBody("""{"error":{"code":400,"message":"Invalid audio format"}}"""),
         )
 
         try {
@@ -120,8 +121,10 @@ class GeminiClientTest {
             fail("Expected RuntimeException")
         } catch (e: RuntimeException) {
             assertTrue("Expected error code, got: ${e.message}", e.message!!.contains("400"))
-            assertTrue("Expected error message, got: ${e.message}",
-                e.message!!.contains("Invalid audio format"))
+            assertTrue(
+                "Expected error message, got: ${e.message}",
+                e.message!!.contains("Invalid audio format"),
+            )
         }
     }
 
@@ -130,15 +133,17 @@ class GeminiClientTest {
         server.enqueue(uploadInitResponse())
         server.enqueue(
             MockResponse().setResponseCode(200)
-                .setBody("""{"unexpectedKey":"someValue"}""")
+                .setBody("""{"unexpectedKey":"someValue"}"""),
         )
 
         try {
             client.transcribe(audioFile())
             fail("Expected RuntimeException")
         } catch (e: RuntimeException) {
-            assertTrue("Expected 'missing file', got: ${e.message}",
-                e.message!!.contains("missing 'file'"))
+            assertTrue(
+                "Expected 'missing file', got: ${e.message}",
+                e.message!!.contains("missing 'file'"),
+            )
         }
     }
 
@@ -152,8 +157,10 @@ class GeminiClientTest {
             client.transcribe(audioFile())
             fail("Expected RuntimeException")
         } catch (e: RuntimeException) {
-            assertTrue("Expected failure message, got: ${e.message}",
-                e.message!!.lowercase().contains("fail"))
+            assertTrue(
+                "Expected failure message, got: ${e.message}",
+                e.message!!.lowercase().contains("fail"),
+            )
         }
     }
 

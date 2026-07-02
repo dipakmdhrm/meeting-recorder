@@ -17,17 +17,17 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -49,7 +49,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.github.meetingrecorder.R
-import com.github.meetingrecorder.data.AudioQuality
 import com.github.meetingrecorder.data.Config
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -114,7 +113,7 @@ private fun GeneralTab(viewModel: SettingsViewModel) {
     val context = LocalContext.current
     // Opening DND-access settings is a no-op contract — the service re-checks the grant at record time.
     val dndAccessLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
+        ActivityResultContracts.StartActivityForResult(),
     ) { /* nothing to do on return */ }
 
     Column(
@@ -302,13 +301,13 @@ private fun PromptsTab(viewModel: SettingsViewModel) {
                 // Store blank when the user hasn't changed from the default,
                 // so the app continues to pick up future default changes.
                 viewModel.setTranscriptionPrompt(
-                    if (transcriptionDraft == Config.DEFAULT_TRANSCRIPTION_PROMPT) "" else transcriptionDraft
+                    if (transcriptionDraft == Config.DEFAULT_TRANSCRIPTION_PROMPT) "" else transcriptionDraft,
                 )
                 viewModel.setSummarizationPrompt(
-                    if (summarizationDraft == Config.DEFAULT_SUMMARIZATION_PROMPT) "" else summarizationDraft
+                    if (summarizationDraft == Config.DEFAULT_SUMMARIZATION_PROMPT) "" else summarizationDraft,
                 )
                 viewModel.setTitlePrompt(
-                    if (titleDraft == Config.DEFAULT_TITLE_PROMPT) "" else titleDraft
+                    if (titleDraft == Config.DEFAULT_TITLE_PROMPT) "" else titleDraft,
                 )
             },
             modifier = Modifier.fillMaxWidth(),
@@ -331,7 +330,9 @@ private fun PromptField(
         label = { Text(label) },
         supportingText = if (isDefault) {
             { Text(stringResource(R.string.hint_showing_default)) }
-        } else null,
+        } else {
+            null
+        },
         modifier = Modifier.fillMaxWidth(),
         minLines = 5,
     )

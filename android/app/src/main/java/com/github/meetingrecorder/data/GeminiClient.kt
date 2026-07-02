@@ -129,7 +129,7 @@ class GeminiClient(
         val fileObj = json.optJSONObject("file")
             ?: throw RuntimeException(
                 "Unexpected upload response (missing 'file'). " +
-                "Response was: ${responseJson.take(200)}"
+                    "Response was: ${responseJson.take(200)}",
             )
         return fileObj.getString("name")
     }
@@ -179,8 +179,8 @@ class GeminiClient(
             parts.put(
                 JSONObject().put(
                     "fileData",
-                    JSONObject().put("mimeType", mimeType).put("fileUri", fileUri)
-                )
+                    JSONObject().put("mimeType", mimeType).put("fileUri", fileUri),
+                ),
             )
         }
         parts.put(JSONObject().put("text", prompt))
@@ -188,7 +188,7 @@ class GeminiClient(
         val body = JSONObject()
             .put(
                 "contents",
-                JSONArray().put(JSONObject().put("parts", parts))
+                JSONArray().put(JSONObject().put("parts", parts)),
             )
             .toString()
             .toRequestBody("application/json".toMediaType())

@@ -2,9 +2,9 @@ package com.github.meetingrecorder.ui.meetings
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
-import com.github.meetingrecorder.R
 import androidx.lifecycle.viewModelScope
 import com.github.meetingrecorder.MeetingRecorderApp
+import com.github.meetingrecorder.R
 import com.github.meetingrecorder.data.Meeting
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow

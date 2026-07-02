@@ -252,7 +252,7 @@ class MeetingDetailViewModel(application: Application) : AndroidViewModel(applic
             "%02d:%02d",
             TimeUnit.MILLISECONDS.toMinutes(millis),
             TimeUnit.MILLISECONDS.toSeconds(millis) -
-                    TimeUnit.MINUTES.toSeconds(TimeUnit.MILLISECONDS.toMinutes(millis))
+                TimeUnit.MINUTES.toSeconds(TimeUnit.MILLISECONDS.toMinutes(millis)),
         )
     }
 

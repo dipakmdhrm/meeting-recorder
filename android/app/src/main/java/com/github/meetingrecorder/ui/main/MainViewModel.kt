@@ -49,6 +49,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var lockFile: File? = null
     private var currentTitle: String? = null
     private var durationSeconds: Int = 0
+
     // True when processing a file that already lives inside a meeting directory (no copy was made).
     // discardResults() must not delete the directory in this case.
     private var isInPlace: Boolean = false
@@ -134,7 +135,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 StopOutcome.EMPTY ->
                     _state.value = RecordingState.Error(
                         "Recording is empty (0 bytes). " +
-                        "Grant 'All files access' in Settings → Apps → Meeting Recorder → Permissions."
+                            "Grant 'All files access' in Settings → Apps → Meeting Recorder → Permissions.",
                     )
                 StopOutcome.SILENCED ->
                     _state.value = RecordingState.Error(app.getString(R.string.error_recording_silenced))
@@ -144,7 +145,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 } catch (e: Exception) {
                     saveAudioOnlyAfterFailure()
                     _state.value = RecordingState.Error(
-                        app.getString(R.string.error_processing_failed_audio_kept, e.message ?: "unknown error")
+                        app.getString(R.string.error_processing_failed_audio_kept, e.message ?: "unknown error"),
                     )
                 }
             }
@@ -168,7 +169,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     } catch (e: Exception) {
                         saveAudioOnlyAfterFailure()
                         _state.value = RecordingState.Error(
-                            app.getString(R.string.error_processing_failed_audio_kept, e.message ?: "unknown error")
+                            app.getString(R.string.error_processing_failed_audio_kept, e.message ?: "unknown error"),
                         )
                     }
                 }
@@ -327,7 +328,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun resolveUriToFile(uri: Uri): File? {
         if (uri.scheme == "file") return File(uri.path ?: return null)
         if (uri.scheme == "content" &&
-            uri.authority == "com.android.externalstorage.documents") {
+            uri.authority == "com.android.externalstorage.documents"
+        ) {
             val docId = DocumentsContract.getDocumentId(uri)
             val parts = docId.split(":")
             if (parts.size == 2 && parts[0] == "primary") {

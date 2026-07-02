@@ -47,7 +47,7 @@ class MeetingRepositoryTest {
             JSONObject()
                 .put("title", "Morning Standup")
                 .put("duration_seconds", 300)
-                .toString()
+                .toString(),
         )
 
         val meetings = repo().listMeetings()
@@ -206,7 +206,7 @@ class MeetingRepositoryTest {
         val titlePart = parts.getOrElse(2) { "" }
         assertTrue(
             "Title part contains illegal chars: $titlePart",
-            titlePart.matches(Regex("[a-zA-Z0-9_\\-]+"))
+            titlePart.matches(Regex("[a-zA-Z0-9_\\-]+")),
         )
     }
 
@@ -219,7 +219,10 @@ class MeetingRepositoryTest {
      * *previous* session (recovery skips locks newer than the repository's sessionStartTime).
      */
     private fun pastLock(dir: File): File =
-        File(dir, ".recording").apply { createNewFile(); setLastModified(System.currentTimeMillis() - 10_000) }
+        File(dir, ".recording").apply {
+            createNewFile()
+            setLastModified(System.currentTimeMillis() - 10_000)
+        }
 
     @Test
     fun `recoverOrphanedRecordings de-orphans locked dir with non-empty audio`() {
@@ -295,7 +298,10 @@ class MeetingRepositoryTest {
         val repo = repo() // captures sessionStartTime now
         val dir = File(tempDir.root, "2024-04-06_15-00").also { it.mkdirs() }
         // Lock dated after sessionStartTime — an in-session recording must never be reaped.
-        File(dir, ".recording").apply { createNewFile(); setLastModified(System.currentTimeMillis() + 5_000) }
+        File(dir, ".recording").apply {
+            createNewFile()
+            setLastModified(System.currentTimeMillis() + 5_000)
+        }
 
         repo.recoverOrphanedRecordings()
 

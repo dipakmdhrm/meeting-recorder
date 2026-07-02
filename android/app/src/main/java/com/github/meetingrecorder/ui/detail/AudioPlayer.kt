@@ -35,25 +35,25 @@ fun AudioPlayer(viewModel: MeetingDetailViewModel) {
             .fillMaxSize()
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        verticalArrangement = Arrangement.Center,
     ) {
         Text(text = "$currentTime / $totalTime")
         Spacer(modifier = Modifier.height(16.dp))
         Row(
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             IconButton(onClick = { viewModel.playPause() }) {
                 Icon(
                     imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                     contentDescription = stringResource(if (isPlaying) R.string.cd_pause else R.string.cd_play),
-                    modifier = Modifier.size(48.dp)
+                    modifier = Modifier.size(48.dp),
                 )
             }
             IconButton(onClick = { viewModel.stop() }) {
                 Icon(
                     imageVector = Icons.Filled.Stop,
                     contentDescription = stringResource(R.string.cd_stop),
-                    modifier = Modifier.size(48.dp)
+                    modifier = Modifier.size(48.dp),
                 )
             }
         }

@@ -218,6 +218,10 @@ jobs:
           yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager \
             "platforms;android-35" "build-tools;35.0.0"
 
+      - name: Kotlin lint (ktlint)
+        working-directory: android
+        run: ./gradlew ktlintCheck --no-daemon
+
       - name: Run unit tests
         working-directory: android
         run: ./gradlew test --no-daemon

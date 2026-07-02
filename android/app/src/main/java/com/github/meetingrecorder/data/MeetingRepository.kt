@@ -31,7 +31,9 @@ class MeetingRepository(private val rootDir: File) {
                     match.groupValues[4].toInt(),
                     match.groupValues[5].toInt(),
                 )
-            } catch (_: Exception) { return@forEach }
+            } catch (_: Exception) {
+                return@forEach
+            }
 
             var title: String? = null
             var durationSeconds: Int? = null
@@ -57,7 +59,7 @@ class MeetingRepository(private val rootDir: File) {
                     hasTranscript = File(meetingDir, "transcript.md").exists(),
                     hasAudio = File(meetingDir, "recording.m4a").exists(),
                     durationSeconds = durationSeconds,
-                )
+                ),
             )
         }
 
@@ -115,9 +117,9 @@ class MeetingRepository(private val rootDir: File) {
 
         val folderName = if (title != null) {
             val sanitized = title.replace(Regex("[^a-zA-Z0-9_\\-]"), "_").take(30)
-            "${datePart}_${timePart}_${sanitized}"
+            "${datePart}_${timePart}_$sanitized"
         } else {
-            "${datePart}_${timePart}"
+            "${datePart}_$timePart"
         }
 
         val dir = File(rootDir, folderName)
@@ -141,7 +143,7 @@ class MeetingRepository(private val rootDir: File) {
         // Folder name format: "YYYY-MM-DD_HH-MM" (first 16 chars) + optional "_title"
         val timePart = dir.name.take(16)
         val sanitized = cleanTitle?.replace(Regex("[^a-zA-Z0-9_\\-]"), "_")?.take(30)
-        val newName = if (sanitized == null) timePart else "${timePart}_${sanitized}"
+        val newName = if (sanitized == null) timePart else "${timePart}_$sanitized"
 
         val newDir = File(rootDir, newName)
         if (newDir.absolutePath != dir.absolutePath) {
@@ -151,8 +153,14 @@ class MeetingRepository(private val rootDir: File) {
         // Update meeting.json — preserve any existing fields (e.g. duration_seconds)
         val metaFile = File(newDir, "meeting.json")
         val json = if (metaFile.exists()) {
-            try { JSONObject(metaFile.readText()) } catch (_: Exception) { JSONObject() }
-        } else JSONObject()
+            try {
+                JSONObject(metaFile.readText())
+            } catch (_: Exception) {
+                JSONObject()
+            }
+        } else {
+            JSONObject()
+        }
         if (cleanTitle != null) json.put("title", cleanTitle) else json.remove("title")
         metaFile.writeText(json.toString())
 
@@ -175,7 +183,8 @@ class MeetingRepository(private val rootDir: File) {
         if (!pattern.matches(parent.name)) return null
         return try {
             if (parent.parentFile?.canonicalPath == rootDir.canonicalPath) parent else null
-        } catch (_: Exception) { null }
+        } catch (_: Exception) {
+            null
+        }
     }
-
 }
