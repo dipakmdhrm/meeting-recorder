@@ -11,6 +11,7 @@ import com.github.meetingrecorder.R
 import com.github.meetingrecorder.audio.RecordingPhase
 import com.github.meetingrecorder.audio.RecordingService
 import com.github.meetingrecorder.data.Config
+import com.github.meetingrecorder.data.MeetingMeta
 import com.github.meetingrecorder.data.MeetingProcessor
 import com.github.meetingrecorder.data.MeetingRepository
 import com.github.meetingrecorder.util.extensionToMimeType
@@ -24,7 +25,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
 import java.io.File
 
 sealed class RecordingState {
@@ -273,9 +273,9 @@ class MainViewModel(
                 val metaFile = File(meetingDir, "meeting.json")
                 if (metaFile.exists()) {
                     try {
-                        val json = JSONObject(metaFile.readText())
-                        currentTitle = json.optString("title").ifBlank { null }
-                        durationSeconds = if (json.has("duration_seconds")) json.getInt("duration_seconds") else 0
+                        val meta = MeetingMeta.parse(metaFile.readText())
+                        currentTitle = meta.title
+                        durationSeconds = meta.durationSeconds ?: 0
                     } catch (e: Exception) {
                         Log.w(TAG, "Could not read meeting.json in ${meetingDir.name}; proceeding without title/duration", e)
                         currentTitle = null

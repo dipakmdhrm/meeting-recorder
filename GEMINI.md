@@ -65,7 +65,7 @@ This repository is a monorepo containing two applications: a Linux desktop apple
 *   **Android App:**
     *   **Language:** Kotlin
     *   **UI:** Jetpack Compose
-    *   **Dependencies:** `androidx.compose`, `androidx.lifecycle`, `androidx.navigation`, `okhttp`, `coroutines`
+    *   **Dependencies:** `androidx.compose`, `androidx.lifecycle`, `androidx.navigation`, `okhttp`, `coroutines`, `kotlinx-serialization-json` (all JSON handling — meeting.json and the Gemini wire format — uses `kotlinx.serialization` DTOs, not `org.json`)
 
 ### Architecture
 

@@ -4,6 +4,7 @@ import android.media.MediaPlayer
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.github.meetingrecorder.data.Config
+import com.github.meetingrecorder.data.MeetingMeta
 import com.github.meetingrecorder.data.MeetingProcessor
 import com.github.meetingrecorder.util.extensionToMimeType
 import kotlinx.coroutines.CancellationException
@@ -15,7 +16,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.TimeUnit
 
@@ -85,9 +85,9 @@ class MeetingDetailViewModel(
                 val metaFile = File(dir, "meeting.json")
                 if (metaFile.exists()) {
                     try {
-                        val json = JSONObject(metaFile.readText())
-                        currentTitle = json.optString("title").ifBlank { null }
-                        durationSeconds = if (json.has("duration_seconds")) json.getInt("duration_seconds") else 0
+                        val meta = MeetingMeta.parse(metaFile.readText())
+                        currentTitle = meta.title
+                        durationSeconds = meta.durationSeconds ?: 0
                     } catch (_: Exception) {
                         currentTitle = null
                         durationSeconds = 0

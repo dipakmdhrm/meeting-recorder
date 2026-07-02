@@ -1,6 +1,9 @@
 package com.github.meetingrecorder.data
 
-import org.json.JSONObject
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 import java.io.File
 import java.time.LocalDateTime
 
@@ -40,12 +43,11 @@ class MeetingRepository(private val rootDir: File) : MeetingStore {
             val metaFile = File(meetingDir, "meeting.json")
             if (metaFile.exists()) {
                 try {
-                    val json = JSONObject(metaFile.readText())
-                    title = json.optString("title").ifBlank { null }
-                    if (json.has("duration_seconds")) {
-                        durationSeconds = json.getInt("duration_seconds")
-                    }
+                    val meta = MeetingMeta.parse(metaFile.readText())
+                    title = meta.title
+                    durationSeconds = meta.durationSeconds
                 } catch (_: Exception) {
+                    // Malformed meeting.json: keep the meeting visible, just without metadata.
                 }
             }
 
@@ -128,10 +130,7 @@ class MeetingRepository(private val rootDir: File) : MeetingStore {
     }
 
     override fun saveMeetingMeta(dir: File, title: String?, durationSeconds: Int?) {
-        val json = JSONObject()
-        if (title != null) json.put("title", title)
-        if (durationSeconds != null) json.put("duration_seconds", durationSeconds)
-        File(dir, "meeting.json").writeText(json.toString())
+        File(dir, "meeting.json").writeText(MeetingMeta(title, durationSeconds).toJson())
     }
 
     /**
@@ -150,19 +149,22 @@ class MeetingRepository(private val rootDir: File) : MeetingStore {
             dir.renameTo(newDir)
         }
 
-        // Update meeting.json — preserve any existing fields (e.g. duration_seconds)
+        // Update meeting.json — preserve any existing fields (e.g. duration_seconds, or keys
+        // written by the Linux app), which is why this edits the raw JSON tree, not MeetingMeta.
         val metaFile = File(newDir, "meeting.json")
-        val json = if (metaFile.exists()) {
+        val existing: Map<String, JsonElement> = if (metaFile.exists()) {
             try {
-                JSONObject(metaFile.readText())
+                lenientJson.parseToJsonElement(metaFile.readText()).jsonObject
             } catch (_: Exception) {
-                JSONObject()
+                emptyMap()
             }
         } else {
-            JSONObject()
+            emptyMap()
         }
-        if (cleanTitle != null) json.put("title", cleanTitle) else json.remove("title")
-        metaFile.writeText(json.toString())
+        val updated = JsonObject(
+            if (cleanTitle != null) existing + ("title" to JsonPrimitive(cleanTitle)) else existing - "title",
+        )
+        metaFile.writeText(updated.toString())
 
         return newDir
     }

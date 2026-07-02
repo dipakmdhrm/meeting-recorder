@@ -4,13 +4,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONArray
-import org.json.JSONObject
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -150,23 +150,25 @@ class GeminiClient(
             .build()
         val responseJson = withRetry { executeForBody(uploadRequest, "Upload") }
 
-        val json = JSONObject(responseJson)
+        val parsed = lenientJson.decodeFromString(UploadResponse.serializer(), responseJson)
         // Gemini occasionally returns error bodies with HTTP 200; surface them clearly.
-        json.optJSONObject("error")?.let { err ->
-            throw RuntimeException("Gemini API error ${err.optInt("code")}: ${err.optString("message")}")
+        parsed.error?.let { err ->
+            throw RuntimeException("Gemini API error ${err.code}: ${err.message}")
         }
-        val fileObj = json.optJSONObject("file")
+        val fileObj = parsed.file
             ?: throw RuntimeException(
                 "Unexpected upload response (missing 'file'). " +
                     "Response was: ${responseJson.take(200)}",
             )
-        return fileObj.getString("name")
+        return fileObj.name
     }
 
     private fun initiateUpload(file: File, mimeType: String): String {
-        val initBody = JSONObject()
-            .put("file", JSONObject().put("display_name", file.name))
-            .toString()
+        val initBody = lenientJson
+            .encodeToString(
+                UploadInitRequest.serializer(),
+                UploadInitRequest(UploadFileMetadata(displayName = file.name)),
+            )
             .toRequestBody("application/json".toMediaType())
 
         val initRequest = Request.Builder()
@@ -204,7 +206,7 @@ class GeminiClient(
             val state = withRetry {
                 val body = executeForBody(pollRequest, "File poll")
                 // GET /v1beta/files/{id} returns the File object directly (not wrapped in "file")
-                JSONObject(body).getString("state")
+                lenientJson.decodeFromString(FilePollResponse.serializer(), body).state
             }
 
             when (state) {
@@ -224,24 +226,18 @@ class GeminiClient(
         fileUri: String? = null,
         mimeType: String? = null,
     ): String {
-        val parts = JSONArray()
-
-        if (fileUri != null && mimeType != null) {
-            parts.put(
-                JSONObject().put(
-                    "fileData",
-                    JSONObject().put("mimeType", mimeType).put("fileUri", fileUri),
-                ),
-            )
+        val parts = buildList {
+            if (fileUri != null && mimeType != null) {
+                add(Part(fileData = FileData(mimeType = mimeType, fileUri = fileUri)))
+            }
+            add(Part(text = prompt))
         }
-        parts.put(JSONObject().put("text", prompt))
 
-        val body = JSONObject()
-            .put(
-                "contents",
-                JSONArray().put(JSONObject().put("parts", parts)),
+        val body = lenientJson
+            .encodeToString(
+                GenerateContentRequest.serializer(),
+                GenerateContentRequest(contents = listOf(Content(parts = parts))),
             )
-            .toString()
             .toRequestBody("application/json".toMediaType())
 
         val request = Request.Builder()
@@ -252,12 +248,53 @@ class GeminiClient(
 
         val responseJson = withRetry { executeForBody(request, "generateContent") }
 
-        return JSONObject(responseJson)
-            .getJSONArray("candidates")
-            .getJSONObject(0)
-            .getJSONObject("content")
-            .getJSONArray("parts")
-            .getJSONObject(0)
-            .getString("text")
+        return lenientJson.decodeFromString(GenerateContentResponse.serializer(), responseJson)
+            .candidates.firstOrNull()?.content?.parts?.firstOrNull()?.text
+            ?: throw RuntimeException(
+                "Unexpected generateContent response (missing candidates/text). " +
+                    "Response was: ${responseJson.take(200)}",
+            )
     }
 }
+
+// -----------------------------------------------------------------------------
+// Wire DTOs — field names must match the Gemini REST API exactly (mixed casing
+// is the API's, not ours). Unknown response fields are ignored by [lenientJson].
+// -----------------------------------------------------------------------------
+
+@Serializable
+private data class UploadInitRequest(val file: UploadFileMetadata)
+
+@Serializable
+private data class UploadFileMetadata(@SerialName("display_name") val displayName: String)
+
+@Serializable
+private data class UploadResponse(val file: UploadedFile? = null, val error: ApiError? = null)
+
+@Serializable
+private data class UploadedFile(val name: String)
+
+@Serializable
+private data class ApiError(val code: Int = 0, val message: String = "")
+
+/** GET /v1beta/files/{id} returns the File object directly (not wrapped in a "file" key). */
+@Serializable
+private data class FilePollResponse(val state: String)
+
+@Serializable
+private data class GenerateContentRequest(val contents: List<Content>)
+
+@Serializable
+private data class GenerateContentResponse(val candidates: List<Candidate> = emptyList())
+
+@Serializable
+private data class Candidate(val content: Content? = null)
+
+@Serializable
+private data class Content(val parts: List<Part> = emptyList())
+
+@Serializable
+private data class Part(val text: String? = null, val fileData: FileData? = null)
+
+@Serializable
+private data class FileData(val mimeType: String, val fileUri: String)

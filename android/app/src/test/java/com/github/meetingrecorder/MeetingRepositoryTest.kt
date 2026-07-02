@@ -211,6 +211,49 @@ class MeetingRepositoryTest {
     }
 
     // -------------------------------------------------------------------------
+    // meeting.json backward compatibility (org.json → kotlinx.serialization)
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun `listMeetings parses meeting_json written before the kotlinx-serialization migration`() {
+        val meetingDir = File(tempDir.root, "2023-11-20_09-15_Legacy").also { it.mkdirs() }
+        // Exact text org.json's JSONObject.toString() produced before the migration.
+        File(meetingDir, "meeting.json")
+            .writeText("""{"title":"Legacy Meeting","duration_seconds":1800}""")
+
+        val m = repo().listMeetings().single()
+        assertEquals("Legacy Meeting", m.title)
+        assertEquals(1800, m.durationSeconds)
+    }
+
+    @Test
+    fun `listMeetings tolerates unknown keys in meeting_json`() {
+        val meetingDir = File(tempDir.root, "2024-06-01_12-00").also { it.mkdirs() }
+        File(meetingDir, "meeting.json")
+            .writeText("""{"title":"Sync","duration_seconds":60,"future_field":{"nested":true}}""")
+
+        val m = repo().listMeetings().single()
+        assertEquals("Sync", m.title)
+        assertEquals(60, m.durationSeconds)
+    }
+
+    @Test
+    fun `renameMeeting preserves duration and unknown keys in meeting_json`() {
+        val dir = File(tempDir.root, "2024-05-01_10-00_Old").also { it.mkdirs() }
+        File(dir, "meeting.json")
+            .writeText("""{"title":"Old","duration_seconds":120,"linux_only_field":"keep me"}""")
+
+        val newDir = repo().renameMeeting(dir, "New Title")
+
+        // Verified with org.json — an independent parser — to prove format compatibility.
+        val json = JSONObject(File(newDir, "meeting.json").readText())
+        assertEquals("New Title", json.getString("title"))
+        assertEquals(120, json.getInt("duration_seconds"))
+        assertEquals("keep me", json.getString("linux_only_field"))
+        assertTrue("Folder should carry new title: ${newDir.name}", newDir.name.endsWith("_New_Title"))
+    }
+
+    // -------------------------------------------------------------------------
     // recoverOrphanedRecordings
     // -------------------------------------------------------------------------
 
