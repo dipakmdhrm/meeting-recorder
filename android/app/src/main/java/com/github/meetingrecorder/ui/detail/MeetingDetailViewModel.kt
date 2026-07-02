@@ -2,6 +2,7 @@ package com.github.meetingrecorder.ui.detail
 
 import android.app.Application
 import android.media.MediaPlayer
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.github.meetingrecorder.MeetingRecorderApp
@@ -25,6 +26,8 @@ sealed interface GenState {
     data class Processing(val status: String) : GenState
     data class Error(val msg: String) : GenState
 }
+
+private const val TAG = "MeetingDetailViewModel"
 
 // View model for the meeting detail screen
 class MeetingDetailViewModel(application: Application) : AndroidViewModel(application) {
@@ -190,7 +193,8 @@ class MeetingDetailViewModel(application: Application) : AndroidViewModel(applic
         if (currentTitle.isNullOrBlank()) {
             try {
                 currentTitle = gemini.generateTitle(notes).trim()
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Log.w(TAG, "Title generation failed; keeping meeting untitled", e)
             }
         }
     }
