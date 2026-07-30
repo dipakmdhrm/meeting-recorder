@@ -422,7 +422,9 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_settings_clicked(self, *_) -> None:
         from .settings_dialog import SettingsDialog
 
-        dialog = SettingsDialog(parent=self, on_saved=self._after_settings_saved)
+        dialog = SettingsDialog(
+            parent=self, on_saved=self._after_settings_saved, engine=self._engine
+        )
         dialog.present()
 
     def _after_settings_saved(self) -> None:

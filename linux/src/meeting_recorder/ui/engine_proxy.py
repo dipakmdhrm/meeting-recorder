@@ -39,6 +39,9 @@ class EngineProxy:
         self._on_output = on_output
         self._on_open_use_existing = on_open_use_existing
         self._on_present = on_present
+        # Install signals go to whatever Settings/Models page is currently open;
+        # it (un)registers itself here since it is created and destroyed on demand.
+        self._install_listeners: list = []
         self._conn = Gio.bus_get_sync(Gio.BusType.SESSION, None)
         self._conn.signal_subscribe(
             ENGINE_NAME,
@@ -65,6 +68,14 @@ class EngineProxy:
             self._on_open_use_existing()
         elif signal_name == "PresentWindow":
             self._on_present()
+        elif signal_name == "InstallProgress":
+            key, text = params.unpack()
+            for listener in list(self._install_listeners):
+                listener.on_install_progress(key, text)
+        elif signal_name == "InstallFinished":
+            key, ok, message = params.unpack()
+            for listener in list(self._install_listeners):
+                listener.on_install_finished(key, ok, message)
 
     # ------------------------------------------------------------------
     # Command calls
@@ -153,6 +164,21 @@ class EngineProxy:
     def output_folder(self) -> str:
         res = self._call_sync("OutputFolder")
         return res[0] if res else ""
+
+    # --- model/engine installs (run in the daemon) ---
+    def add_install_listener(self, listener) -> None:
+        self._install_listeners.append(listener)
+
+    def remove_install_listener(self, listener) -> None:
+        if listener in self._install_listeners:
+            self._install_listeners.remove(listener)
+
+    def start_install(self, spec_json: str) -> None:
+        self._call("StartInstall", GLib.Variant("(s)", (spec_json,)))
+
+    def get_installs(self) -> str:
+        res = self._call_sync("GetInstalls")
+        return res[0] if res else "[]"
 
     # --- misc ---
     def reload_config(self) -> None:

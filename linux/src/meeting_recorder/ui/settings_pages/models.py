@@ -10,6 +10,7 @@ production, a synchronous callable in tests).
 
 from __future__ import annotations
 
+import json
 import threading
 from collections.abc import Callable
 
@@ -34,6 +35,8 @@ from meeting_recorder.config.defaults import (
     WHISPER_MODELS,
 )
 
+from ...core import install_spec as ispec
+from ...core.install_spec import InstallSpec, spec_to_json
 from ...services.ollama_service import OllamaClient
 from ...services.system_installer import (
     CudaInstaller,
@@ -81,10 +84,16 @@ class ModelsPage:
         whisper_cpp_downloader: WhisperCppModelDownloader | None = None,
         gpu_vendor: str | None = None,
         dispatcher: Callable = GLib.idle_add,
+        engine=None,
     ) -> None:
         # --- injected dependencies (real defaults for production) ---
         self._cfg = cfg
         self._dispatch = dispatcher
+        # The daemon proxy. Installs/downloads are started on it and run in a
+        # daemon-spawned child process, so they survive this window closing and
+        # never load the heavy faster-whisper stack into the daemon. The status
+        # checkers below stay here (read-only filesystem/HTTP probes).
+        self._engine = engine
         self._whisper_checker = whisper_checker or WhisperStatusChecker()
         self._whisper_dl = whisper_downloader or WhisperDownloader()
         self._ollama = ollama_client or OllamaClient()
@@ -421,11 +430,7 @@ class ModelsPage:
     def _on_install_ollama(self, button: Gtk.Button) -> None:
         button.set_sensitive(False)
         button.set_label("Installing…")
-        threading.Thread(target=self._do_install_ollama, daemon=True).start()
-
-    def _do_install_ollama(self) -> None:
-        success = self._ollama_inst.install()
-        self._dispatch(self._on_ollama_install_finished, success)
+        self._start_install(InstallSpec(kind=ispec.OLLAMA))
 
     def _on_ollama_install_finished(self, success: bool) -> None:
         if success and self._ollama_inst.is_available():
@@ -443,11 +448,7 @@ class ModelsPage:
     def _on_install_whisper_engine(self, button: Gtk.Button) -> None:
         button.set_sensitive(False)
         button.set_label("Installing…")
-        threading.Thread(target=self._do_install_whisper_engine, daemon=True).start()
-
-    def _do_install_whisper_engine(self) -> None:
-        success = self._whisper_eng_inst.install()
-        self._dispatch(self._on_whisper_engine_install_finished, success)
+        self._start_install(InstallSpec(kind=ispec.WHISPER_ENGINE))
 
     def _on_whisper_engine_install_finished(self, success: bool) -> None:
         if success and self._whisper_eng_inst.is_available():
@@ -468,11 +469,7 @@ class ModelsPage:
         backend = self._wcpp_backend_combo.get_active_id() or "auto"
         if backend == "auto":
             backend = detect_gpu_backend()
-        threading.Thread(target=self._do_build_whisper_cpp, args=(backend,), daemon=True).start()
-
-    def _do_build_whisper_cpp(self, backend: str) -> None:
-        success = self._wcpp_builder.build(backend)
-        self._dispatch(self._on_whisper_cpp_build_finished, success)
+        self._start_install(InstallSpec(kind=ispec.WHISPER_CPP_BUILD, backend=backend))
 
     def _on_whisper_cpp_build_finished(self, success: bool) -> None:
         if success and self._wcpp_builder.is_built():
@@ -486,12 +483,7 @@ class ModelsPage:
     def _on_install_gpu(self, button: Gtk.Button, vendor: str) -> None:
         button.set_sensitive(False)
         button.set_label("Installing…")
-        threading.Thread(target=self._do_install_gpu, args=(vendor,), daemon=True).start()
-
-    def _do_install_gpu(self, vendor: str) -> None:
-        installer = self._gpu_installers.get(vendor)
-        success = installer.install() if installer else False
-        self._dispatch(self._on_gpu_install_finished, success, vendor)
+        self._start_install(InstallSpec(kind=ispec.GPU, vendor=vendor))
 
     def _on_gpu_install_finished(self, success: bool, vendor: str) -> None:
         installer = self._gpu_installers.get(vendor)
@@ -567,43 +559,88 @@ class ModelsPage:
 
     def _start_whisper_download(self, model: str) -> None:
         self._whisper_grid.set_progress(model, "Downloading…")
-        threading.Thread(target=self._do_whisper_download, args=(model,), daemon=True).start()
-
-    def _do_whisper_download(self, model: str) -> None:
-        try:
-            self._whisper_dl.download(model)
-            self._dispatch(self._whisper_grid.set_ready, model)
-        except Exception as exc:
-            self._dispatch(self._whisper_grid.set_error, model, str(exc))
+        self._start_install(InstallSpec(kind=ispec.WHISPER_MODEL, model=model))
 
     def _start_wcpp_download(self, model: str) -> None:
         self._wcpp_grid.set_progress(model, "Downloading…")
-        threading.Thread(target=self._do_wcpp_download, args=(model,), daemon=True).start()
-
-    def _do_wcpp_download(self, model: str) -> None:
-        try:
-            self._wcpp_dl.download(model)
-            self._dispatch(self._wcpp_grid.set_ready, model)
-        except Exception as exc:
-            self._dispatch(self._wcpp_grid.set_error, model, str(exc))
+        self._start_install(InstallSpec(kind=ispec.WHISPER_CPP_MODEL, model=model))
 
     def _start_ollama_download(self, model: str) -> None:
         host = self._ollama_host_entry.get_text().strip()
         self._ollama_grid.set_progress(model, "Starting…")
-        threading.Thread(target=self._do_ollama_download, args=(model, host), daemon=True).start()
+        self._start_install(InstallSpec(kind=ispec.OLLAMA_MODEL, model=model, host=host))
 
-    def _do_ollama_download(self, model: str, host: str) -> None:
-        def on_progress(text: str) -> None:
-            self._dispatch(self._ollama_grid.set_progress, model, text)
+    # ------------------------------------------------------------------
+    # Daemon-run installs: dispatch, progress/finished routing, reopen sync
+    # ------------------------------------------------------------------
 
+    def _start_install(self, spec: InstallSpec) -> None:
+        """Hand an install to the daemon (runs in a child, survives window close)."""
+        if self._engine is not None:
+            self._engine.start_install(spec_to_json(spec))
+
+    def _grid_for_kind(self, kind: str):
+        return {
+            ispec.WHISPER_MODEL: self._whisper_grid,
+            ispec.WHISPER_CPP_MODEL: self._wcpp_grid,
+            ispec.OLLAMA_MODEL: self._ollama_grid,
+        }.get(kind)
+
+    def on_install_progress(self, key: str, text: str) -> None:
+        """Daemon InstallProgress signal (main-thread) — update the model row."""
+        kind, _, model = key.partition(":")
+        grid = self._grid_for_kind(kind)
+        if grid is not None and model:
+            grid.set_progress(model, text)
+
+    def on_install_finished(self, key: str, ok: bool, message: str) -> None:
+        """Daemon InstallFinished signal (main-thread) — reflect the outcome."""
+        kind, _, arg = key.partition(":")
+        if kind == ispec.OLLAMA:
+            self._on_ollama_install_finished(ok)
+        elif kind == ispec.WHISPER_ENGINE:
+            self._on_whisper_engine_install_finished(ok)
+        elif kind == ispec.WHISPER_CPP_BUILD:
+            self._on_whisper_cpp_build_finished(ok)
+        elif kind == ispec.GPU:
+            self._on_gpu_install_finished(ok, arg)
+        else:
+            grid = self._grid_for_kind(kind)
+            if grid is not None and arg:
+                if ok:
+                    grid.set_ready(arg)
+                else:
+                    grid.set_error(arg, message or "Download failed")
+
+    def reflect_running_installs(self) -> None:
+        """On (re)open, show installs already running in the daemon as in-progress."""
+        if self._engine is None:
+            return
         try:
-            success = self._ollama.pull_model(model, host, on_progress)
-            if success:
-                self._dispatch(self._ollama_grid.set_ready, model)
-            else:
-                self._dispatch(self._ollama_grid.set_error, model, "Download may have failed")
-        except Exception as exc:
-            self._dispatch(self._ollama_grid.set_error, model, str(exc))
+            running = json.loads(self._engine.get_installs())
+        except Exception:
+            return
+        for entry in running:
+            self._reflect_running(entry.get("key", ""), entry.get("status", ""))
+
+    def _reflect_running(self, key: str, status: str) -> None:
+        kind, _, arg = key.partition(":")
+        button_labels = {
+            ispec.OLLAMA: ("_ollama_install_button", "Installing…"),
+            ispec.WHISPER_ENGINE: ("_whisper_install_button", "Installing…"),
+            ispec.WHISPER_CPP_BUILD: ("_wcpp_install_button", "Building…"),
+            ispec.GPU: ("_gpu_install_button", "Installing…"),
+        }
+        if kind in button_labels:
+            attr, label = button_labels[kind]
+            button = getattr(self, attr, None)
+            if button is not None:
+                button.set_sensitive(False)
+                button.set_label(label)
+            return
+        grid = self._grid_for_kind(kind)
+        if grid is not None and arg:
+            grid.set_progress(arg, status or "Downloading…")
 
     # ------------------------------------------------------------------
     # Save
