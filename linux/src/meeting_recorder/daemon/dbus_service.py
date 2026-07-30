@@ -118,7 +118,9 @@ class EngineService:
     def _on_name_lost(self, _conn, _name) -> None:
         # Another daemon owns the name (or the bus went away). A second daemon
         # must not fight for it — log and let this one exit cleanly.
-        logger.warning("Lost/failed to acquire bus name %s — another daemon is running", ENGINE_NAME)
+        logger.warning(
+            "Lost/failed to acquire bus name %s — another daemon is running", ENGINE_NAME
+        )
 
     # ------------------------------------------------------------------
     # Signals pushed to the window

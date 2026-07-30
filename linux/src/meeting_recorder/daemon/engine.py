@@ -104,9 +104,7 @@ class Engine:
         job_dicts = [
             job_to_dict(j, self._job_status_text.get(j.job_id)) for j in self._job_manager.jobs
         ]
-        return snapshot_to_json(
-            wire_state, self._status, self._elapsed, self._countdown, job_dicts
-        )
+        return snapshot_to_json(wire_state, self._status, self._elapsed, self._countdown, job_dicts)
 
     def restore_persisted_jobs(self) -> None:
         """Re-offer jobs from the previous session (crash/quit recovery)."""
@@ -321,9 +319,7 @@ class Engine:
             transcript_path=job.transcript_path,
             notes_path=job.notes_path,
             on_status=lambda msg: (
-                idle_call(self._set_job_status_text, job.job_id, msg)
-                if not job.cancelled
-                else None
+                idle_call(self._set_job_status_text, job.job_id, msg) if not job.cancelled else None
             ),
         )
         try:

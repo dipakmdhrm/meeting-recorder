@@ -166,9 +166,7 @@ def test_start_recording_starts_with_key(engine, monkeypatch):
     monkeypatch.setattr(
         "meeting_recorder.daemon.engine.settings.load", lambda: {"output_folder": "~/m"}
     )
-    monkeypatch.setattr(
-        "meeting_recorder.daemon.engine.settings.api_key_error", lambda cfg: None
-    )
+    monkeypatch.setattr("meeting_recorder.daemon.engine.settings.api_key_error", lambda cfg: None)
     engine.set_title("Weekly sync")
     engine.start_recording("speaker")
     assert engine._test["ctrl"]["ctrl"].started_with == ("speaker", "Weekly sync")
