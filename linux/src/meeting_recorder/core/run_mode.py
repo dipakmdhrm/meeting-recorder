@@ -16,11 +16,13 @@ from collections.abc import Sequence
 DAEMON = "daemon"
 WINDOW = "window"
 PROCESS = "process"
+INSTALL = "install"
 CLIENT = "client"
 
 DAEMON_FLAG = "--daemon"
 WINDOW_FLAG = "--window"
 PROCESS_FLAG = "--process"
+INSTALL_FLAG = "--install"
 
 
 def resolve_run_mode(argv: Sequence[str]) -> str:
@@ -31,6 +33,9 @@ def resolve_run_mode(argv: Sequence[str]) -> str:
     ``--process`` → run a one-shot AI-processing child (spawned by the daemon);
     it loads the heavy Gemini/Whisper stack, does one job, and exits so the
     memory is reclaimed instead of accumulating in the long-lived daemon.
+    ``--install`` → run a one-shot model/engine install child (spawned by the
+    daemon); it runs the installer/build/download and exits, so the install
+    survives the window closing and never bloats the daemon.
     Neither      → client mode: ensure the daemon is running, then ask it to
     open a window. This is what the app-menu launcher and the tray "Open"
     action invoke.
@@ -45,4 +50,6 @@ def resolve_run_mode(argv: Sequence[str]) -> str:
         return WINDOW
     if PROCESS_FLAG in args:
         return PROCESS
+    if INSTALL_FLAG in args:
+        return INSTALL
     return CLIENT
