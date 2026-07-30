@@ -143,6 +143,7 @@ jobs:
             echo "Origin: Meeting Recorder"
             echo "Label: Meeting Recorder"
             echo "Codename: stable"
+            echo "Suite: stable"
             echo "Architectures: amd64 arm64"
             echo "Components: main"
             echo "Description: Meeting Recorder APT repository"
