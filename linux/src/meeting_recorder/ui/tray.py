@@ -205,13 +205,16 @@ _MENU_PATH = "/MenuBar"
 class TrayIcon:
     """StatusNotifierItem tray icon driven over D-Bus.
 
-    Public API (unchanged from the GTK3 version): construct with the main
-    window, then call ``update(recording_state, jobs)`` whenever state changes.
-    ``jobs`` is a list of ``(label, cancel_fn)`` tuples.
+    Lives in the GTK-free daemon. Construct with an ``on_command`` callback —
+    ``on_command(action, job_index)`` — that the daemon routes to the engine
+    (record/pause/stop/…), the window process (``show``/``use_existing``), or
+    daemon quit. Call ``update(recording_state, jobs)`` whenever state changes;
+    ``jobs`` is a list of ``(label, cancel_fn)`` tuples (the cancel_fn cancels
+    that job on the daemon).
     """
 
-    def __init__(self, window) -> None:
-        self._window = window
+    def __init__(self, on_command) -> None:
+        self._on_command = on_command
         self._recording_state = "idle"
         self._jobs: list = []
         self._icon_name = icon_for_state("idle", [])
@@ -364,10 +367,10 @@ class TrayIcon:
         return values.get(prop)
 
     def _sni_method(self, _conn, _sender, _path, _iface, method, _params, invocation):
-        # Left-click → focus the window. Runs on the GTK main thread (the D-Bus
-        # connection is owned by the main-loop context), so call directly.
+        # Left-click → open/focus the window. Runs on the daemon main loop, so
+        # dispatch straight to the command router.
         if method == "Activate":
-            self._window.present_window()
+            self._on_command("show", None)
         invocation.return_value(None)
 
     # ------------------------------------------------------------------
@@ -468,38 +471,11 @@ class TrayIcon:
         self._dispatch_action(item["action"], item.get("job_index"))
 
     def _dispatch_action(self, action: str, job_index=None) -> None:
-        from ..utils.glib_bridge import idle_call
-
-        w = self._window
-        handlers = {
-            "record_headphones": w.on_record_headphones_clicked,
-            "record_speaker": w.on_record_speaker_clicked,
-            "use_existing": w.on_use_existing_clicked,
-            "pause": w.on_pause_clicked,
-            "resume": w.on_resume_clicked,
-            "stop": w.on_stop_clicked,
-            "cancel_save": w.on_cancel_save_clicked,
-            "cancel": w.on_cancel_clicked,
-        }
-        if action in handlers:
-            idle_call(handlers[action])
-        elif action == "show":
-            # Direct call keeps the click context for window focusing.
-            w.present_window()
-        elif action == "quit":
-            self._quit()
-        elif action == "cancel_job":
+        if action == "cancel_job":
             if job_index is not None and 0 <= job_index < len(self._jobs):
                 # cancel_fn already marshals onto the main thread via idle_call.
                 self._jobs[job_index][1]()
-
-    def _quit(self) -> None:
-        from ..utils.glib_bridge import idle_call
-
-        def _do_quit():
-            # Finalize any active recording via the window's public API (the
-            # recorder itself now lives in core.RecordingController).
-            self._window.prepare_quit()
-            self._window.get_application().quit()
-
-        idle_call(_do_quit)
+            return
+        # All other actions (record/pause/stop/show/use_existing/quit/…) go to
+        # the daemon's single command router.
+        self._on_command(action, None)
