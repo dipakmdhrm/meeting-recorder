@@ -82,6 +82,6 @@ def build_menu_model(recording_state: str, jobs: list) -> list[dict]:
 
     # Footer.
     items.append({"type": "separator"})
-    action("Show Window", "show")
+    action("Open", "show")
     action("Quit", "quit")
     return items

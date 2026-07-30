@@ -781,7 +781,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def present_window(self) -> None:
         """Show, raise and focus the window — used by the tray (left-click and
-        the "Show Window" menu item). Re-shows the window if it was hidden to
+        the "Open" menu item). Re-shows the window if it was hidden to
         the tray and un-minimises it before presenting.
 
         GTK4 removed set_skip_taskbar_hint(), present_with_time() and
