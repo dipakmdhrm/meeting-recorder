@@ -59,6 +59,34 @@ class RecordingRunner:
         self.submissions.append(description)
 
 
+class FakeProcessorHandle:
+    def __init__(self):
+        self.cancelled = False
+
+    def cancel(self):
+        self.cancelled = True
+
+
+class FakeLauncher:
+    """Captures processor launches (and callbacks) without spawning a child."""
+
+    def __init__(self):
+        self.launches = []
+
+    def launch(self, audio, transcript, notes, *, on_status, on_done, on_error):
+        handle = FakeProcessorHandle()
+        self.launches.append(
+            {
+                "audio": audio,
+                "on_status": on_status,
+                "on_done": on_done,
+                "on_error": on_error,
+                "handle": handle,
+            }
+        )
+        return handle
+
+
 @pytest.fixture
 def engine(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
@@ -66,6 +94,7 @@ def engine(tmp_path, monkeypatch):
     errors = []
     outputs = []
     ctrl_holder = {}
+    launcher = FakeLauncher()
 
     def factory(**cb):
         ctrl_holder["ctrl"] = FakeController(**cb)
@@ -78,8 +107,15 @@ def engine(tmp_path, monkeypatch):
         on_output=outputs.append,
         job_manager=JobManager(),
         controller_factory=factory,
+        processor_launcher=launcher,
     )
-    eng._test = {"changes": changes, "errors": errors, "outputs": outputs, "ctrl": ctrl_holder}
+    eng._test = {
+        "changes": changes,
+        "errors": errors,
+        "outputs": outputs,
+        "ctrl": ctrl_holder,
+        "launcher": launcher,
+    }
     return eng
 
 
@@ -96,14 +132,53 @@ def test_state_name_defaults_idle(engine):
     assert snap["jobs"] == []
 
 
-def test_import_existing_creates_job_and_submits(engine, tmp_path):
+def test_import_existing_creates_job_and_launches_processor(engine, tmp_path):
     a, t, n = _paths(tmp_path)
     engine.import_existing(a, t, n, "my recording")
     snap = json.loads(engine.snapshot_json())
     assert len(snap["jobs"]) == 1
     assert snap["jobs"][0]["label"] == "my recording"
-    assert engine._test["ctrl"]  # controller built
-    assert engine._runner.submissions  # pipeline submitted
+    # A processing child was launched (in-daemon threads no longer run the SDK).
+    launches = engine._test["launcher"].launches
+    assert len(launches) == 1
+    assert launches[0]["audio"] == a
+
+
+def test_processing_done_marks_job_done_and_adopts_paths(engine, tmp_path):
+    a, t, n = _paths(tmp_path)
+    engine.import_existing(a, t, n, "r")
+    job_id = engine._job_manager.jobs[0].job_id
+    # Simulate the child finishing with auto-title-renamed paths.
+    renamed = str(tmp_path / "10-00_Retro" / "recording.mp3")
+    engine._test["launcher"].launches[0]["on_done"]([renamed, t, n])
+    from meeting_recorder.core.job import JobStatus
+
+    job = engine._job_manager.jobs[0]
+    assert job.status is JobStatus.DONE
+    assert str(job.audio_path) == renamed
+    assert job_id not in engine._processors
+
+
+def test_cancel_job_kills_running_processor(engine, tmp_path):
+    a, t, n = _paths(tmp_path)
+    engine.import_existing(a, t, n, "r")
+    job = engine._job_manager.jobs[0]
+    handle = engine._test["launcher"].launches[0]["handle"]
+    engine.cancel_job(job.job_id)
+    assert handle.cancelled is True
+    assert job.job_id not in engine._processors
+    assert engine._job_manager.jobs == []
+
+
+def test_processing_error_marks_job_error(engine, tmp_path):
+    a, t, n = _paths(tmp_path)
+    engine.import_existing(a, t, n, "r")
+    engine._test["launcher"].launches[0]["on_error"]("bad key")
+    from meeting_recorder.core.job import JobStatus
+
+    job = engine._job_manager.jobs[0]
+    assert job.status is JobStatus.ERROR
+    assert (job.error_msg or "") == "bad key"
 
 
 def test_status_text_appears_in_snapshot(engine, tmp_path):

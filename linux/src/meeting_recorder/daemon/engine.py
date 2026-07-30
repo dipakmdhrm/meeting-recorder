@@ -61,6 +61,7 @@ class Engine:
         on_output: Callable[[str], None],
         job_manager: JobManager | None = None,
         controller_factory: Callable[..., object] | None = None,
+        processor_launcher: object | None = None,
     ) -> None:
         self._runner = runner
         self._on_change = on_change
@@ -71,6 +72,11 @@ class Engine:
         self._elapsed = 0
         self._countdown = 0
         self._job_status_text: dict[int, str] = {}
+        # Each processing job runs in a short-lived child process so the heavy
+        # Gemini/Whisper stack never accumulates in the daemon. Tracked by
+        # job_id so a cancel can kill the child. Launcher is injectable for tests.
+        self._processor_launcher = processor_launcher
+        self._processors: dict[int, object] = {}
 
         # controller_factory / job_manager are injectable so the engine is
         # unit-testable headless (fake controller + runner + temp JobManager),
@@ -211,6 +217,10 @@ class Engine:
             return
         job.cancelled = True
         job.token.cancel()
+        # Kill the processing child if one is running for this job.
+        handle = self._processors.pop(job_id, None)
+        if handle is not None:
+            handle.cancel()
         self.dismiss_job(job_id)
         logger.info("Job %d cancelled by user", job_id)
 
@@ -289,74 +299,75 @@ class Engine:
         idle_call(self._emit_error, msg)
 
     # ------------------------------------------------------------------
-    # Pipeline (unchanged logic, lifted from MainWindow)
+    # Pipeline — runs in a short-lived child process (memory isolation)
     # ------------------------------------------------------------------
 
     def _submit_pipeline_job(self, job: Job) -> None:
-        self._runner.submit(
-            self._pipeline_worker,
-            job,
-            on_done=lambda paths, j=job: self._on_pipeline_finished(j, paths),
-            on_error=lambda exc, j=job: self._on_pipeline_failed(j, exc),
-            description=f"pipeline: {job.label}",
-        )
+        """Launch processing for a job whose audio is already on disk."""
+        self._launch_processor(job)
 
     def _submit_recorded_job(self, job: Job) -> None:
-        self._runner.submit(
-            self._recorded_job_worker,
-            job,
-            on_done=lambda paths, j=job: self._on_pipeline_finished(j, paths),
-            on_error=lambda exc, j=job: self._on_pipeline_failed(j, exc),
-            description=f"pipeline (after stop): {job.label}",
-        )
+        """Wait for the recorder to finish writing, then launch processing.
 
-    def _recorded_job_worker(self, job: Job):
-        self._controller.wait_until_stopped()
+        The wait blocks (ffmpeg concat of segments), so it runs on the
+        TaskRunner; the processor is then spawned back on the main thread.
+        """
+
+        def _wait_then_launch(j: Job):
+            self._controller.wait_until_stopped()
+            if j.cancelled:
+                return
+            idle_call(self._launch_processor, j)
+
+        self._runner.submit(_wait_then_launch, job, description=f"await stop: {job.label}")
+
+    def _launch_processor(self, job: Job) -> None:
         if job.cancelled:
-            return None
-        idle_call(self._set_job_status_text, job.job_id, "Transcribing…")
-        return self._pipeline_worker(job)
-
-    def _pipeline_worker(self, job: Job):
-        from ..processing.pipeline import Pipeline, PipelineCancelled
-
-        cfg = settings.load()
-        pipeline = Pipeline(
-            config=cfg,
-            audio_path=job.audio_path,
-            transcript_path=job.transcript_path,
-            notes_path=job.notes_path,
-            on_status=lambda msg: (
-                idle_call(self._set_job_status_text, job.job_id, msg) if not job.cancelled else None
-            ),
-        )
-        try:
-            pipeline.run(cancel_token=job.token)
-        except PipelineCancelled:
-            logger.info("Pipeline for job %d stopped after cancellation", job.job_id)
-            return None
-        return pipeline.output_paths
-
-    def _on_pipeline_finished(self, job: Job, paths) -> None:
-        if job.cancelled or paths is None:
             return
-        audio_path, transcript_path, notes_path = paths
+        self._set_job_status_text(job.job_id, "Transcribing…")
+        handle = self._launcher().launch(
+            str(job.audio_path),
+            str(job.transcript_path),
+            str(job.notes_path),
+            on_status=lambda msg, jid=job.job_id: self._set_job_status_text(jid, msg),
+            on_done=lambda paths, j=job: self._on_processing_done(j, paths),
+            on_error=lambda msg, j=job: self._on_processing_error(j, msg),
+        )
+        self._processors[job.job_id] = handle
+
+    def _launcher(self):
+        # Built lazily (imports Gio) so the engine module stays importable
+        # headless; tests inject a fake via the constructor.
+        if self._processor_launcher is None:
+            from .processor import ProcessorLauncher
+
+            self._processor_launcher = ProcessorLauncher()
+        return self._processor_launcher
+
+    def _on_processing_done(self, job: Job, paths) -> None:
+        self._processors.pop(job.job_id, None)
+        if job.cancelled:
+            return
+        # Child returns [audio, transcript, notes] as strings/None; auto-title
+        # may have moved the meeting directory, so adopt the returned paths.
+        audio_path, transcript_path, notes_path = (paths + [None, None, None])[:3]
         if audio_path:
-            job.audio_path = audio_path
+            job.audio_path = Path(audio_path)
         if transcript_path:
-            job.transcript_path = transcript_path
+            job.transcript_path = Path(transcript_path)
         if notes_path:
-            job.notes_path = notes_path
-        self._job_manager.persist()  # auto-title may have moved the paths
+            job.notes_path = Path(notes_path)
+        self._job_manager.persist()
         self._job_manager.mark_done(job)
         self._job_status_text.pop(job.job_id, None)
         self._changed()
         self._notify_complete(job)
 
-    def _on_pipeline_failed(self, job: Job, exc: Exception) -> None:
+    def _on_processing_error(self, job: Job, msg: str) -> None:
+        self._processors.pop(job.job_id, None)
         if job.cancelled:
             return
-        self._job_manager.mark_error(job, str(exc))
+        self._job_manager.mark_error(job, msg)
         self._changed()
 
     def _set_job_status_text(self, job_id: int, msg: str) -> None:

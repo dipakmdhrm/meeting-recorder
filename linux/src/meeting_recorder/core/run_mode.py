@@ -15,22 +15,27 @@ from collections.abc import Sequence
 
 DAEMON = "daemon"
 WINDOW = "window"
+PROCESS = "process"
 CLIENT = "client"
 
 DAEMON_FLAG = "--daemon"
 WINDOW_FLAG = "--window"
+PROCESS_FLAG = "--process"
 
 
 def resolve_run_mode(argv: Sequence[str]) -> str:
     """Return the process role implied by ``argv``.
 
-    ``--daemon`` → run the engine daemon (tray only, no window).
+    ``--daemon``  → run the engine daemon (tray only, no window).
     ``--window``  → run the GTK UI child (spawned by the daemon).
-    Neither     → client mode: ensure the daemon is running, then ask it to
+    ``--process`` → run a one-shot AI-processing child (spawned by the daemon);
+    it loads the heavy Gemini/Whisper stack, does one job, and exits so the
+    memory is reclaimed instead of accumulating in the long-lived daemon.
+    Neither      → client mode: ensure the daemon is running, then ask it to
     open a window. This is what the app-menu launcher and the tray "Open"
     action invoke.
 
-    The two role flags are mutually exclusive; ``--daemon`` wins if both are
+    The role flags are mutually exclusive; ``--daemon`` wins if several are
     somehow present (defensive — a daemon must never also try to be a window).
     """
     args = set(argv[1:]) if len(argv) > 1 else set()
@@ -38,4 +43,6 @@ def resolve_run_mode(argv: Sequence[str]) -> str:
         return DAEMON
     if WINDOW_FLAG in args:
         return WINDOW
+    if PROCESS_FLAG in args:
+        return PROCESS
     return CLIENT

@@ -13,7 +13,7 @@ import sys
 
 import setproctitle
 
-from .core.run_mode import DAEMON, WINDOW, resolve_run_mode
+from .core.run_mode import DAEMON, PROCESS, WINDOW, resolve_run_mode
 
 
 def main() -> int:
@@ -28,6 +28,11 @@ def main() -> int:
         from .ui.window_app import main as window_main
 
         return window_main(sys.argv)
+    if mode == PROCESS:
+        setproctitle.setproctitle("meeting-recorder-process")
+        from .daemon.processor import run_processor_child
+
+        return run_processor_child(sys.argv)
     # client mode
     setproctitle.setproctitle("meeting-recorder")
     from .client import main as client_main

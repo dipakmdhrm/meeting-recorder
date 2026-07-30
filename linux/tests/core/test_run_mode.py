@@ -1,6 +1,6 @@
 """Tests for the pure run-mode resolver."""
 
-from meeting_recorder.core.run_mode import CLIENT, DAEMON, WINDOW, resolve_run_mode
+from meeting_recorder.core.run_mode import CLIENT, DAEMON, PROCESS, WINDOW, resolve_run_mode
 
 
 def test_no_flags_is_client():
@@ -18,6 +18,10 @@ def test_daemon_flag():
 
 def test_window_flag():
     assert resolve_run_mode(["meeting-recorder", "--window"]) == WINDOW
+
+
+def test_process_flag():
+    assert resolve_run_mode(["meeting-recorder", "--process", "a.mp3", "t.md", "n.md"]) == PROCESS
 
 
 def test_daemon_wins_over_window():
