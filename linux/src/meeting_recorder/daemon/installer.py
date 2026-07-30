@@ -131,6 +131,8 @@ class InstallLauncher:
     ) -> InstallHandle:
         from gi.repository import Gio, GLib
 
+        from .child_io import capture_stderr, stderr_tail
+
         # Capture stderr too: the installers run their commands via subprocess
         # inheriting fd 2, so pip/cmake/sudo error output lands on the child's
         # stderr. Piping it lets us log the real reason and surface a tail of it
@@ -141,8 +143,8 @@ class InstallLauncher:
         )
         handle = InstallHandle(proc)
         out_in = Gio.DataInputStream.new(proc.get_stdout_pipe())
-        err_in = Gio.DataInputStream.new(proc.get_stderr_pipe())
-        state: dict = {"ok": False, "message": "", "stderr": []}
+        stderr_lines = capture_stderr(proc)
+        state: dict = {"ok": False, "message": ""}
 
         def read_out() -> None:
             out_in.read_line_async(GLib.PRIORITY_DEFAULT, None, on_out_line)
@@ -164,36 +166,17 @@ class InstallLauncher:
                 state["message"] = line[len("ERROR:") :]
             read_out()
 
-        def read_err() -> None:
-            err_in.read_line_async(GLib.PRIORITY_DEFAULT, None, on_err_line)
-
-        def on_err_line(stream, res) -> None:
-            try:
-                line, _ = stream.read_line_finish_utf8(res)
-            except GLib.Error:
-                line = None
-            if line is None:
-                return  # stderr EOF
-            text = line.strip()
-            if text:
-                state["stderr"].append(text)
-                del state["stderr"][:-20]  # keep only the last 20 lines
-            read_err()
-
         def on_exit(p, res) -> None:
             try:
                 p.wait_finish(res)
             except GLib.Error:
                 pass
             message = state["message"]
-            if not state["ok"]:
-                if state["stderr"]:
-                    logger.warning("Install stderr: %s", " | ".join(state["stderr"]))
-                tail = " ".join(state["stderr"])[-400:]
-                if tail:
-                    message = f"{message} — {tail}" if message else tail
+            if not state["ok"] and stderr_lines:
+                logger.warning("Install stderr: %s", " | ".join(stderr_lines))
+                tail = stderr_tail(stderr_lines)
+                message = f"{message} — {tail}" if message else tail
             on_finished(state["ok"], message)
 
         read_out()
-        read_err()
         return handle
