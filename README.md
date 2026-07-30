@@ -22,7 +22,7 @@ This repository is a monorepo with two independent apps — a Linux desktop appl
 - **Local models** — run fully offline with no API key required
 - **Customizable prompts** — edit transcription and summarization prompts in Settings
 - **System tray** integration — a StatusNotifierItem (SNI) exposed over D-Bus; left-click opens the window where the host supports it, otherwise opens the menu
-- **Lightweight background daemon** — the app runs as a small GTK-free tray daemon and only loads the full GTK window when you open it, so it idles at roughly a fifth of the memory. Closing the window returns to the tray while recording and processing keep running in the background; reopening (tray "Open" or the app icon) shows a fresh window reflecting the current state.
+- **Lightweight background daemon** — the app runs as a small GTK-free tray daemon and only loads the full GTK window when you open it, so it idles at roughly a fifth of the memory. Closing the window returns to the tray while recording, transcription, and model installs keep running in the background; reopening (tray "Open" or the app icon) shows a fresh window reflecting the current state (an in-progress model install still shows its progress).
 - **Call detection** — optionally monitor for active calls and get notified to start recording
 - **Start at system startup** — optionally launch the tray daemon automatically on login
 
