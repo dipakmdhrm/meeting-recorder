@@ -593,6 +593,13 @@ class ModelsPage:
         if grid is not None and model:
             grid.set_progress(model, text)
 
+    _INSTALL_BUTTON_ATTR = {
+        ispec.OLLAMA: "_ollama_install_button",
+        ispec.WHISPER_ENGINE: "_whisper_install_button",
+        ispec.WHISPER_CPP_BUILD: "_wcpp_install_button",
+        ispec.GPU: "_gpu_install_button",
+    }
+
     def on_install_finished(self, key: str, ok: bool, message: str) -> None:
         """Daemon InstallFinished signal (main-thread) — reflect the outcome."""
         kind, _, arg = key.partition(":")
@@ -611,6 +618,13 @@ class ModelsPage:
                     grid.set_ready(arg)
                 else:
                     grid.set_error(arg, message or "Download failed")
+            return
+        # For install/build/gpu, surface the reason on the (rebuilt) Retry button
+        # so the failure isn't opaque; the section handler leaves it in place.
+        if not ok and message:
+            button = getattr(self, self._INSTALL_BUTTON_ATTR.get(kind, ""), None)
+            if button is not None:
+                button.set_tooltip_text(message)
 
     def reflect_running_installs(self) -> None:
         """On (re)open, show installs already running in the daemon as in-progress."""
