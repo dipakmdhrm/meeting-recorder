@@ -20,6 +20,7 @@ from ..utils.autostart import migrate_autostart_entry
 from ..utils.logging_setup import setup_logging
 from .dbus_service import EngineService
 from .engine import Engine
+from .install_manager import InstallManager
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +38,15 @@ class Daemon:
             on_error=self._on_engine_error,
             on_output=self._on_engine_output,
         )
+        self._install_manager = InstallManager(
+            on_progress=self._on_install_progress,
+            on_finished=self._on_install_finished,
+        )
         self._service = EngineService(
             self._engine,
             on_quit=self.quit,
             on_reload_config=self._reload_config,
+            install_manager=self._install_manager,
         )
 
     # ------------------------------------------------------------------
@@ -142,6 +148,16 @@ class Daemon:
 
     def _on_engine_output(self, text: str) -> None:
         self._service.emit_output(text)
+
+    # ------------------------------------------------------------------
+    # Install fan-out (to the Settings window, if open)
+    # ------------------------------------------------------------------
+
+    def _on_install_progress(self, key: str, text: str) -> None:
+        self._service.emit_install_progress(key, text)
+
+    def _on_install_finished(self, key: str, ok: bool, message: str) -> None:
+        self._service.emit_install_finished(key, ok, message)
 
     # ------------------------------------------------------------------
     # Config reload (from the window's Settings save)

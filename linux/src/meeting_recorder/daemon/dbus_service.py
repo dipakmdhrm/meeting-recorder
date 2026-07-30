@@ -66,12 +66,18 @@ _ENGINE_XML = f"""
     <method name="ReloadConfig"/>
     <method name="OpenWindow"/>
     <method name="GetSnapshot"><arg name="json" type="s" direction="out"/></method>
+    <method name="StartInstall"><arg name="spec" type="s" direction="in"/></method>
+    <method name="GetInstalls"><arg name="json" type="s" direction="out"/></method>
     <method name="Quit"/>
     <signal name="SnapshotChanged"><arg name="json" type="s"/></signal>
     <signal name="Error"><arg name="msg" type="s"/></signal>
     <signal name="Output"><arg name="text" type="s"/></signal>
     <signal name="OpenUseExisting"/>
     <signal name="PresentWindow"/>
+    <signal name="InstallProgress"><arg name="key" type="s"/><arg name="text" type="s"/></signal>
+    <signal name="InstallFinished">
+      <arg name="key" type="s"/><arg name="ok" type="b"/><arg name="message" type="s"/>
+    </signal>
   </interface>
 </node>
 """
@@ -85,10 +91,12 @@ class EngineService:
         engine: Engine,
         on_quit,
         on_reload_config,
+        install_manager=None,
     ) -> None:
         self._engine = engine
         self._on_quit = on_quit
         self._on_reload_config = on_reload_config
+        self._install_manager = install_manager
         self._conn: Gio.DBusConnection | None = None
         self._reg_id = 0
         self._owner_id = 0
@@ -134,6 +142,12 @@ class EngineService:
 
     def emit_output(self, text: str) -> None:
         self._emit("Output", GLib.Variant("(s)", (text,)))
+
+    def emit_install_progress(self, key: str, text: str) -> None:
+        self._emit("InstallProgress", GLib.Variant("(ss)", (key, text)))
+
+    def emit_install_finished(self, key: str, ok: bool, message: str) -> None:
+        self._emit("InstallFinished", GLib.Variant("(sbs)", (key, ok, message)))
 
     def _emit_present(self) -> None:
         self._emit("PresentWindow", None)
@@ -246,6 +260,17 @@ class EngineService:
             invocation.return_value(None)
         elif method == "GetSnapshot":
             invocation.return_value(GLib.Variant("(s)", (eng.snapshot_json(),)))
+        elif method == "StartInstall":
+            (spec,) = params.unpack()
+            if self._install_manager is not None:
+                try:
+                    self._install_manager.start(spec)
+                except ValueError as exc:
+                    logger.warning("Rejected install request: %s", exc)
+            invocation.return_value(None)
+        elif method == "GetInstalls":
+            running = self._install_manager.running_json() if self._install_manager else "[]"
+            invocation.return_value(GLib.Variant("(s)", (running,)))
         elif method == "Quit":
             invocation.return_value(None)
             self._on_quit()
