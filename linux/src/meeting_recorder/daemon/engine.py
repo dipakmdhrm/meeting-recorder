@@ -29,9 +29,17 @@ from ..core.recording_controller import PendingRecording, RecordingController
 from ..core.state_machine import State
 from ..core.task_runner import CancelToken, TaskRunner
 from ..core.wire import job_to_dict, snapshot_to_json
-from ..utils.glib_bridge import idle_call
 
 logger = logging.getLogger(__name__)
+
+
+def idle_call(func, *args):
+    """Marshal onto the GLib main loop. Imported lazily so the engine module is
+    importable without PyGObject (the headless test env has no gi)."""
+    from ..utils.glib_bridge import idle_call as _idle_call
+
+    _idle_call(func, *args)
+
 
 _STATE_NAMES = {
     State.IDLE: "idle",
