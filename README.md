@@ -21,9 +21,10 @@ This repository is a monorepo with two independent apps — a Linux desktop appl
 - **Summarize from the library** — re-run summarization for any past meeting from the meetings browser
 - **Local models** — run fully offline with no API key required
 - **Customizable prompts** — edit transcription and summarization prompts in Settings
-- **System tray** integration — a StatusNotifierItem (SNI) exposed over D-Bus; left-click focuses the window where the host supports it, otherwise opens the menu
+- **System tray** integration — a StatusNotifierItem (SNI) exposed over D-Bus; left-click opens the window where the host supports it, otherwise opens the menu
+- **Lightweight background daemon** — the app runs as a small GTK-free tray daemon and only loads the full GTK window when you open it, so it idles at roughly a fifth of the memory. Closing the window returns to the tray while recording and processing keep running in the background; reopening (tray "Open" or the app icon) shows a fresh window reflecting the current state.
 - **Call detection** — optionally monitor for active calls and get notified to start recording
-- **Start at system startup** — optionally launch automatically on login
+- **Start at system startup** — optionally launch the tray daemon automatically on login
 
 ### Output Structure
 
@@ -133,6 +134,11 @@ python3 -m venv .venv --system-site-packages
 .venv/bin/pip install -r linux/requirements.txt
 PYTHONPATH=linux/src python3 -m meeting_recorder
 ```
+
+`python3 -m meeting_recorder` (no flag) is **client** mode: it starts the background
+daemon if needed and opens a window. To run the pieces directly, use
+`python3 -m meeting_recorder --daemon` (the GTK-free tray daemon) and
+`python3 -m meeting_recorder --window` (the GTK window, normally spawned by the daemon).
 
 ### Recording Modes
 
