@@ -75,3 +75,14 @@ def test_snapshot_tolerates_missing_keys():
     assert snap.state == "paused"
     assert snap.elapsed == 0
     assert snap.jobs == []
+
+
+def test_status_text_round_trips_into_job_view():
+    payload = snapshot_to_json(
+        "idle", "", 0, 0, [job_to_dict(_job(1), status_text="Summarizing…")]
+    )
+    snap = snapshot_from_json(payload)
+    assert snap.jobs[0].status_text == "Summarizing…"
+    # Absent status_text defaults to empty, not None.
+    snap2 = snapshot_from_json(snapshot_to_json("idle", "", 0, 0, [job_to_dict(_job(2))]))
+    assert snap2.jobs[0].status_text == ""

@@ -114,6 +114,29 @@ class JobsPanel:
         if widgets:
             widgets["row"].set_subtitle(msg)
 
+    def render(self, jobs) -> None:
+        """Reconcile the panel to a snapshot's job list (daemon-split path).
+
+        ``jobs`` is a list of JobView duck-typed objects. Rows for jobs no
+        longer present are removed; existing rows are updated; new jobs get a
+        row. Processing rows show their transient ``status_text`` subtitle.
+        """
+        assert_main_thread()
+        incoming = {j.job_id: j for j in jobs}
+        for job_id in [jid for jid in self._rows if jid not in incoming]:
+            widgets = self._rows.pop(job_id, None)
+            if widgets:
+                self.widget.remove(widgets["row"])
+        for job in jobs:
+            if job.job_id in self._rows:
+                self.update_job(job)
+            else:
+                self.add_job(job)
+                self.update_job(job)
+            if job.status is JobStatus.PROCESSING and getattr(job, "status_text", ""):
+                self._rows[job.job_id]["row"].set_subtitle(job.status_text)
+        self.widget.set_visible(bool(self._rows))
+
     def remove_job(self, job: Job) -> None:
         """Remove a job's row; hides the panel when the last row goes."""
         assert_main_thread()

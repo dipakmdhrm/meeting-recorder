@@ -30,6 +30,7 @@ class JobView:
     status: JobStatus
     error_msg: str | None = None
     audio_dir: str = ""
+    status_text: str = ""
 
 
 @dataclass
@@ -67,6 +68,7 @@ def job_view_from_dict(data: dict) -> JobView:
         status=JobStatus(data.get("status", "processing")),
         error_msg=data.get("error_msg"),
         audio_dir=data.get("audio_dir", ""),
+        status_text=data.get("status_text", ""),
     )
 
 
