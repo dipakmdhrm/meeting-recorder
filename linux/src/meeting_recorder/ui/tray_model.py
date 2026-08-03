@@ -85,3 +85,21 @@ def build_menu_model(recording_state: str, jobs: list) -> list[dict]:
     action("Open", "show")
     action("Quit", "quit")
     return items
+
+
+def assign_menu_ids(model: list[dict], next_id: int) -> int:
+    """Stamp each item with a unique, monotonically increasing dbusmenu id.
+
+    Returns the next free id so the caller can keep the counter advancing across
+    rebuilds. Ids are **never reused**: an id that once addressed, say, the
+    "Cancel" action is never handed to a later separator. This matters because
+    ``com.canonical.dbusmenu`` hosts cache items by id and *merge* fresh
+    properties onto the cached item on layout updates — so reusing an id whose
+    type flips (action ↔ separator) leaves stale props behind (e.g. an old label
+    surviving on a new separator), which renders as a disabled ghost row. Fresh
+    ids force the host to drop the vanished items and add the new ones cleanly.
+    """
+    for item in model:
+        item["id"] = next_id
+        next_id += 1
+    return next_id

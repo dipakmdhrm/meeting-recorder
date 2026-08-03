@@ -9,7 +9,7 @@ The helpers live in ``tray_model`` (gi-free) so this test runs without PyGObject
 — the CI test environment installs only pytest.
 """
 
-from meeting_recorder.ui.tray_model import build_menu_model, icon_for_state
+from meeting_recorder.ui.tray_model import assign_menu_ids, build_menu_model, icon_for_state
 
 
 def _labels(items):
@@ -77,3 +77,36 @@ class TestBuildMenuModel:
     def test_idle_has_only_footer_separator(self):
         items = build_menu_model("idle", [])
         assert sum(1 for i in items if i["type"] == "separator") == 1
+
+
+class TestAssignMenuIds:
+    def test_stamps_sequential_ids(self):
+        model = build_menu_model("idle", [])
+        nxt = assign_menu_ids(model, 1)
+        assert [i["id"] for i in model] == list(range(1, len(model) + 1))
+        assert nxt == len(model) + 1
+
+    def test_ids_never_reused_across_rebuilds(self):
+        # A recording→idle transition must not hand any idle item an id that
+        # a recording item used, or dbusmenu hosts merge stale props (the ghost
+        # "Cancel"/disabled "Open" bug). Fresh ids guarantee disjoint id sets.
+        recording = build_menu_model("recording", [])
+        nxt = assign_menu_ids(recording, 1)
+        idle = build_menu_model("idle", [])
+        assign_menu_ids(idle, nxt)
+
+        recording_ids = {i["id"] for i in recording}
+        idle_ids = {i["id"] for i in idle}
+        assert recording_ids.isdisjoint(idle_ids)
+
+    def test_counter_advances_monotonically(self):
+        nxt = 1
+        seen: set[int] = set()
+        for state in ("idle", "recording", "paused", "idle"):
+            model = build_menu_model(state, [])
+            new_nxt = assign_menu_ids(model, nxt)
+            ids = {i["id"] for i in model}
+            assert ids.isdisjoint(seen)  # no id ever repeats
+            assert new_nxt > nxt
+            seen |= ids
+            nxt = new_nxt

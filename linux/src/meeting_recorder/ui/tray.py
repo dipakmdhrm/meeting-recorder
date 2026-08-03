@@ -25,7 +25,7 @@ import gi
 gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import GdkPixbuf, Gio, GLib
 
-from .tray_model import build_menu_model, icon_for_state
+from .tray_model import assign_menu_ids, build_menu_model, icon_for_state
 
 logger = logging.getLogger(__name__)
 
@@ -220,7 +220,10 @@ class TrayIcon:
         self._icon_name = icon_for_state("idle", [])
 
         # Menu state: materialised item list + a monotonically increasing
-        # revision the host watches via LayoutUpdated.
+        # revision the host watches via LayoutUpdated. ``_next_menu_id`` never
+        # rewinds, so a rebuilt menu never reuses an old item's id (see
+        # ``assign_menu_ids``).
+        self._next_menu_id = 1
         self._menu_items: list[dict] = self._materialize_menu()
         self._revision = 1
 
@@ -452,10 +455,9 @@ class TrayIcon:
     # ------------------------------------------------------------------
 
     def _materialize_menu(self) -> list[dict]:
-        """Assign stable integer ids (1..N) to the pure menu model."""
+        """Stamp the pure menu model with fresh, never-reused dbusmenu ids."""
         model = build_menu_model(self._recording_state, self._jobs)
-        for i, item in enumerate(model, start=1):
-            item["id"] = i
+        self._next_menu_id = assign_menu_ids(model, self._next_menu_id)
         return model
 
     def _find_item(self, item_id: int) -> dict | None:
