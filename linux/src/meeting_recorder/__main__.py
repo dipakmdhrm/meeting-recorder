@@ -13,7 +13,7 @@ import sys
 
 import setproctitle
 
-from .core.run_mode import DAEMON, PROCESS, WINDOW, resolve_run_mode
+from .core.run_mode import DAEMON, INSTALL, PROCESS, WINDOW, resolve_run_mode
 
 
 def main() -> int:
@@ -33,6 +33,11 @@ def main() -> int:
         from .daemon.processor import run_processor_child
 
         return run_processor_child(sys.argv)
+    if mode == INSTALL:
+        setproctitle.setproctitle("meeting-recorder-install")
+        from .daemon.installer import run_install_child
+
+        return run_install_child(sys.argv)
     # client mode
     setproctitle.setproctitle("meeting-recorder")
     from .client import main as client_main

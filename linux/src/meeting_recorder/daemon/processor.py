@@ -115,12 +115,17 @@ class ProcessorLauncher:
     ) -> ProcessorHandle:
         from gi.repository import Gio, GLib
 
+        from .child_io import capture_stderr, stderr_tail
+
+        # STDERR_PIPE too: a provider's underlying tool (whisper-cli, ffmpeg) can
+        # fail on stderr, so capture it to surface the real reason on failure.
         proc = Gio.Subprocess.new(
             [sys.executable, "-m", "meeting_recorder", PROCESS_FLAG, audio, transcript, notes],
-            Gio.SubprocessFlags.STDOUT_PIPE,
+            Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE,
         )
         handle = ProcessorHandle(proc)
         data_in = Gio.DataInputStream.new(proc.get_stdout_pipe())
+        stderr_lines = capture_stderr(proc)
         state: dict = {"paths": None, "error": None}
 
         def read_next() -> None:
@@ -148,6 +153,13 @@ class ProcessorLauncher:
             elif line.startswith("ERROR:"):
                 state["error"] = line[len("ERROR:") :]
 
+        def _fail(message: str) -> None:
+            if stderr_lines:
+                logger.warning("Processor stderr: %s", " | ".join(stderr_lines))
+                tail = stderr_tail(stderr_lines)
+                message = f"{message} — {tail}" if message else tail
+            on_error(message)
+
         def on_exit(p, res) -> None:
             try:
                 p.wait_finish(res)  # reap
@@ -156,11 +168,11 @@ class ProcessorLauncher:
             if handle.cancelled:
                 return  # engine already handled the cancel
             if state["error"] is not None:
-                on_error(state["error"])
+                _fail(state["error"])
             elif state["paths"] is not None:
                 on_done(state["paths"])
             else:
-                on_error("processing exited without a result")
+                _fail("processing exited without a result")
 
         read_next()
         return handle

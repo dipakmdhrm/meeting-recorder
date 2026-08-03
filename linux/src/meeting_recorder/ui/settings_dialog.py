@@ -72,9 +72,14 @@ class SettingsDialog(Adw.Window):
         gpu_vendor: str | None = None,
         dispatcher: Callable = GLib.idle_add,
         on_saved: Callable | None = None,
+        engine=None,
     ) -> None:
         super().__init__(title="Settings", transient_for=parent, modal=True)
         self.set_default_size(620, 680)
+
+        # The daemon proxy: model/engine installs are started on it and run in
+        # the daemon so they survive this window closing.
+        self._engine = engine
 
         # Called after a successful save. The window is modeless (Adw.Window has
         # no blocking run()), so the caller acts on the result via this callback
@@ -102,11 +107,24 @@ class SettingsDialog(Adw.Window):
             whisper_cpp_downloader=whisper_cpp_downloader,
             gpu_vendor=gpu_vendor,
             dispatcher=dispatcher,
+            engine=engine,
         )
         self._prompts_page = PromptsPage(cfg)
         self._pages = (self._general_page, self._models_page, self._prompts_page)
 
         self._build_ui()
+
+        # Route the daemon's install progress/finished signals to the Models page
+        # while this dialog is open, and detach when it closes.
+        if self._engine is not None:
+            self._engine.add_install_listener(self._models_page)
+            self._models_page.reflect_running_installs()
+            self.connect("close-request", self._on_close_request)
+
+    def _on_close_request(self, *_) -> bool:
+        if self._engine is not None:
+            self._engine.remove_install_listener(self._models_page)
+        return False
 
     # ------------------------------------------------------------------
     # Top-level layout
