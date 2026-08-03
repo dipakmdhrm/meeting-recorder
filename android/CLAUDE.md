@@ -34,13 +34,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 **Application class & DI:** `MeetingRecorderApp` owns an `AppContainer` (manual dependency container — deliberately no Hilt/Koin at this size) that wires the app-wide singletons: `Config` (SharedPreferences wrapper), `MeetingRepository` (file-system meeting store rooted at `Documents/Meetings/`), a shared `GeminiClient`, and a shared `MeetingProcessor`. ViewModels get these as constructor parameters through the shared `appViewModelFactory` (`viewModelFactory { initializer { … } }` reading the app from `APPLICATION_KEY`) instead of casting `application`; only ViewModels that genuinely need a Context stay `AndroidViewModel` (`MainViewModel` — service start/getString/contentResolver; `MeetingsViewModel` — getString), while `MeetingDetailViewModel` and `SettingsViewModel` are plain `ViewModel`s. Startup orphan recovery (`recoverOrphanedRecordings()`) runs in an application-scoped coroutine (`SupervisorJob() + Dispatchers.IO`), not a raw `Thread`.
 
-**Navigation:** `AppNavGraph` (Compose Navigation) with four routes:
-- `main` → `MainScreen` (record button, status)
-- `settings` → `SettingsScreen` (General tab + Prompts tab)
-- `meetings` → `MeetingsScreen` (list of past meetings)
-- `meeting_detail/{meetingPath}` → `MeetingDetailScreen` (Notes / Transcript / Audio tabs)
-
-Routes are defined once in `ui/nav/Routes.kt` (`Routes.MAIN`, `Routes.meetingDetail(path)`, `Routes.MEETING_DETAIL_PATTERN`, …) — no call site hand-builds route strings. File system paths are passed as nav arguments with `/` encoded as `%2F` via the pure `Routes.encodeMeetingPath`/`decodeMeetingPath` helpers (JVM-tested in `RoutesTest`).
+**Navigation:** `AppNavGraph` (Compose Navigation) over four screens — `main` (`MainScreen`), `settings` (`SettingsScreen`), `meetings` (`MeetingsScreen`), and `meeting_detail/{meetingPath}` (`MeetingDetailScreen`, Notes/Transcript/Audio tabs). Route strings are defined once in `ui/nav/Routes.kt` (no call site hand-builds them); filesystem paths are passed as nav args with `/` encoded as `%2F` via the pure `Routes.encodeMeetingPath`/`decodeMeetingPath` helpers (JVM-tested in `RoutesTest`).
 
 **Settings save model:** Each settings tab holds local draft state in the Composable. The ViewModel setters write directly to `Config`/SharedPreferences. The Save button is what calls the setters — nothing is persisted on keystroke. Empty string stored for a prompt = use built-in default (same convention as Linux).
 
@@ -62,14 +56,6 @@ Routes are defined once in `ui/nav/Routes.kt` (`Routes.MAIN`, `Routes.meetingDet
 
 ## Test coverage boundaries
 
-JVM-only unit tests (no Robolectric) in `app/src/test/`:
-- `ConfigTest` — validates constants and model list invariants
-- `MeetingRepositoryTest` — full coverage of listing, parsing, creating, and saving meetings using `TemporaryFolder`, including meeting.json backward-compatibility fixtures (pre-migration org.json-written text, unknown-key tolerance, rename preserving foreign keys); tests deliberately keep the `org.json` test dependency as an *independent* parser to prove the kotlinx.serialization output stays format-compatible
-- `GeminiClientTest` — full coverage of the upload→poll→generate flow using `MockWebServer`
-- `MeetingProcessorTest` — the extracted process→save workflow end to end (`MockWebServer` + `TemporaryFolder`): happy path writes transcript.md/notes.md/meeting.json, title-generation failure returns null without failing the flow, notes-only path reuses the transcript without an upload, transcription errors propagate with nothing written
-- `MimeTest` — the pure `util/Mime.kt` extension→MIME and MIME-alias mappings
-- `RecordingStopDecisionTest` — covers `decideStopOutcome` branch ordering
-- `GenerateActionDecisionTest` — covers the detail-screen empty-state button policy
-- `RoutesTest` — covers the nav-route builders and the `%2F` meeting-path encode/decode round-trip
+JVM-only unit tests (no Robolectric, no Android platform) in `app/src/test/` cover the testable seams: `Config` invariants; `MeetingRepository` listing/parsing/creating/saving via `TemporaryFolder` — including `meeting.json` backward-compat fixtures and rename-preserves-foreign-keys, with the `org.json` test dependency deliberately kept as an *independent* parser to prove the kotlinx.serialization output stays format-compatible; the `GeminiClient` upload→poll→generate flow (`MockWebServer`); the `MeetingProcessor` process→save workflow; and the extracted pure helpers (`util/Mime.kt`, `RecordingStopDecision`, `GenerateActionDecision`, `Routes` encode/decode).
 
-ViewModels (`MainViewModel`, `MeetingDetailViewModel`, `MeetingsViewModel`, `SettingsViewModel`) and all Compose UI are **not** unit-tested; they require Android platform APIs or the Compose testing framework, neither of which is in the current test setup. The established pattern is to **extract pure decision logic out of a ViewModel into a standalone function** (e.g. `RecordingStopDecision.kt`, `GenerateActionDecision.kt`) — or a whole workflow into a constructor-injected class (`MeetingProcessor`) — so the logic is unit-testable even though the ViewModel is not.
+ViewModels (`MainViewModel`, `MeetingDetailViewModel`, `MeetingsViewModel`, `SettingsViewModel`) and all Compose UI are **not** unit-tested — they need Android platform APIs or the Compose test framework. The established pattern is to **extract pure decision logic out of a ViewModel into a standalone function** (`RecordingStopDecision`, `GenerateActionDecision`) — or a whole workflow into a constructor-injected class (`MeetingProcessor`) — so it's testable even though the ViewModel isn't.
