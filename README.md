@@ -168,7 +168,7 @@ Mix and match freely — e.g. Whisper for transcription + Ollama for summarizati
 
 ### First-Time Setup
 
-Open **Settings** (gear icon or tray menu):
+Open **Settings** (gear icon → **Preferences**, or the tray menu). The gear icon also has an **About Meeting Recorder** entry showing the app version and project links.
 
 1. **General tab** — choose your transcription and summarization services; set output folder and recording quality
 2. **Models tab** — configure the selected services:

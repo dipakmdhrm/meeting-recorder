@@ -98,10 +98,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         header = Adw.HeaderBar()
         header.set_title_widget(switcher)
-        settings_btn = Gtk.Button(icon_name="preferences-system-symbolic")
-        settings_btn.set_tooltip_text("Settings")
-        settings_btn.connect("clicked", self._on_settings_clicked)
-        header.pack_end(settings_btn)
+        header.pack_end(self._build_gear_menu_button())
         toolbar_view.add_top_bar(header)
         toolbar_view.set_content(self._stack)
 
@@ -419,6 +416,26 @@ class MainWindow(Adw.ApplicationWindow):
     # Settings
     # ------------------------------------------------------------------
 
+    def _build_gear_menu_button(self) -> Gtk.MenuButton:
+        """The header-bar gear: a menu with Preferences (settings) and About."""
+        menu = Gio.Menu()
+        menu.append("Preferences", "gear.preferences")
+        menu.append("About Meeting Recorder", "gear.about")
+
+        actions = Gio.SimpleActionGroup()
+        preferences = Gio.SimpleAction.new("preferences", None)
+        preferences.connect("activate", self._on_settings_clicked)
+        actions.add_action(preferences)
+        about = Gio.SimpleAction.new("about", None)
+        about.connect("activate", self._on_about_clicked)
+        actions.add_action(about)
+        self.insert_action_group("gear", actions)
+
+        button = Gtk.MenuButton(icon_name="preferences-system-symbolic")
+        button.set_tooltip_text("Menu")
+        button.set_menu_model(menu)
+        return button
+
     def _on_settings_clicked(self, *_) -> None:
         from .settings_dialog import SettingsDialog
 
@@ -426,6 +443,57 @@ class MainWindow(Adw.ApplicationWindow):
             parent=self, on_saved=self._after_settings_saved, engine=self._engine
         )
         dialog.present()
+
+    def _on_about_clicked(self, *_) -> None:
+        from ..core import app_info
+
+        version = app_info.resolve_version()
+        if hasattr(Adw, "AboutDialog"):
+            about = Adw.AboutDialog(
+                application_name=app_info.APP_NAME,
+                application_icon="meeting-recorder",
+                developer_name=app_info.DEVELOPER_NAME,
+                comments=app_info.DESCRIPTION,
+                website=app_info.REPOSITORY,
+                issue_url=app_info.ISSUE_URL,
+                developers=app_info.DEVELOPERS,
+                copyright=app_info.COPYRIGHT,
+                license_type=Gtk.License.MIT_X11,
+            )
+            if version:
+                about.set_version(version)
+            about.present(self)
+        elif hasattr(Adw, "AboutWindow"):
+            about = Adw.AboutWindow(
+                transient_for=self,
+                application_name=app_info.APP_NAME,
+                application_icon="meeting-recorder",
+                developer_name=app_info.DEVELOPER_NAME,
+                comments=app_info.DESCRIPTION,
+                website=app_info.REPOSITORY,
+                issue_url=app_info.ISSUE_URL,
+                developers=app_info.DEVELOPERS,
+                copyright=app_info.COPYRIGHT,
+                license_type=Gtk.License.MIT_X11,
+            )
+            if version:
+                about.set_version(version)
+            about.present()
+        else:
+            about = Gtk.AboutDialog(
+                transient_for=self,
+                modal=True,
+                program_name=app_info.APP_NAME,
+                logo_icon_name="meeting-recorder",
+                comments=app_info.DESCRIPTION,
+                website=app_info.REPOSITORY,
+                authors=app_info.DEVELOPERS,
+                copyright=app_info.COPYRIGHT,
+                license_type=Gtk.License.MIT_X11,
+            )
+            if version:
+                about.set_version(version)
+            about.present()
 
     def _after_settings_saved(self) -> None:
         # The daemon owns call detection; ask it to reconcile with the new config.
