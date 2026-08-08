@@ -100,6 +100,7 @@ class EngineService:
         self._conn: Gio.DBusConnection | None = None
         self._reg_id = 0
         self._owner_id = 0
+        self._window_proc: Gio.Subprocess | None = None
         self._supervisor = WindowSupervisor(
             spawn_fn=self._spawn_window, present_fn=self._emit_present
         )
@@ -176,9 +177,11 @@ class EngineService:
                 [sys.executable, "-m", "meeting_recorder", "--window"],
                 Gio.SubprocessFlags.NONE,
             )
+            self._window_proc = proc
             proc.wait_async(None, self._on_window_exit)
         except GLib.Error as exc:
             logger.error("Failed to spawn window: %s", exc)
+            self._window_proc = None
             self._supervisor.on_child_exit()
 
     def _on_window_exit(self, proc, result) -> None:
@@ -186,7 +189,25 @@ class EngineService:
             proc.wait_finish(result)  # reap — no zombies
         except GLib.Error:
             pass
+        if proc is self._window_proc:
+            self._window_proc = None
         self._supervisor.on_child_exit()
+
+    def shutdown_window(self) -> None:
+        """Terminate the window child, if any, before the daemon exits.
+
+        A kept-in-memory (hidden) window would otherwise be orphaned and linger
+        after the daemon quits. The window also self-exits when it sees the bus
+        name vanish; this makes the cleanup immediate on a clean quit.
+        """
+        proc = self._window_proc
+        if proc is None:
+            return
+        self._window_proc = None
+        try:
+            proc.force_exit()
+        except GLib.Error as exc:
+            logger.debug("Failed to terminate window child: %s", exc)
 
     # ------------------------------------------------------------------
     # Method dispatch (window -> engine)

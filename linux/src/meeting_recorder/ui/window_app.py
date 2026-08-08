@@ -59,6 +59,7 @@ class WindowApp(Adw.Application):
             on_output=self._on_output,
             on_open_use_existing=self._on_open_use_existing,
             on_present=self._on_present,
+            on_daemon_gone=self._on_daemon_gone,
         )
         self.window = MainWindow(engine=self._proxy, application=self)
 
@@ -82,6 +83,15 @@ class WindowApp(Adw.Application):
     def _on_present(self) -> None:
         if self.window:
             self.window.present_window()
+
+    def _on_daemon_gone(self) -> None:
+        # The daemon that spawned us quit or crashed. Destroy the window (it may
+        # be hidden/kept-in-memory) and quit so we don't linger as an orphan that
+        # would double up on the next daemon's PresentWindow broadcast.
+        if self.window is not None:
+            self.window.destroy()
+            self.window = None
+        self.quit()
 
     @staticmethod
     def _setup_app_icon() -> None:

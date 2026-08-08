@@ -19,6 +19,7 @@ from collections.abc import Callable
 
 from gi.repository import Gio, GLib
 
+from ..core.daemon_watch import should_exit_on_owner_change
 from ..daemon.dbus_service import ENGINE_IFACE, ENGINE_NAME, ENGINE_PATH
 
 logger = logging.getLogger(__name__)
@@ -33,12 +34,14 @@ class EngineProxy:
         on_output: Callable[[str], None],
         on_open_use_existing: Callable[[], None],
         on_present: Callable[[], None],
+        on_daemon_gone: Callable[[], None] = lambda: None,
     ) -> None:
         self._on_snapshot = on_snapshot
         self._on_error = on_error
         self._on_output = on_output
         self._on_open_use_existing = on_open_use_existing
         self._on_present = on_present
+        self._on_daemon_gone = on_daemon_gone
         # Install signals go to whatever Settings/Models page is currently open;
         # it (un)registers itself here since it is created and destroyed on demand.
         self._install_listeners: list = []
@@ -52,6 +55,30 @@ class EngineProxy:
             Gio.DBusSignalFlags.NONE,
             self._on_signal,
         )
+        # A window must never outlive its daemon: watch the Engine bus name and
+        # exit if the daemon that spawned us quits or crashes, so a hidden
+        # (kept-in-memory) window can't linger and double up on the next daemon's
+        # PresentWindow broadcast. See core/daemon_watch.py.
+        self._daemon_seen = False
+        self._watch_id = Gio.bus_watch_name_on_connection(
+            self._conn,
+            ENGINE_NAME,
+            Gio.BusNameWatcherFlags.NONE,
+            self._on_daemon_appeared,
+            self._on_daemon_vanished,
+        )
+
+    # ------------------------------------------------------------------
+    # Daemon liveness (bus-name owner) watch
+    # ------------------------------------------------------------------
+
+    def _on_daemon_appeared(self, _conn, _name, _owner) -> None:
+        self._daemon_seen = True
+
+    def _on_daemon_vanished(self, _conn, _name) -> None:
+        if should_exit_on_owner_change(self._daemon_seen, has_owner=False):
+            logger.info("Daemon gone — window exiting to avoid orphaning")
+            self._on_daemon_gone()
 
     # ------------------------------------------------------------------
     # Signals from the daemon

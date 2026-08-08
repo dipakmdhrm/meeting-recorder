@@ -79,6 +79,9 @@ class Daemon:
 
     def quit(self) -> None:
         logger.info("Daemon shutting down")
+        # Kill the window child first so a kept-in-memory (hidden) window doesn't
+        # outlive us and double up on the next daemon's PresentWindow broadcast.
+        self._service.shutdown_window()
         if self._call_detector is not None:
             self._call_detector.stop()
         # Finish any active recording (keep audio) and let in-flight jobs drain.
