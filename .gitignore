@@ -49,3 +49,6 @@ android/captures/
 # Coverage artifacts
 .coverage
 coverage.xml
+
+# Gemini model test-script outputs (scripts/README.md)
+/tmp/
