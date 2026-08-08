@@ -7,7 +7,7 @@ the models are swappable per run. Models default to your config.json when the fl
 omitted. Outputs land in <repo>/tmp/test-<timestamp>/.
 
     scripts/test-full-gemini.py --audio /path/audio.mp3 \\
-        --transcript-model gemini-pro-latest --summarization-model gemini-flash-latest
+        --transcription-model gemini-pro-latest --summarization-model gemini-flash-latest
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--audio", required=True, type=Path, help="Path to the audio file.")
     parser.add_argument(
-        "--transcript-model",
+        "--transcription-model",
         default=None,
         help="Gemini model for transcription (default: config's gemini_transcription_model).",
     )
@@ -45,7 +45,7 @@ def main() -> None:
 
     config = load_gemini_config(
         {
-            "gemini_transcription_model": args.transcript_model,
+            "gemini_transcription_model": args.transcription_model,
             "gemini_summarization_model": args.summarization_model,
         }
     )

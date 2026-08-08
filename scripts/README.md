@@ -18,7 +18,7 @@ VENV=/opt/meeting-recorder/venv/bin/python   # the app's venv
 
 # Full pipeline: transcription + summarization
 $VENV scripts/test-full-gemini.py --audio /path/audio.mp3 \
-    --transcript-model gemini-pro-latest --summarization-model gemini-flash-latest
+    --transcription-model gemini-pro-latest --summarization-model gemini-flash-latest
 
 # Transcription only
 $VENV scripts/test-transcription-gemini.py --audio /path/audio.mp3 --model gemini-pro-latest
