@@ -122,6 +122,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "start_at_startup": False,
     "auto_title": True,
     "processing_countdown_enabled": False,
+    # When True the window process exits on close (idle-in-tray ~20 MB) and the
+    # daemon respawns a fresh window on demand, costing a cold-start delay on
+    # every reopen. Default off keeps the window resident (hidden) on close so
+    # reopening is instant, at the cost of keeping GTK/libadwaita in RAM
+    # (~100 MB idle once a window has been opened). Enable on low-memory systems.
+    "low_memory_mode": False,
     "llm_request_timeout_minutes": 5,
     "whisper_model": "large-v3-turbo",
     "whisper_cpp_model": "large-v3-turbo",

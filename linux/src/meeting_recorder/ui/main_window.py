@@ -28,6 +28,7 @@ from meeting_recorder.utils.filename import output_paths
 from meeting_recorder.utils.meeting_scanner import Meeting, find_audio_file
 
 from ..core.errors import error_presentation
+from ..core.window_close import CLOSE_HIDE, resolve_close_action
 from ..core.wire import Snapshot, snapshot_from_json
 from ..utils.gtk_compat import remove_all_children
 from ..utils.recording_import import resolve_existing_recording_target
@@ -530,6 +531,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.on_use_existing_clicked()
 
     def _on_close_request(self, *_) -> bool:
-        # Closing the window just exits this process; the daemon keeps running
-        # (recording/jobs continue) and will respawn a window on demand.
+        # By default closing exits this process; the daemon keeps running
+        # (recording/jobs continue) and will respawn a window on demand. When the
+        # user opts into "keep window in memory", hide instead of exit so the
+        # process stays resident and the next Open is an instant present.
+        if resolve_close_action(settings.load()) == CLOSE_HIDE:
+            self.set_visible(False)
+            return True  # veto the destroy; the window lives on, hidden
         return False

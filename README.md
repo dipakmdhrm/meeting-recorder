@@ -22,7 +22,7 @@ This repository is a monorepo with two independent apps — a Linux desktop appl
 - **Local models** — run fully offline with no API key required
 - **Customizable prompts** — edit transcription and summarization prompts in Settings
 - **System tray** integration — a StatusNotifierItem (SNI) exposed over D-Bus; left-click opens the window where the host supports it, otherwise opens the menu
-- **Lightweight background daemon** — the app runs as a small GTK-free tray daemon and only loads the full GTK window when you open it, so it idles at roughly a fifth of the memory. Closing the window returns to the tray while recording, transcription, and model installs keep running in the background; reopening (tray "Open" or the app icon) shows a fresh window reflecting the current state (an in-progress model install still shows its progress).
+- **Lightweight background daemon** — the app runs as a small GTK-free tray daemon, so recording, transcription, and model installs keep running in the background even with no window open. Closing the window returns to the tray; reopening (tray "Open" or the app icon) shows the current state (an in-progress model install still shows its progress). By default the window stays loaded in the background so reopening is instant. On low-memory systems, enable **Low memory mode** (Settings → General) to unload the window when it's closed — the tray daemon then idles at roughly a fifth of the memory, at the cost of a brief delay when you reopen.
 - **Call detection** — optionally monitor for active calls and get notified to start recording
 - **Start at system startup** — optionally launch the tray daemon automatically on login
 
@@ -188,6 +188,7 @@ Open **Settings** (gear icon → **Preferences**, or the tray menu). The gear ic
 | Summarization service | Gemini (cloud) or Ollama (local) |
 | Start at system startup | Launch automatically on login |
 | Enable call detection | Monitor for active calls and notify you to start recording |
+| Low memory mode | Unload the window from memory when you close it (~20 MB vs. ~100 MB idle in the tray) at the cost of a brief delay when reopening. Off by default — enable on low-memory systems |
 | Output folder | Where recordings and notes are saved (default: `~/meetings`) |
 | Recording quality | Audio bitrate preset (Very High / High / Medium / Low) |
 

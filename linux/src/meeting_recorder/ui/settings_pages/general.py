@@ -51,6 +51,17 @@ class GeneralPage:
         )
         self._detection_switch.set_active(self._cfg.get("call_detection_enabled", False))
         general.add(self._detection_switch)
+
+        self._low_memory_switch = Adw.SwitchRow(
+            title="Low memory mode",
+            subtitle=(
+                "Unload the window from memory when you close it, saving RAM "
+                "while idle in the tray (~20 MB vs. ~100 MB) at the cost of a "
+                "brief delay when reopening. Enable on low-memory systems."
+            ),
+        )
+        self._low_memory_switch.set_active(self._cfg.get("low_memory_mode", False))
+        general.add(self._low_memory_switch)
         box.append(general)
 
         recording = Adw.PreferencesGroup(title="Recording")
@@ -127,6 +138,7 @@ class GeneralPage:
         cfg["output_folder"] = self._folder_entry.get_text().strip() or "~/meetings"
         cfg["recording_quality"] = self._quality_combo.get_active_id() or "high"
         cfg["call_detection_enabled"] = self._detection_switch.get_active()
+        cfg["low_memory_mode"] = self._low_memory_switch.get_active()
         cfg["start_at_startup"] = self._startup_switch.get_active()
         cfg["auto_title"] = self._auto_title_switch.get_active()
         cfg["processing_countdown_enabled"] = self._countdown_switch.get_active()
