@@ -10,16 +10,21 @@ auto-release.
 
 ## Scripts
 
+Run them with the **app's virtualenv Python** so the keyring API key resolves (see
+Prerequisites). For a system install that's `/opt/meeting-recorder/venv/bin/python`:
+
 ```bash
+VENV=/opt/meeting-recorder/venv/bin/python   # the app's venv
+
 # Full pipeline: transcription + summarization
-scripts/test-full-gemini.py --audio /path/audio.mp3 \
+$VENV scripts/test-full-gemini.py --audio /path/audio.mp3 \
     --transcript-model gemini-pro-latest --summarization-model gemini-flash-latest
 
 # Transcription only
-scripts/test-transcription-gemini.py --audio /path/audio.mp3 --model gemini-pro-latest
+$VENV scripts/test-transcription-gemini.py --audio /path/audio.mp3 --model gemini-pro-latest
 
 # Summarization only, from an existing transcript
-scripts/test-summarization-gemini.py --transcript /path/transcript.md --model gemini-flash-latest
+$VENV scripts/test-summarization-gemini.py --transcript /path/transcript.md --model gemini-flash-latest
 ```
 
 All model flags are **optional**. When omitted, the model falls back to your
@@ -43,11 +48,15 @@ The `tmp/` directory is git-ignored.
 
 ## Prerequisites
 
-- Run with a Python that has **`google-genai`** installed — the same virtualenv the applet
-  uses (the base install is Gemini-only, so it's already there). Otherwise:
-  `pip install google-genai`.
-- Your Gemini API key must be resolvable: the app stores it in the system keyring
-  (config.json holds the `@keyring` sentinel), so the login keyring needs to be unlocked.
-  Without a keyring, a plaintext `gemini_api_key` in config.json also works.
+**Use the app's virtualenv Python** (e.g. `/opt/meeting-recorder/venv/bin/python`). It has
+the two things a bare system `python3` usually lacks:
 
-The scripts print a clear error and exit if either prerequisite is missing.
+- **`google-genai`** — the Gemini SDK.
+- **`secretstorage`** — needed to read your API key from the keyring. The app stores the key
+  in the system keyring (config.json holds the `@keyring` sentinel); without `secretstorage`
+  the key resolves to empty and the scripts exit with an error.
+
+Also make sure the login keyring is unlocked (open the applet once if unsure). Without a
+keyring at all, a plaintext `gemini_api_key` in config.json also works.
+
+The scripts print a clear, actionable error and exit if a prerequisite is missing.

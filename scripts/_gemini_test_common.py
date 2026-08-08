@@ -61,8 +61,12 @@ def load_gemini_config(overrides: dict[str, Any]) -> dict[str, Any]:
     if not config.get("gemini_api_key"):
         sys.exit(
             "error: no Gemini API key available.\n"
-            "The app stores it in the keyring (config.json holds '@keyring'); make sure the\n"
-            "keyring/login session is unlocked, or set gemini_api_key in config.json."
+            "The app stores it in the keyring (config.json holds '@keyring'), which needs the\n"
+            "'secretstorage' module — your system python3 likely lacks it. Run with the app's\n"
+            "venv instead, e.g.:\n"
+            "    /opt/meeting-recorder/venv/bin/python scripts/test-full-gemini.py ...\n"
+            "Or make sure the login keyring is unlocked, or set a plaintext gemini_api_key in\n"
+            "config.json."
         )
 
     return config
