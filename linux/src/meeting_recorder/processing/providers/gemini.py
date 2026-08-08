@@ -63,18 +63,6 @@ def _require_text(response: Any, context: str) -> str:
                     )
             except ImportError:
                 pass
-            # Some models report STOP even when truncated — warn if output tokens
-            # are suspiciously close to a common model limit (8192)
-            if usage and not _truncation_error:
-                out_tokens = getattr(usage, "candidates_token_count", 0) or 0
-                if out_tokens >= 8000:
-                    logger.warning(
-                        "%s: output tokens (%d) near 8192 limit — transcript may be truncated. "
-                        "Consider using gemini-2.5-flash which supports up to "
-                        "65,536 output tokens.",
-                        context,
-                        out_tokens,
-                    )
     except Exception:
         pass
     if _truncation_error:
