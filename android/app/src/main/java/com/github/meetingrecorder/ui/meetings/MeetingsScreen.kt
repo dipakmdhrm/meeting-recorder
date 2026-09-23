@@ -51,7 +51,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.github.meetingrecorder.R
 import com.github.meetingrecorder.appViewModelFactory
 import com.github.meetingrecorder.data.Meeting
-import com.github.meetingrecorder.util.formatMeetingDate
+import com.github.meetingrecorder.util.formatMeetingSubtitle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -232,7 +232,7 @@ private fun MeetingCard(
                 }
             }
             Text(
-                text = formatMeetingDate(meeting.date),
+                text = formatMeetingSubtitle(meeting.date, meeting.durationSeconds),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
