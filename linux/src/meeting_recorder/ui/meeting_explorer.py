@@ -17,6 +17,7 @@ from gi.repository import Adw, Gdk, GLib, Gtk, Pango
 
 from meeting_recorder.config import settings
 from meeting_recorder.config.defaults import TITLE_PROMPT
+from meeting_recorder.utils.meeting_format import format_meeting_subtitle
 from meeting_recorder.utils.meeting_scanner import (
     Meeting,
     delete_meetings,
@@ -150,17 +151,8 @@ class MeetingExplorer(Gtk.Box):
         # label for double-click editing (see _add_meeting_row's gesture below).
         title_box.append(primary_label)
 
-        # Secondary line: date, time, duration
-        date_str = meeting.date.strftime("%b %d, %Y")
-        time_str = meeting.date.strftime("%I:%M %p").lstrip("0")
-        parts = [date_str, time_str]
-        if meeting.duration_seconds is not None:
-            dur = meeting.duration_seconds
-            if dur >= 3600:
-                parts.append(f"{dur // 3600}h {(dur % 3600) // 60}m")
-            else:
-                parts.append(f"{dur // 60}m")
-        secondary_text = "  \u00b7  ".join(parts)
+        # Secondary line: weekday, date, time, duration
+        secondary_text = format_meeting_subtitle(meeting.date, meeting.duration_seconds)
         secondary_label = Gtk.Label(xalign=0)
         secondary_label.set_markup(
             f'<span size="small" foreground="gray">{GLib.markup_escape_text(secondary_text)}</span>'
