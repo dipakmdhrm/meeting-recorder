@@ -51,7 +51,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.github.meetingrecorder.R
 import com.github.meetingrecorder.appViewModelFactory
 import com.github.meetingrecorder.data.Meeting
-import java.time.format.DateTimeFormatter
+import com.github.meetingrecorder.util.formatMeetingDate
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -189,8 +189,6 @@ private fun DeleteDialog(title: String, onConfirm: () -> Unit, onDismiss: () -> 
     )
 }
 
-private val dateFormatter = DateTimeFormatter.ofPattern("MMM d, yyyy  HH:mm")
-
 @Composable
 private fun MeetingCard(
     meeting: Meeting,
@@ -234,7 +232,7 @@ private fun MeetingCard(
                 }
             }
             Text(
-                text = meeting.date.format(dateFormatter),
+                text = formatMeetingDate(meeting.date),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

@@ -18,6 +18,7 @@ This repository is a monorepo with two independent apps — a Linux desktop appl
 - **Record** system audio + microphone simultaneously, or microphone only
 - **Transcribe** with Google Gemini or local Whisper (timestamped, speaker-labeled transcript)
 - **Summarize** into structured Markdown notes with Google Gemini or local Ollama
+- **Meetings browser** — the Library tab lists past meetings with the day of the week, date, time, and duration; rename or delete them
 - **Summarize from the library** — re-run summarization for any past meeting from the meetings browser
 - **Local models** — run fully offline with no API key required
 - **Customizable prompts** — edit transcription and summarization prompts in Settings
@@ -319,7 +320,7 @@ error.log  — WARNING and above
 - **Use Existing Recording** — import an external audio file and transcribe/summarize it
 - **Silenced-mic warning** — if the system mutes the mic mid-recording (e.g. an answered call), the audio is kept and you're warned instead of getting a silent transcript
 - **Do Not Disturb while recording** (optional) — silence notifications during capture
-- **Meetings browser** — browse and read past transcripts and notes; rename or delete meetings
+- **Meetings browser** — browse and read past transcripts and notes, each listed with the day of the week, date, and time; rename or delete meetings
 - **Audio playback** — play back recordings directly in the meeting detail view
 - Recordings saved to `Documents/Meetings/` — same structure as the Linux app
 
