@@ -63,6 +63,39 @@ def test_empty_text_raises():
         _require_text(response, "transcription")
 
 
+def test_blocked_content_raises_actionable_error():
+    """An empty response with a safety block_reason gets a readable, actionable message."""
+    block_reason = SimpleNamespace(name="PROHIBITED_CONTENT")
+    prompt_feedback = SimpleNamespace(block_reason=block_reason)
+    response = _response("", out_tokens=0, prompt_feedback=prompt_feedback)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        _require_text(response, "transcription")
+
+    message = str(excinfo.value)
+    # Human-readable reason, not the raw enum dump.
+    assert "prohibited content" in message
+    assert "safety filters" in message
+    assert "local engine" in message
+    assert "BlockedReason" not in message
+
+
+def test_blocking_finish_reason_without_prompt_feedback_is_detected():
+    """A refusal that surfaces only as a candidate finish_reason is still recognised."""
+    finish = SimpleNamespace(name="SAFETY")
+    response = _response("", out_tokens=0, finish_reason=finish)
+
+    with pytest.raises(RuntimeError, match="safety filters"):
+        _require_text(response, "transcription")
+
+
+def test_empty_text_without_block_reason_keeps_generic_message():
+    """An empty STOP response with no block info falls back to the diagnostic message."""
+    response = _response("", out_tokens=0, finish_reason="STOP")
+    with pytest.raises(RuntimeError, match="returned no text"):
+        _require_text(response, "transcription")
+
+
 def test_max_tokens_finish_reason_still_raises():
     """The legitimate hard-truncation error (finish_reason == MAX_TOKENS) is preserved."""
     pytest.importorskip("google.genai")

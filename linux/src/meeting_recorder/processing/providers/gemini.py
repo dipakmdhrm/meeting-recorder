@@ -33,6 +33,36 @@ _TRANSCRIPTION_TEMPERATURE = 0
 _MAX_OUTPUT_TOKENS = 65_536
 
 
+# finish_reason values (from google.genai types.FinishReason) that mean the model
+# refused rather than simply stopping. block_reason on prompt_feedback is the primary
+# signal, but a refusal can also surface only as one of these candidate finish reasons.
+_BLOCKING_FINISH_REASONS = frozenset(
+    {"SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "RECITATION"}
+)
+
+
+def _blocked_reason(response: Any) -> str | None:
+    """Return a human-readable block reason (e.g. ``"prohibited content"``) or None.
+
+    Gemini reports a refusal either as ``prompt_feedback.block_reason`` (an enum) or,
+    when only the candidate is affected, as a blocking ``candidate.finish_reason``.
+    Returns None when the empty response is not attributable to a content block.
+    """
+    feedback = getattr(response, "prompt_feedback", None)
+    reason = getattr(feedback, "block_reason", None)
+    if reason is None:
+        candidates = getattr(response, "candidates", None) or []
+        candidate = candidates[0] if candidates else None
+        finish = getattr(candidate, "finish_reason", None)
+        finish_name = getattr(finish, "name", None) or (str(finish) if finish else "")
+        if finish_name in _BLOCKING_FINISH_REASONS:
+            reason = finish
+    if reason is None:
+        return None
+    name = getattr(reason, "name", None) or str(reason)
+    return name.replace("_", " ").lower()
+
+
 def _require_text(response: Any, context: str) -> str:
     """Extract text from a GenerateContentResponse, raising clearly if empty or truncated."""
     # Log token usage and finish_reason for diagnostics
@@ -70,6 +100,14 @@ def _require_text(response: Any, context: str) -> str:
 
     text = response.text
     if not text:
+        reason = _blocked_reason(response)
+        if reason:
+            raise RuntimeError(
+                f"Gemini blocked the {context} because its safety filters flagged the "
+                f"audio content as {reason}. This can be a false positive on ordinary "
+                "meeting audio. You can retry, or switch to a local engine "
+                "(Settings → Models), which applies no content filters."
+            )
         feedback = getattr(response, "prompt_feedback", None)
         raise RuntimeError(f"Gemini returned no text for {context}. prompt_feedback={feedback}")
     return str(text).strip()
