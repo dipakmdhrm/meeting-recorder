@@ -13,7 +13,13 @@ import stat
 from pathlib import Path
 from typing import Any
 
-from .defaults import CONFIG_DIR, CONFIG_FILE, DEFAULT_CONFIG
+from .defaults import (
+    CONFIG_DIR,
+    CONFIG_FILE,
+    DEFAULT_CONFIG,
+    GEMINI_SUMMARIZATION_SERVICES,
+    GEMINI_TRANSCRIPTION_SERVICES,
+)
 from .keyring_store import KeyringStore
 
 logger = logging.getLogger(__name__)
@@ -165,13 +171,22 @@ def get(key: str, default: Any = None) -> Any:
     return load().get(key, default)
 
 
+def uses_gemini(config: dict[str, Any]) -> bool:
+    """True if either configured service needs a Gemini API key.
+
+    Transcription has two Gemini paths - the prompt-based models and the
+    dedicated speech-to-text model - so this is a set membership test, not an
+    equality test against "gemini".
+    """
+    return (
+        config.get("transcription_service", "gemini") in GEMINI_TRANSCRIPTION_SERVICES
+        or config.get("summarization_service", "gemini") in GEMINI_SUMMARIZATION_SERVICES
+    )
+
+
 def api_key_error(config: dict[str, Any]) -> str | None:
     """Hard pre-flight check: a Gemini service is selected but no key is set."""
-    uses_gemini = "gemini" in (
-        config.get("transcription_service", "gemini"),
-        config.get("summarization_service", "gemini"),
-    )
-    if uses_gemini and not config.get("gemini_api_key"):
+    if uses_gemini(config) and not config.get("gemini_api_key"):
         return "Gemini API key is not configured. Please open Settings."
     return None
 
@@ -183,11 +198,7 @@ def gemini_key_warning(config: dict[str, Any]) -> str | None:
     keys start with "AIza"; a mismatch almost always means a paste error, and
     catching it at save time beats a failed job at the end of a meeting.
     """
-    uses_gemini = "gemini" in (
-        config.get("transcription_service", "gemini"),
-        config.get("summarization_service", "gemini"),
-    )
-    if not uses_gemini:
+    if not uses_gemini(config):
         return None
     key = (config.get("gemini_api_key") or "").strip()
     if not key:

@@ -19,6 +19,7 @@ from meeting_recorder.config.defaults import (
     TITLE_PROMPT,
 )
 
+from ..settings_visibility import transcription_prompt_note
 from .widgets import make_scroll_page
 
 _PROMPT_DEFAULTS = {
@@ -46,7 +47,7 @@ class PromptsPage:
             self._build_prompt_section(
                 key="transcription",
                 label="Transcription prompt",
-                note="Transcription prompts apply to Gemini only. Whisper does not use prompts.",
+                note=transcription_prompt_note(self._cfg.get("transcription_service", "gemini")),
                 height=160,
             )
         )

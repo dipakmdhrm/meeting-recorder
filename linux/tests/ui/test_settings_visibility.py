@@ -5,7 +5,11 @@ The widget show/hide is GTK-bound and stays outside unit scope; this guards the
 which-sections-and-separators-are-visible decision.
 """
 
-from meeting_recorder.ui.settings_visibility import compute_section_visibility
+from meeting_recorder.ui.settings_visibility import (
+    compute_gemini_row_visibility,
+    compute_section_visibility,
+    transcription_prompt_note,
+)
 
 
 class TestSectionVisibility:
@@ -69,3 +73,56 @@ class TestSectionVisibility:
         for name in ("gemini", "whisper", "wcpp", "ollama"):
             assert f"{name}_sep" in vis
         assert "gpu_sep" not in vis  # last section has no trailing separator
+
+
+class TestGeminiTranscribeService:
+    def test_dedicated_stt_service_keeps_the_gemini_section(self):
+        # The section holds the API key and the processing timeout, which the
+        # speech-to-text model needs just as much as the prompt-based one.
+        vis = compute_section_visibility("gemini_transcribe", "gemini")
+        assert vis["gemini"] is True
+        assert vis["whisper"] is False
+        assert vis["wcpp"] is False
+        assert vis["gpu"] is False
+
+    def test_section_stays_visible_with_local_summarization(self):
+        vis = compute_section_visibility("gemini_transcribe", "ollama")
+        assert vis["gemini"] is True
+        assert vis["ollama"] is True
+
+
+class TestGeminiRowVisibility:
+    def test_prompt_based_transcription_shows_only_its_own_model(self):
+        rows = compute_gemini_row_visibility("gemini", "gemini")
+        assert rows["ts_model"] is True
+        assert rows["transcribe_model"] is False
+        assert rows["transcribe_options"] is False
+        assert rows["ss_model"] is True
+
+    def test_dedicated_stt_swaps_in_the_speech_to_text_rows(self):
+        rows = compute_gemini_row_visibility("gemini_transcribe", "gemini")
+        assert rows["ts_model"] is False
+        assert rows["transcribe_model"] is True
+        assert rows["transcribe_options"] is True
+        assert rows["ss_model"] is True
+
+    def test_local_transcription_hides_both_transcription_models(self):
+        rows = compute_gemini_row_visibility("whisper", "gemini")
+        assert rows["ts_model"] is False
+        assert rows["transcribe_model"] is False
+        assert rows["ss_model"] is True
+
+    def test_local_summarization_hides_the_summarization_model(self):
+        rows = compute_gemini_row_visibility("gemini", "ollama")
+        assert rows["ts_model"] is True
+        assert rows["ss_model"] is False
+
+
+class TestTranscriptionPromptNote:
+    def test_dedicated_stt_says_the_prompt_is_unused(self):
+        note = transcription_prompt_note("gemini_transcribe")
+        assert "takes no prompt" in note
+
+    def test_other_services_keep_the_gemini_only_note(self):
+        for service in ("gemini", "whisper", "whisper_cpp"):
+            assert "apply to Gemini only" in transcription_prompt_note(service)

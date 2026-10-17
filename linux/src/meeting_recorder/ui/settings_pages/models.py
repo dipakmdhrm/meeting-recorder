@@ -22,6 +22,7 @@ from gi.repository import Adw, GLib, Gtk
 
 from meeting_recorder.config.defaults import (
     GEMINI_MODELS,
+    GEMINI_TRANSCRIBE_MODELS,
     LLM_TIMEOUT_OPTIONS,
     OLLAMA_DEFAULT_HOST,
     OLLAMA_MODEL_INFO,
@@ -54,11 +55,15 @@ from ...services.whisper_cpp_service import (
 from ...services.whisper_service import WhisperDownloader, WhisperStatusChecker
 from ...utils.gtk_compat import remove_all_children
 from ..model_row_grid import ModelRowGrid
-from ..settings_visibility import compute_section_visibility
+from ..settings_visibility import (
+    compute_gemini_row_visibility,
+    compute_section_visibility,
+)
 from .widgets import IdComboRow, action_row, install_button, make_scroll_page
 
 _SERVICE_LABELS = {
     "gemini": "Google Gemini",
+    "gemini_transcribe": "Google Gemini (speech-to-text)",
     "whisper": "Whisper (local)",
     "whisper_cpp": "whisper.cpp (local, GPU)",
     "ollama": "Ollama (local)",
@@ -175,6 +180,12 @@ class ModelsPage:
         ss = self._ss_combo.get_active_id() or "gemini"
         vis = compute_section_visibility(ts, ss)
         self._gemini_section_widget.set_visible(vis["gemini"])
+        rows = compute_gemini_row_visibility(ts, ss)
+        self._gemini_ts_model_combo.set_visible(rows["ts_model"])
+        self._gemini_transcribe_model_combo.set_visible(rows["transcribe_model"])
+        self._gemini_transcribe_names_row.set_visible(rows["transcribe_options"])
+        self._gemini_transcribe_note.set_visible(rows["transcribe_options"])
+        self._gemini_ss_model_combo.set_visible(rows["ss_model"])
         self._whisper_section_widget.set_visible(vis["whisper"])
         self._wcpp_section_widget.set_visible(vis["wcpp"])
         self._ollama_section_widget.set_visible(vis["ollama"])
@@ -197,6 +208,33 @@ class ModelsPage:
             self._cfg.get("gemini_transcription_model", GEMINI_MODELS[0]),
         )
         group.add(self._gemini_ts_model_combo)
+
+        self._gemini_transcribe_model_combo = IdComboRow(
+            "Speech-to-text model",
+            GEMINI_TRANSCRIBE_MODELS,
+            GEMINI_TRANSCRIBE_MODELS,
+            self._cfg.get("gemini_transcribe_model", GEMINI_TRANSCRIBE_MODELS[0]),
+        )
+        group.add(self._gemini_transcribe_model_combo)
+
+        self._gemini_transcribe_names_row = Adw.SwitchRow(
+            title="Identify speaker names",
+            subtitle="Ask the summarization model to replace Person 1/2 with real "
+            "names where the transcript makes them clear",
+        )
+        self._gemini_transcribe_names_row.set_active(
+            bool(self._cfg.get("gemini_transcribe_resolve_names", True))
+        )
+        group.add(self._gemini_transcribe_names_row)
+
+        self._gemini_transcribe_note = Adw.ActionRow(
+            title="Speaker diarization and word timestamps are always on",
+            subtitle="This model takes no prompt, so the Prompts tab's "
+            "transcription prompt does not apply. Recordings longer than 28 "
+            "minutes are split and stitched back together automatically.",
+        )
+        self._gemini_transcribe_note.set_subtitle_lines(0)
+        group.add(self._gemini_transcribe_note)
 
         self._gemini_ss_model_combo = IdComboRow(
             "Summarization model",
@@ -671,6 +709,10 @@ class ModelsPage:
         cfg["gemini_summarization_model"] = (
             self._gemini_ss_model_combo.get_active_id() or GEMINI_MODELS[0]
         )
+        cfg["gemini_transcribe_model"] = (
+            self._gemini_transcribe_model_combo.get_active_id() or GEMINI_TRANSCRIBE_MODELS[0]
+        )
+        cfg["gemini_transcribe_resolve_names"] = self._gemini_transcribe_names_row.get_active()
         cfg["llm_request_timeout_minutes"] = int(self._timeout_combo.get_active_id() or "3")
         # These combos only exist once the corresponding opt-in engine is
         # installed/built; preserve the stored value otherwise.
