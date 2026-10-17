@@ -12,12 +12,13 @@ from pathlib import Path
 from typing import Any
 
 from ..core.task_runner import CancelToken
+from .cancellation import PipelineCancelled
 
 logger = logging.getLogger(__name__)
 
-
-class PipelineCancelled(Exception):
-    """Raised when the job's CancelToken is set between pipeline stages."""
+# Re-exported for importers that have always taken it from this module (and so
+# that a provider can raise it without importing the pipeline).
+__all__ = ["Pipeline", "PipelineCancelled"]
 
 
 class Pipeline:
@@ -104,10 +105,17 @@ class Pipeline:
         transcript = ts_provider.transcribe(
             audio_path=audio_path,
             on_status=self._on_status,
+            cancel_token=cancel_token,
         )
 
         # Free transcription model from memory before loading summarization model.
         self._maybe_unload(ts_provider, "transcription")
+
+        self._check_cancelled(cancel_token)
+
+        # Must run before summarization: the notes prompt attributes decisions
+        # to whatever speaker labels the transcript carries.
+        transcript = self._maybe_resolve_speaker_names(transcript)
 
         self._check_cancelled(cancel_token)
 
@@ -124,6 +132,42 @@ class Pipeline:
 
         if self._config.get("auto_title", True):
             self._auto_title(notes)
+
+    def _maybe_resolve_speaker_names(self, transcript: str) -> str:
+        """Replace generic "Person N" labels with real names where possible.
+
+        Only relevant to the dedicated transcription model, which returns
+        anonymous speaker ids and accepts no prompt that could ask it to infer
+        names. Best effort exactly like auto-titling: any failure logs and
+        leaves the generic labels, never failing the job.
+        """
+        if self._config.get("transcription_service") != "gemini_transcribe":
+            return transcript
+        if not self._config.get("gemini_transcribe_resolve_names", True):
+            return transcript
+        if "**Person " not in transcript:
+            return transcript
+
+        if self._on_status:
+            self._on_status("Identifying speakers…")
+
+        try:
+            from ..config.defaults import SPEAKER_NAMES_PROMPT
+            from .diarization import apply_speaker_names, parse_speaker_name_mapping
+            from .summarization import create_summarization_provider
+
+            provider = create_summarization_provider(
+                {**self._config, "summarization_prompt": SPEAKER_NAMES_PROMPT}
+            )
+            mapping = parse_speaker_name_mapping(provider.summarize(transcript))
+            if not mapping:
+                logger.info("No speaker names could be resolved from the transcript")
+                return transcript
+            logger.info("Resolved speaker names: %s", mapping)
+            return apply_speaker_names(transcript, mapping)
+        except Exception as exc:
+            logger.warning("Speaker name resolution failed: %s", exc)
+            return transcript
 
     @property
     def output_paths(self) -> tuple[Path | None, Path | None, Path | None]:

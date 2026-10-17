@@ -17,6 +17,8 @@ from ...config.defaults import (
     SUMMARIZATION_PROMPT,
 )
 from ...core.retry import retry_on_transient
+from ...core.task_runner import CancelToken
+from ..cancellation import PipelineCancelled
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +90,102 @@ def _wrap_timeout(exc: Exception, context: str, timeout_ms: int) -> Exception:
     return exc
 
 
+AUDIO_MIME_TYPES = {
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/m4a",
+    ".mp4": "audio/m4a",
+    ".aac": "audio/aac",
+    ".wav": "audio/wav",
+    ".flac": "audio/flac",
+    ".ogg": "audio/ogg",
+    ".opus": "audio/opus",
+    ".oga": "audio/ogg",
+    ".webm": "audio/webm",
+    ".aiff": "audio/aiff",
+    ".aif": "audio/aiff",
+}
+
+
+def mime_for_audio(audio_path: Path) -> str:
+    """Map a recording's extension to a MIME type the Gemini API accepts.
+
+    The app records MP3 (Linux) and can import whatever the user points it at,
+    so this covers the formats the API documents. Anything unrecognised falls
+    back to audio/mpeg, which is what this provider always sent before.
+    """
+    return AUDIO_MIME_TYPES.get(audio_path.suffix.lower(), "audio/mpeg")
+
+
+def upload_audio(
+    client: Any,
+    audio_path: Path,
+    mime_type: str,
+    on_status: Callable[[str], None] | None = None,
+) -> Any:
+    """Upload an audio file and return it once Gemini has it in ACTIVE state.
+
+    Shared by both Gemini transcription providers (the prompt-based one below
+    and the dedicated transcription model), which differ only in what they ask
+    for once the file is uploaded.
+    """
+    if on_status:
+        on_status("Uploading audio to Gemini…")
+
+    logger.info("Uploading %s to Gemini Files API", audio_path)
+    uploaded = retry_on_transient(
+        lambda: client.files.upload(
+            file=str(audio_path),
+            # mime_type must be specified explicitly; the SDK does not infer it from
+            # the file extension for audio files, and omitting it causes a 400 error.
+            config={"mime_type": mime_type},
+        ),
+        description="Gemini file upload",
+    )
+
+    # After upload, Google's servers transcode and analyse the audio. The file
+    # state transitions PROCESSING → ACTIVE before it can be referenced in prompts.
+    return wait_for_active(client, uploaded, on_status)
+
+
+def wait_for_active(
+    client: Any,
+    file_obj: Any,
+    on_status: Callable[[str], None] | None = None,
+) -> Any:
+    """Poll until the uploaded file reaches ACTIVE state."""
+    from google.genai import types
+
+    deadline = time.time() + _POLL_TIMEOUT
+    while True:
+        state = file_obj.state
+
+        if state == types.FileState.ACTIVE:
+            return file_obj
+        if state in (types.FileState.FAILED, types.FileState.STATE_UNSPECIFIED):
+            raise RuntimeError(f"Gemini file processing failed (state={state})")
+
+        if time.time() > deadline:
+            raise TimeoutError("Timed out waiting for Gemini file to become active")
+
+        state_label = state.value if state else "unknown"
+        if on_status:
+            on_status(f"Waiting for Gemini to process audio… ({state_label})")
+
+        time.sleep(_POLL_INTERVAL)
+        file_obj = client.files.get(name=file_obj.name)
+
+
+def delete_uploaded(client: Any, file_obj: Any) -> None:
+    """Best-effort removal of an uploaded file; never fails the caller."""
+    name = getattr(file_obj, "name", None)
+    if not name:
+        return
+    try:
+        client.files.delete(name=name)
+    except Exception as exc:
+        logger.debug("Could not delete uploaded Gemini file %s: %s", name, exc)
+
+
 class GeminiProvider:
     """
     Handles both transcription (audio → text) and summarization (text → notes).
@@ -132,27 +230,15 @@ class GeminiProvider:
         self,
         audio_path: Path,
         on_status: Callable[[str], None] | None = None,
+        cancel_token: CancelToken | None = None,
     ) -> str:
         """Transcribe audio file using Gemini Files API."""
         client = self._get_client()
 
-        if on_status:
-            on_status("Uploading audio to Gemini…")
+        uploaded = upload_audio(client, audio_path, mime_for_audio(audio_path), on_status)
 
-        logger.info("Uploading %s to Gemini Files API", audio_path)
-        uploaded = retry_on_transient(
-            lambda: client.files.upload(
-                file=str(audio_path),
-                # mime_type must be specified explicitly; the SDK does not infer it from
-                # the file extension for audio files, and omitting it causes a 400 error.
-                config={"mime_type": "audio/mpeg"},
-            ),
-            description="Gemini file upload",
-        )
-
-        # After upload, Google's servers transcode and analyse the audio. The file
-        # state transitions PROCESSING → ACTIVE before it can be referenced in prompts.
-        uploaded = self._wait_for_active(client, uploaded, on_status)
+        if cancel_token is not None and cancel_token.cancelled:
+            raise PipelineCancelled()
 
         if on_status:
             on_status("Transcribing with Gemini…")
@@ -209,32 +295,3 @@ class GeminiProvider:
         except Exception as exc:
             raise _wrap_timeout(exc, "summarization", self._generate_timeout_ms) from exc
         return _require_text(response, "summarization")
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-
-    def _wait_for_active(
-        self, client: Any, file_obj: Any, on_status: Callable[[str], None] | None
-    ) -> Any:
-        """Poll until the uploaded file reaches ACTIVE state."""
-        from google.genai import types
-
-        deadline = time.time() + _POLL_TIMEOUT
-        while True:
-            state = file_obj.state
-
-            if state == types.FileState.ACTIVE:
-                return file_obj
-            if state in (types.FileState.FAILED, types.FileState.STATE_UNSPECIFIED):
-                raise RuntimeError(f"Gemini file processing failed (state={state})")
-
-            if time.time() > deadline:
-                raise TimeoutError("Timed out waiting for Gemini file to become active")
-
-            state_label = state.value if state else "unknown"
-            if on_status:
-                on_status(f"Waiting for Gemini to process audio… ({state_label})")
-
-            time.sleep(_POLL_INTERVAL)
-            file_obj = client.files.get(name=file_obj.name)

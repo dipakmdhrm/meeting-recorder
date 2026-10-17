@@ -16,6 +16,8 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
+from ...core.task_runner import CancelToken
+
 logger = logging.getLogger(__name__)
 
 
@@ -67,6 +69,7 @@ class WhisperCppProvider:
         self,
         audio_path: Path,
         on_status: Callable[[str], None] | None = None,
+        cancel_token: CancelToken | None = None,
     ) -> str:
         if on_status:
             on_status(f"Transcribing with whisper.cpp ({self._model_name})…")

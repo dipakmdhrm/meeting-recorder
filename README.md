@@ -16,7 +16,7 @@ This repository is a monorepo with two independent apps — a Linux desktop appl
 ### Features
 
 - **Record** system audio + microphone simultaneously, or microphone only
-- **Transcribe** with Google Gemini or local Whisper (timestamped, speaker-labeled transcript)
+- **Transcribe** with Google Gemini, Gemini's dedicated speech-to-text model, or local Whisper (timestamped, speaker-labeled transcript)
 - **Summarize** into structured Markdown notes with Google Gemini or local Ollama
 - **Meetings browser** — the Library tab lists past meetings with the day of the week, date, time, and duration; rename or delete them
 - **Summarize from the library** — re-run summarization for any past meeting from the meetings browser
@@ -55,7 +55,7 @@ The base install is **Gemini-only and minimal** — no local engines or GPU libr
 
 | Service | Requirement |
 |---|---|
-| **Gemini** (transcription or summarization) | Free API key from [aistudio.google.com](https://aistudio.google.com) — no local install |
+| **Gemini** (transcription, speech-to-text, or summarization) | Free API key from [aistudio.google.com](https://aistudio.google.com) — no local install |
 
 > Your API key is stored in the system keyring (GNOME Keyring / KWallet) when one is available, falling back to a permission-restricted config file otherwise.
 | **Whisper** (local transcription) | Engine (`faster-whisper`) installed on opt-in; model downloaded from HuggingFace (~500 MB – 3 GB); **NVIDIA GPU or CPU** |
@@ -155,7 +155,8 @@ daemon if needed and opens a window. To run the pieces directly, use
 
 | Service | How it works | Requires |
 |---|---|---|
-| **Google Gemini** | Audio sent to Gemini API | API key |
+| **Google Gemini** | Audio sent to Gemini API with a transcription prompt | API key |
+| **Google Gemini (speech-to-text)** | Audio sent to Gemini's dedicated transcription model (`gemini-3.5-transcribe`), with speaker diarization and word timestamps | API key |
 | **Whisper** | Runs locally via `faster-whisper` | Engine installed + model downloaded in Settings → Models; NVIDIA GPU or CPU |
 | **whisper.cpp** | Runs locally via a from-source whisper.cpp build | Engine built + GGML model downloaded in Settings → Models; **GPU on AMD / Apple / NVIDIA / Vulkan**, or CPU |
 
@@ -186,7 +187,7 @@ Open **Settings** (gear icon → **Preferences**, or the tray menu). The gear ic
 
 | Setting | Description |
 |---|---|
-| Transcription service | Gemini (cloud), Whisper (local), or whisper.cpp (local, GPU) |
+| Transcription service | Gemini (cloud), Gemini speech-to-text (cloud), Whisper (local), or whisper.cpp (local, GPU) |
 | Summarization service | Gemini (cloud) or Ollama (local) |
 | Start at system startup | Launch automatically on login |
 | Enable call detection | Monitor for active calls and notify you to start recording |
@@ -200,9 +201,20 @@ Open **Settings** (gear icon → **Preferences**, or the tray menu). The gear ic
 
 | Setting | Description |
 |---|---|
-| API key | Required when Gemini is selected for transcription or summarization |
-| Model | Gemini model to use (`gemini-flash-latest` recommended) |
-| Processing timeout | Max time to wait for a Gemini response (1–10 min) |
+| API key | Required when Gemini is selected for transcription, speech-to-text, or summarization |
+| Transcription model | Prompt-based Gemini model used for transcription (`gemini-flash-latest` recommended). Shown when the transcription service is **Google Gemini** |
+| Speech-to-text model | Dedicated transcription model (`gemini-3.5-transcribe`). Shown when the transcription service is **Google Gemini (speech-to-text)** |
+| Identify speaker names | Best-effort pass that asks the summarization model to replace `Person 1`/`Person 2` with real names where the transcript makes them clear. On by default; a failure just leaves the generic labels |
+| Summarization model | Gemini model used for notes and titles. Shown when the summarization service is **Google Gemini** |
+| Processing timeout | Max time to wait for a Gemini response (1–10 min). With the speech-to-text model this applies per chunk |
+
+**Gemini speech-to-text (`gemini-3.5-transcribe`)**
+
+A dedicated transcription model rather than a prompt-based one, so it behaves differently from the other Gemini models:
+
+- **Speaker diarization and word timestamps are always on**, and it labels speakers itself (up to 8). It takes no prompt, so the Prompts tab's transcription prompt does not apply to it.
+- Because it cannot be asked to infer speakers' names, transcripts start out labelled `Person 1`, `Person 2`, ... The **Identify speaker names** setting resolves those to real names afterwards where the conversation makes them clear.
+- The API caps a diarized request at 30 minutes of audio, so **recordings longer than 28 minutes are split into overlapping chunks automatically**, transcribed part by part (the job row shows which part is in flight), and stitched back into a single timeline with speakers matched across the joins. Splitting needs `ffmpeg`, which the app already requires for recording.
 
 **Whisper**
 
@@ -263,7 +275,7 @@ Available Ollama models:
 
 Customize the transcription and summarization prompts. Each has a **Reset to default** button. The `{transcript}` placeholder in the summarization prompt is replaced with the transcript text.
 
-Note: transcription prompts apply to Gemini only — the local Whisper and whisper.cpp engines do not use a prompt.
+Note: transcription prompts apply to the prompt-based Gemini models only. The local Whisper and whisper.cpp engines do not use a prompt, and neither does Gemini's dedicated speech-to-text model — when that one is selected, the Prompts tab says so.
 
 ### Workflow
 

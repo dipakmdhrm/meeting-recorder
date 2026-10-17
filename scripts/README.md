@@ -23,6 +23,9 @@ $VENV scripts/test-full-gemini.py --audio /path/audio.mp3 \
 # Transcription only
 $VENV scripts/test-transcription-gemini.py --audio /path/audio.mp3 --model gemini-pro-latest
 
+# Transcription with the dedicated speech-to-text model, logging token usage
+$VENV scripts/test-transcription-gemini.py --audio /path/audio.mp3 --stt -v
+
 # Summarization only, from an existing transcript
 $VENV scripts/test-summarization-gemini.py --transcript /path/transcript.md --model gemini-flash-latest
 ```
@@ -35,6 +38,14 @@ keyring-stored API key are loaded the same way the app loads them.
 Valid model names are the ones listed in the app's Settings → the `GEMINI_MODELS` list in
 `linux/src/meeting_recorder/config/defaults.py` (e.g. `gemini-pro-latest`,
 `gemini-flash-latest`, `gemini-3.1-pro-preview`, `gemini-2.5-pro`, …).
+
+`--stt` switches `test-transcription-gemini.py` to the dedicated speech-to-text service
+(`GEMINI_TRANSCRIBE_MODELS`, currently `gemini-3.5-transcribe`). That path ignores the
+transcription prompt, always asks for speaker diarization and word timestamps, and splits
+audio longer than 28 minutes into overlapping chunks. Add `-v` to log the chunk plan and the
+per-request token usage, which is the way to measure its real cost against the prompt-based
+models (the published output price covers plain text; whether the word annotations are
+billed as output tokens is not documented).
 
 ## Output
 

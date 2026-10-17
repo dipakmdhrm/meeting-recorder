@@ -107,29 +107,10 @@ def _iter_dirs(parent: Path) -> list[Path]:
 
 def _probe_audio_duration(audio_path: Path) -> int | None:
     """Get audio duration in seconds using ffprobe. Returns None on failure."""
-    import subprocess
+    from .audio_probe import probe_duration
 
-    try:
-        result = subprocess.run(
-            [
-                "ffprobe",
-                "-v",
-                "quiet",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "default=noprint_wrappers=1:nokey=1",
-                str(audio_path),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return int(float(result.stdout.strip()))
-    except Exception:
-        pass
-    return None
+    duration = probe_duration(audio_path)
+    return None if duration is None else int(duration)
 
 
 def read_metadata(meeting_path: Path) -> dict[str, Any]:

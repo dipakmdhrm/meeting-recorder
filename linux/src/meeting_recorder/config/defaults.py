@@ -14,8 +14,14 @@ CONFIG_DIR = "~/.config/meeting-recorder"
 CONFIG_FILE = "~/.config/meeting-recorder/config.json"
 DEFAULT_OUTPUT_FOLDER = "~/meetings"
 
-TRANSCRIPTION_SERVICES = ["gemini", "whisper", "whisper_cpp"]
+TRANSCRIPTION_SERVICES = ["gemini", "gemini_transcribe", "whisper", "whisper_cpp"]
 SUMMARIZATION_SERVICES = ["gemini", "ollama"]
+
+# The services that need a Gemini API key. Transcription has two Gemini
+# paths - the prompt-based models and the dedicated speech-to-text model -
+# so membership checks must use these rather than comparing to "gemini".
+GEMINI_TRANSCRIPTION_SERVICES = ("gemini", "gemini_transcribe")
+GEMINI_SUMMARIZATION_SERVICES = ("gemini",)
 
 # Allowed LLM request timeout values (minutes)
 LLM_TIMEOUT_OPTIONS = [1, 2, 3, 5, 8, 10]
@@ -33,6 +39,14 @@ GEMINI_MODELS = [
     "gemini-2.5-pro",
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
+]
+
+# Google's dedicated speech-to-text models. Kept separate from GEMINI_MODELS
+# because they are served by the Interactions API, not generateContent: they
+# accept no prompt, no temperature and no output-token limit, and so can only
+# be used for transcription - never for summarization or titles.
+GEMINI_TRANSCRIBE_MODELS = [
+    "gemini-3.5-transcribe",
 ]
 
 # Whisper STT model list (for local transcription)
@@ -116,6 +130,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "gemini_api_key": "",
     "gemini_transcription_model": "gemini-flash-latest",
     "gemini_summarization_model": "gemini-flash-latest",
+    "gemini_transcribe_model": "gemini-3.5-transcribe",
+    # The dedicated transcription model labels speakers "spk_1"/"spk_2" and
+    # cannot be prompted to infer their real names, so an optional best-effort
+    # pass over the finished transcript asks the summarization model to resolve
+    # them. Failure leaves the generic Person N labels in place.
+    "gemini_transcribe_resolve_names": True,
     "output_folder": DEFAULT_OUTPUT_FOLDER,
     "recording_quality": "high",
     "call_detection_enabled": False,
@@ -182,6 +202,26 @@ TITLE_PROMPT = (
     "Generate a concise 3-6 word title for this meeting based on the content below. "
     "Return only the title text, nothing else.\n\n{transcript}"
 )
+
+SPEAKER_NAMES_PROMPT = """\
+You are given a meeting transcript in which speakers are labelled generically, \
+for example **Person 1:** and **Person 2:**.
+
+Identify each speaker's real name, but only where the transcript makes it clear - \
+they introduce themselves, someone addresses them by name, or they are referred to \
+unambiguously.
+
+Rules:
+- Return only a JSON object mapping each generic label to the real name. No code \
+fences, no commentary.
+- Omit any speaker whose name you cannot determine confidently. Never guess.
+- If two labels are obviously the same person, map both to the same name.
+
+Example response: {{"Person 1": "Alice", "Person 3": "Bob"}}
+
+TRANSCRIPT:
+{transcript}
+"""
 
 GEMINI_TRANSCRIPTION_PROMPT = """\
 Transcribe this audio recording exactly as spoken.

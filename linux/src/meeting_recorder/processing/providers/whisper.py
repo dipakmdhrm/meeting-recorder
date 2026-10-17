@@ -12,6 +12,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from ...core.task_runner import CancelToken
+
 logger = logging.getLogger(__name__)
 
 
@@ -63,6 +65,7 @@ class WhisperProvider:
         self,
         audio_path: Path,
         on_status: Callable[[str], None] | None = None,
+        cancel_token: CancelToken | None = None,
     ) -> str:
         if on_status:
             on_status(f"Loading Whisper model ({self._model_name})\u2026")
