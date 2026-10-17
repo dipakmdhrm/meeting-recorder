@@ -25,9 +25,9 @@ cryptography==49.0.0
     #   secretstorage
 distro==1.9.0
     # via google-genai
-google-auth==2.55.1
+google-auth==2.62.0
     # via google-genai
-google-genai==2.10.0
+google-genai==2.31.0
     # via -r linux/requirements.txt
 h11==0.16.0
     # via httpcore
